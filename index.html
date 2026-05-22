@@ -77,10 +77,19 @@
         .filter-label { font-size: 11px; color: var(--cinza); }
         select, input, textarea { border: 1px solid var(--cinza-borda); border-radius: 7px; padding: 7px 10px; font-size: 13px; outline: none; }
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-        .form-grid-3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 14px; }
+        .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
         .form-group { display: flex; flex-direction: column; gap: 5px; }
         .form-group label { font-size: 12px; color: var(--cinza); font-weight: 500; }
         .span2 { grid-column: span 2; }
+        
+        /* ── TELA DE LOGIN ────────────────────────────────────── */
+        #login-screen { position: fixed; inset: 0; background: linear-gradient(135deg, #1A3C5E 0%, #0F2744 100%); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+        .login-box { background: white; border-radius: 16px; padding: 40px; width: 380px; box-shadow: 0 24px 64px rgba(0,0,0,0.3); }
+        .login-title { text-align: center; font-size: 20px; font-weight: 700; color: var(--azul); margin-bottom: 4px; }
+        .login-sub { text-align: center; font-size: 13px; color: var(--cinza); margin-bottom: 24px; }
+        .btn-login { width: 100%; padding: 11px; font-size: 14px; font-weight: 600; margin-top: 12px; }
+        .alert { padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+        .alert-danger { background: var(--vermelho-bg); color: #B71C1C; }
         .hidden { display: none; }
     </style>
 </head>
@@ -139,7 +148,7 @@
 
 <script>
 // ══════════════════════════════════════════════════════════════
-// BANCO DE DADOS SUPABASE E CONFIGURAÇÕES CORES
+// BANCO DE DADOS E SEED DATA
 // ══════════════════════════════════════════════════════════════
 const SUPABASE_URL = 'https://stfebxsmovcnlyzpcsoa.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0ZmVieHNtb3Zjbmx5enBjc29hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0NTgyNjYsImV4cCI6MjA5NTAzNDI2Nn0.Oo8HQ9UA4RmTaPv-W8zgw0x3IV1PlOoOTuFZNfUd3mk';
@@ -185,11 +194,11 @@ async function initDB() {
         DB = JSON.parse(saved);
     }
     seedData();
-    await buscarTiposServico();
+    await carregarTiposServico();
 }
 
-// Carrega os tipos de serviço direto da tabela do Supabase
-async function buscarTiposServico() {
+// Carrega os serviços direto da sua tabela de banco de dados do Supabase
+async function carregarTiposServico() {
     try {
         const { data, error } = await supabaseClient.from('tipos_servico').select('*');
         if (!error && data) {
@@ -197,7 +206,7 @@ async function buscarTiposServico() {
             saveDB();
         }
     } catch (e) {
-        console.error("Erro ao carregar tipos de serviço do Supabase:", e);
+        console.error("Erro ao ler tipos_servico do Supabase:", e);
     }
 }
 
@@ -236,23 +245,20 @@ function badge(status) {
     return `<span class="badge ${c}">${status}</span>`;
 }
 
-// Atualiza o textarea com a descrição padrão e os prazos ao mudar o select de serviço
-function atualizarDescricaoServico() {
+// Resgata os detalhes do tipo de serviço selecionado para jogar na tela
+function atualizarEscopoDoServico() {
     const select = document.getElementById('orc-servico-id');
-    const selectedOption = select.options[select.selectedIndex];
+    const opt = select.options[select.selectedIndex];
     
-    const descricao = selectedOption.getAttribute('data-desc') || '';
-    const prazoExec = selectedOption.getAttribute('data-exec') || 'A combinar';
-    const prazoLaudo = selectedOption.getAttribute('data-laudo') || 'A combinar';
-    const validade = selectedOption.getAttribute('data-validade') || '15 dias';
+    if(!opt.value) return;
 
-    document.getElementById('orc-desc-visual').value = descricao;
-    document.getElementById('orc-prazo-exec').value = prazoExec;
-    document.getElementById('orc-prazo-laudo').value = prazoLaudo;
-    document.getElementById('orc-validade').value = validade;
+    document.getElementById('orc-desc-visual').value = opt.getAttribute('data-desc') || '';
+    document.getElementById('orc-prazo-exec').value = opt.getAttribute('data-exec') || 'A combinar';
+    document.getElementById('orc-prazo-laudo').value = opt.getAttribute('data-laudo') || 'A combinar';
+    document.getElementById('orc-validade').value = opt.getAttribute('data-validade') || '15 dias';
 }
 
-// ── CONTROLE DE TELAS ────────────────────────────────────────────────────────
+// ── CONTROLE DE TELAS (CORRIGIDO E SEM LOOPS) ────────────────────────────────
 function nav(page) {
     document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
     document.getElementById('nav-'+page)?.classList.add('active');
@@ -283,7 +289,7 @@ function nav(page) {
                         <table>
                             <thead><tr><th>Nº OS</th><th>Cliente</th><th>Serviço</th><th>Status</th><th class="td-num">Valor</th></tr></thead>
                             <tbody>
-                                ${DB.os.map(o => `<tr><td><b>#${o.numero_os}</b></td><td>${o.cliente_nome}</td><td>${o.servico}</td><td>${badge(o.status)}</td><td class="td-num">${fmtBRL(o.valor_total)}</td></tr>`).join('')}
+                                ${DB.os.map(o => `<tr><td><b>#${o.numero_os}</b></td><td>${o.cliente_nome || '—'}</td><td>${o.servico}</td><td>${badge(o.status)}</td><td class="td-num">${fmtBRL(o.valor_total)}</td></tr>`).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -293,33 +299,31 @@ function nav(page) {
         setTimeout(renderCharts, 100);
 
     } else if (page === 'orcamentos') {
-        // Fallback caso a tabela do Supabase esteja vazia temporariamente
-        const opcoesServico = DB.tipos_servico.length > 0 ? DB.tipos_servico : [
-            { id: 1, nome: "Teste de estanqueidade nos compartimentos de armazenamento e distribuição", descricao_padrao: "Execução de ensaio pneumático não destrutivo de estanqueidade em conformidade com as diretrizes da NBR 13784 e regulamentações vigentes ambientais.", prazo_execucao: "2 dias úteis", prazo_laudo: "5 dias úteis", validade_proposta: "15 dias" },
-            { id: 2, nome: "Inspeção e Medição de espessura de chapa por ultrassom (NR-13)", descricao_padrao: "Avaliação técnica de integridade estrutural em vasos de pressão e tubulações via ultrassom microprocessado, atendendo aos requisitos normativos da NR-13.", prazo_execucao: "3 dias úteis", prazo_laudo: "7 dias úteis", validade_proposta: "30 dias" }
+        const lista = DB.tipos_servico.length > 0 ? DB.tipos_servico : [
+            { id: 1, nome: "Teste de estanqueidade nos compartimentos de armazenamento", descricao_padrao: "Execução de ensaio pneumático não destrutivo em conformidade com as diretrizes da NBR 13784.", prazo_execucao: "2 dias úteis", prazo_laudo: "5 dias úteis", validade_proposta: "15 dias" }
         ];
 
         content.innerHTML = `
             <div class="card">
-                <div class="card-title">📝 Módulo Avançado de Emissão de Orçamentos Técnicos</div>
+                <div class="card-title">📝 Emissão Espelhada de Orçamentos da Compostos</div>
                 <div class="form-grid">
                     <div class="form-group span2">
-                        <label>Busca de Cadastro via API da Receita Federal (CNPJ)</label>
+                        <label>Busca Automática por CNPJ (Receita Federal)</label>
                         <div style="display:flex; gap:8px">
-                            <input type="text" id="orc-cnpj" placeholder="Digite apenas os 14 números do CNPJ">
-                            <button class="btn btn-outline" onclick="buscarCNPJReal()">🔍 Consultar CNPJ</button>
+                            <input type="text" id="orc-cnpj" placeholder="Apenas números">
+                            <button class="btn btn-outline" onclick="buscarCNPJReal()">🔍 Buscar Cadastro</button>
                         </div>
                     </div>
-                    <div class="form-group span2"><label>Razão Social do Cliente</label><input type="text" id="orc-razao"></div>
-                    <div class="form-group"><label>Cidade/Município</label><input type="text" id="orc-cidade"></div>
-                    <div class="form-group"><label>Estado (UF)</label><input type="text" id="orc-uf" maxlength="2"></div>
+                    <div class="form-group span2"><label>Razão Social</label><input type="text" id="orc-razao"></div>
+                    <div class="form-group"><label>Cidade</label><input type="text" id="orc-cidade"></div>
+                    <div class="form-group"><label>UF</label><input type="text" id="orc-uf" maxlength="2"></div>
                     
                     <div class="form-group span2">
-                        <label>Serviço Técnico Integrado (Base de Dados Real)</label>
-                        <select id="orc-servico-id" onchange="atualizarDescricaoServico()">
-                            <option value="" disabled selected>Escolha um tipo de serviço cadastrado...</option>
-                            ${opcoesServico.map(s => `
-                                <option value="${s.id}" data-desc="${s.descricao_padrao || ''}" data-exec="${s.prazo_execucao || ''}" data-laudo="${s.prazo_laudo || ''}" data-validade="${s.validade_proposta || ''}">
+                        <label>Selecionar Tipo de Serviço Técnico (Base real)</label>
+                        <select id="orc-servico-id" onchange="atualizarEscopoDoServico()">
+                            <option value="" disabled selected>Escolha o serviço...</option>
+                            ${lista.map(s => `
+                                <option value="${s.id}" data-desc="${s.descricao_padrao || ''}" data-exec="${s.prazo_execucao || 'A combinar'}" data-laudo="${s.prazo_laudo || 'A combinar'}" data-validade="${s.validade_proposta || '15 dias'}">
                                     ${s.nome}
                                 </option>
                             `).join('')}
@@ -327,20 +331,20 @@ function nav(page) {
                     </div>
                     
                     <div class="form-group span2">
-                        <label>Descrição Detalhada do Escopo Técnico</label>
-                        <textarea id="orc-desc-visual" rows="4" readonly style="background:#FAFBFB; color:#5A6B7C; font-size:12.5px; resize:none;"></textarea>
+                        <label>Descrição Técnica Padrão do Laudo</label>
+                        <textarea id="orc-desc-visual" rows="4" readonly style="background:#FAFBFB; color:#4A5568; resize:none; font-size:12.5px;"></textarea>
                     </div>
                     
                     <div class="form-grid-3 span2">
-                        <div class="form-group"><label>Prazo de Execução</label><input type="text" id="orc-prazo-exec" readonly style="background:#FAFBFB;"></div>
-                        <div class="form-group"><label>Prazo do Laudo</label><input type="text" id="orc-prazo-laudo" readonly style="background:#FAFBFB;"></div>
+                        <div class="form-group"><label>Prazo Execução</label><input type="text" id="orc-prazo-exec" readonly style="background:#FAFBFB;"></div>
+                        <div class="form-group"><label>Prazo Laudo</label><input type="text" id="orc-prazo-laudo" readonly style="background:#FAFBFB;"></div>
                         <div class="form-group"><label>Validade da Proposta</label><input type="text" id="orc-validade" readonly style="background:#FAFBFB;"></div>
                     </div>
 
-                    <div class="form-group"><label>Quantidade de Atividades/Compartimentos</label><input type="number" id="orc-qtd" value="1"></div>
+                    <div class="form-group"><label>Quantidade</label><input type="number" id="orc-qtd" value="1"></div>
                     <div class="form-group"><label>Valor Unitário (R$)</label><input type="number" id="orc-val" value="0" step="0.01"></div>
                 </div>
-                <button class="btn btn-primary" style="margin-top:20px" onclick="gerarOrcamentoPDFReal()">📄 Exportar Orçamento Oficial em PDF (Design Profissional)</button>
+                <button class="btn btn-primary" style="margin-top:20px" onclick="gerarOrcamentoPDFReal()">📄 Exportar Proposta Comercial Avançada em PDF</button>
             </div>
         `;
     } else if (page === 'os') {
@@ -348,14 +352,14 @@ function nav(page) {
     } else if (page === 'receber') {
         content.innerHTML = `
             <div class="card">
-                <div class="card-title">📋 Controle de Contas a Receber (Faturamento)</div>
+                <div class="card-title">📋 Controle de Contas a Receber</div>
                 <div class="table-wrap">
                     <table>
                         <thead><tr><th>ID</th><th>Cliente</th><th>Vencimento</th><th>Forma</th><th class="td-num">Valor</th><th>Status</th><th>Ação</th></tr></thead>
                         <tbody>
                             ${DB.receber.map(r => `<tr>
                                 <td>#${r.id}</td><td>${r.cliente}</td><td>${fmtData(r.vencimento)}</td><td>${r.forma}</td><td class="td-num">${fmtBRL(r.valor)}</td><td>${badge(r.status)}</td>
-                                <td>${r.status !== 'RECEBIDO' ? `<button class="btn btn-sm btn-success" onclick="darBaixaReceber(${r.id})">✅ Liquidar Parcela</button>` : 'Baixa Concluída'}</td>
+                                <td>${r.status !== 'RECEBIDO' ? `<button class="btn btn-sm btn-success" onclick="darBaixaReceber(${r.id})">✅ Liquidar</button>` : 'Baixa Concluída'}</td>
                             </tr>`).join('')}
                         </tbody>
                     </table>
@@ -367,9 +371,9 @@ function nav(page) {
             <div class="card">
                 <div class="card-title">📤 Gestão de Contas a Pagar</div>
                 <div class="filters">
-                    <input type="text" id="new-p-forn" placeholder="Credor/Fornecedor">
-                    <input type="text" id="new-p-cat" placeholder="Categoria (Ex: ART)">
-                    <input type="number" id="new-p-val" placeholder="Valor Bruto (R$)">
+                    <input type="text" id="new-p-forn" placeholder="Fornecedor">
+                    <input type="text" id="new-p-cat" placeholder="Categoria">
+                    <input type="number" id="new-p-val" placeholder="Valor (R$)">
                     <input type="date" id="new-p-venc">
                     <button class="btn btn-primary" onclick="addPagarReal()">＋ Gravar Conta</button>
                 </div>
@@ -379,7 +383,7 @@ function nav(page) {
                         <tbody>
                             ${DB.pagar.map(p => `<tr>
                                 <td>${p.fornecedor}</td><td>${p.categoria}</td><td>${fmtData(p.vencimento)}</td><td class="td-num">${fmtBRL(p.valor)}</td><td>${badge(p.status)}</td>
-                                <td>${p.status !== 'PAGO' ? `<button class="btn btn-sm btn-primary" onclick="darBaixaPagar(${p.id})">🔴 Confirmar Saída</button>` : 'Obrigação Paga'}</td>
+                                <td>${p.status !== 'PAGO' ? `<button class="btn btn-sm btn-primary" onclick="darBaixaPagar(${p.id})">🔴 Baixar</button>` : 'Pago'}</td>
                             </tr>`).join('')}
                         </tbody>
                     </table>
@@ -389,13 +393,13 @@ function nav(page) {
     } else if (page === 'fluxo') {
         content.innerHTML = `
             <div class="card">
-                <div class="card-title">💰 Histórico Consolidado de Fluxo de Caixa Realizado</div>
+                <div class="card-title">💰 Histórico Consolidado de Fluxo de Caixa</div>
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>Data Movimentação</th><th>Operação</th><th>Cliente / Fornecedor</th><th>Categoria</th><th class="td-num">Valor</th></tr></thead>
+                        <thead><tr><th>Data</th><th>Operação</th><th>Cliente / Fornecedor</th><th>Categoria</th><th class="td-num">Valor</th></tr></thead>
                         <tbody>
                             ${DB.fluxo.map(f => `<tr>
-                                <td>${fmtData(f.data)}</td><td>${badge(f.tipo)}</td><td>${f.cliente}</td><td>${f.categoria || 'Serviço Integrado'}</td>
+                                <td>${fmtData(f.data)}</td><td>${badge(f.tipo)}</td><td>${f.cliente}</td><td>${f.categoria || 'Geral'}</td>
                                 <td class="td-num ${f.tipo==='RECEITA'?'verde':'vermelho'}">${fmtBRL(f.valor)}</td>
                             </tr>`).join('')}
                         </tbody>
@@ -406,7 +410,7 @@ function nav(page) {
     }
 }
 
-// ── LÓGICAS OPERACIONAIS E INTEGRAÇÕES ───────────────────────────────────────
+// ── LÓGICAS OPERACIONAIS E CONEXÕES ──────────────────────────────────────────
 async function buscarCNPJReal() {
     const cnpj = document.getElementById('orc-cnpj').value.replace(/\D/g,'');
     if(cnpj.length !== 14) { alert('Digite os 14 números do CNPJ.'); return; }
@@ -417,15 +421,15 @@ async function buscarCNPJReal() {
             document.getElementById('orc-razao').value = data.razao_social;
             document.getElementById('orc-cidade').value = data.municipio;
             document.getElementById('orc-uf').value = data.uf;
-        } else { alert('CNPJ não localizado na API pública.'); }
-    } catch { alert('Erro ao conectar na API externa de busca.'); }
+        } else { alert('CNPJ não localizado.'); }
+    } catch { alert('Erro ao consultar API de CNPJ.'); }
 }
 
 function gerarOrcamentoPDFReal() {
     const select = document.getElementById('orc-servico-id');
-    if(!select.value) { alert('Selecione um tipo de serviço antes de exportar.'); return; }
+    if(!select.value) { alert('Escolha um tipo de serviço primeiro.'); return; }
 
-    const rz = (document.getElementById('orc-razao').value || 'CONSORCIO PUBLICO INTERMUNICIPAL').toUpperCase();
+    const rz = (document.getElementById('orc-razao').value || 'CLIENTE NÃO IDENTIFICADO').toUpperCase();
     const cid = document.getElementById('orc-cidade').value || 'Campos dos Goytacazes';
     const uf = (document.getElementById('orc-uf').value || 'RJ').toUpperCase();
     const tit = select.options[select.selectedIndex].text.trim();
@@ -440,147 +444,91 @@ function gerarOrcamentoPDFReal() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     
-    // ── PÁGINA 1: IDENTIFICAÇÃO E ESCOPO TÉCNICO ──────────────────────────────
-    // Top Banner Corporativo
-    doc.setFillColor(26, 60, 94); 
-    doc.rect(0, 0, 210, 38, 'F');
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
+    // ── PÁGINA 1: APRESENTAÇÃO E ESCOPO COMERCIAL ────────────────────────────
+    // Cabeçalho Profissional
+    doc.setFillColor(26, 60, 94); doc.rect(0, 0, 210, 38, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
     doc.text('COMPOSTOS ENGENHARIA', 18, 16);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Soluções em Engenharia Mecânica e Inspeções Técnicas', 18, 23);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 192, 16, {align: 'right'});
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    doc.text('Engenharia Mecânica, Testes de Estanqueidade e Inspeções Técnicas', 18, 24);
+    doc.text(`Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 192, 16, {align: 'right'});
 
-    // Seção Cliente
-    doc.setFillColor(245, 246, 250);
-    doc.rect(15, 48, 180, 32, 'F');
-    doc.setDrawColor(224, 230, 237);
-    doc.rect(15, 48, 180, 32, 'S');
-    
-    doc.setTextColor(26, 60, 94);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
+    // Box de Dados do Cliente
+    doc.setFillColor(245, 246, 250); doc.rect(15, 48, 180, 32, 'F');
+    doc.setDrawColor(224, 230, 237); doc.rect(15, 48, 180, 32, 'S');
+    doc.setTextColor(26, 60, 94); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
     doc.text('PROPOSTA COMERCIAL DESTINADA A:', 20, 55);
-    
-    doc.setTextColor(40, 40, 40);
-    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(50, 50, 50); doc.setFont('helvetica', 'normal');
     doc.text(`Razão Social: ${rz}`, 20, 62);
-    doc.text(`Localidade da Prestação: ${cid} — ${uf}`, 20, 69);
-    doc.text(`CNPJ informado: ${document.getElementById('orc-cnpj').value || 'Não informado'}`, 20, 75);
+    doc.text(`Localidade: ${cid} — ${uf}`, 20, 69);
+    doc.text(`CNPJ: ${document.getElementById('orc-cnpj').value || 'Não informado'}`, 20, 75);
 
-    // Título do Objeto Técnico
-    doc.setTextColor(26, 60, 94);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.text('1. ESCOPO DO SERVIÇO PROPRASTADO', 15, 95);
-    
-    doc.setTextColor(50, 50, 50);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
+    // Corpo do Escopo Técnico
+    doc.setTextColor(26, 60, 94); doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    doc.text('1. OBJETO E ESCOPO DOS TRABALHOS', 15, 95);
+    doc.setTextColor(40, 40, 40); doc.setFontSize(10);
     doc.text(tit, 15, 103, {maxWidth: 180});
-    
-    // Texto do Escopo / Descrição Padrão da Tabela
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text(desc, 15, 114, {maxWidth: 180, align: 'justify', lineLeading: 5});
+    doc.text(desc, 15, 114, {maxWidth: 180, align: 'justify'});
 
-    // Tabela Dinâmica de Valores (Desenho Vetorial Elegante)
-    doc.setTextColor(26, 60, 94);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.text('2. INVESTIMENTO E CONDIÇÕES COMERCIAIS', 15, 160);
-
-    // Cabeçalho da Tabela
-    doc.setFillColor(26, 60, 94);
-    doc.rect(15, 167, 180, 8, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(9);
-    doc.text('Item / Atividade Técnica', 18, 172.5);
+    // Tabela Vetorial Comercial
+    doc.setTextColor(26, 60, 94); doc.setFont('helvetica', 'bold'); doc.text('2. INVESTIMENTO COMERCIAL', 15, 160);
+    doc.setFillColor(26, 60, 94); doc.rect(15, 167, 180, 8, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFontSize(9);
+    doc.text('Descrição Detalhada do Item Técnico', 18, 172.5);
     doc.text('Qtd.', 125, 172.5);
-    doc.text('Valor Unitário', 145, 172.5);
-    doc.text('Valor Total', 175, 172.5);
+    doc.text('Val. Unitário', 145, 172.5);
+    doc.text('Val. Total', 175, 172.5);
 
-    // Linha de dados da Tabela
-    doc.setFillColor(255, 255, 255);
-    doc.rect(15, 175, 180, 10, 'F');
-    doc.setDrawColor(224, 230, 237);
-    doc.line(15, 185, 195, 185);
-    
+    // Linha de Valores
+    doc.setFillColor(255, 255, 255); doc.rect(15, 175, 180, 10, 'F');
+    doc.setDrawColor(224, 230, 237); doc.line(15, 185, 195, 185);
     doc.setTextColor(60, 60, 60);
-    doc.text(tit.length > 55 ? tit.substring(0,52) + '...' : tit, 18, 181);
-    doc.text(qty.toString(), 127, 181);
-    doc.text(fmtBRL(val), 145, 181);
-    doc.setFont('helvetica', 'bold');
-    doc.text(fmtBRL(qty * val), 175, 181);
+    doc.text(tit.length > 55 ? tit.substring(0,52) + '...' : tit, 18, 181.5);
+    doc.text(qty.toString(), 127, 181.5);
+    doc.text(fmtBRL(val), 145, 181.5);
+    doc.setFont('helvetica', 'bold'); doc.text(fmtBRL(qty * val), 175, 181.5);
 
-    // Bloco Resumo Geral
-    doc.setFillColor(232, 240, 248);
-    doc.rect(115, 190, 80, 12, 'F');
-    doc.setTextColor(26, 60, 94);
-    doc.setFontSize(10);
-    doc.text('VALOR GLOBAL:', 119, 197.5);
-    doc.text(fmtBRL(qty * val), 154, 197.5);
+    // Totalizador Centralizado
+    doc.setFillColor(232, 240, 248); doc.rect(120, 190, 75, 12, 'F');
+    doc.setTextColor(26, 60, 94); doc.setFontSize(10);
+    doc.text('TOTAL GLOBAL:', 124, 197.5);
+    doc.text(fmtBRL(qty * val), 156, 197.5);
 
-    // Rodapé da primeira página
-    doc.setDrawColor(200, 200, 200);
-    doc.line(15, 282, 195, 282);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(120, 120, 120);
+    // Rodapé Pág 1
+    doc.line(15, 282, 195, 282); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(120, 120, 120);
     doc.text('Compostos Engenharia — Campos dos Goytacazes/RJ', 15, 287);
     doc.text('Página 1 de 2', 195, 287, {align: 'right'});
 
-    // ── PÁGINA 2: METODOLOGIA E RESPONSABILIDADE TÉCNICA ──────────────────────
+    // ── PÁGINA 2: PRAZOS E ASSINATURA TÉCNICA ────────────────────────────────
     doc.addPage();
+    doc.setFillColor(26, 60, 94); doc.rect(0, 0, 210, 15, 'F');
     
-    // Top Banner Pág 2
-    doc.setFillColor(26, 60, 94); 
-    doc.rect(0, 0, 210, 15, 'F');
-
-    doc.setTextColor(26, 60, 94);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.text('3. METODOLOGIA, CRONOGRAMA E VALIDADE', 15, 32);
-
-    // Tabela de Prazos
-    doc.setDrawColor(224, 230, 237);
-    doc.line(15, 38, 195, 38);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(50, 50, 50);
-    doc.text(`• Prazo de execução em campo: ${pExec}`, 18, 46);
-    doc.text(`• Prazo para emissão do laudo técnico conclusivo: ${pLaudo}`, 18, 54);
-    doc.text(`• Prazo de validade desta proposta comercial: ${valProp}`, 18, 62);
+    doc.setTextColor(26, 60, 94); doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    doc.text('3. METODOLOGIA E PRAZOS CRONOLÓGICOS', 15, 32);
+    doc.setDrawColor(224, 230, 237); doc.line(15, 38, 195, 38);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(50, 50, 50);
+    doc.text(`• Prazo limite para execução em campo: ${pExec}`, 18, 46);
+    doc.text(`• Emissão do laudo técnico conclusivo: ${pLaudo}`, 18, 54);
+    doc.text(`• Validade regulamentar desta proposta: ${valProp}`, 18, 62);
     doc.line(15, 68, 195, 68);
 
-    doc.setFont('helvetica', 'bold');
-    doc.text('4. CERTIFICAÇÕES E ASSEGURAÇÃO DA QUALIDADE', 15, 82);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.text('* Equipamento Microprocessado de Ultrassom com Certificado de Calibração Rastreável.', 15, 92);
-    doc.text('* Metodologia de Ensaio Não Destrutivo conforme diretrizes da ABNT NBR 13784 (Estanqueidade).', 15, 100);
-    doc.text('* Emissão de Anotação de Responsabilidade Técnica (ART/CREA) inclusa nas obrigações escritas.', 15, 108);
+    doc.setFont('helvetica', 'bold'); doc.text('4. REQUISITOS E DIRETRIZES DE ASSEGURAÇÃO', 15, 82);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+    doc.text('* Aparelho de medição de espessura de chapa por ultrassom devidamente calibrado.', 15, 92);
+    doc.text('* Execução de ensaios e laudos em conformidade estrita com as normas regulamentadoras.', 15, 100);
+    doc.text('* Emissão obrigatória de ART (Anotação de Responsabilidade Técnica) junto ao CREA.', 15, 108);
 
-    // Assinatura e Encerramento
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text('Ficamos à total disposição para esclarecimentos técnicos ou comerciais.', 15, 140);
-    
-    doc.line(55, 185, 155, 185);
-    doc.setFont('helvetica', 'bold');
-    doc.text('HUGO VELOSO SOARES', 105, 191, {align: 'center'});
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Engenheiro Mecânico Responsável', 105, 196, {align: 'center'});
-    doc.text('Registro CREA N° ES – 050105/D', 105, 201, {align: 'center'});
+    // Espaço para Assinatura do Hugo
+    doc.line(55, 195, 155, 195);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.text('HUGO VELOSO SOARES', 105, 201, {align: 'center'});
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    doc.text('Engenheiro Mecânico Responsável', 105, 206, {align: 'center'});
+    doc.text('Registro CREA N° ES – 050105/D', 105, 211, {align: 'center'});
 
-    // Rodapé da segunda página
-    doc.line(15, 282, 195, 282);
-    doc.setFontSize(8);
-    doc.setTextColor(120, 120, 120);
+    // Rodapé Pág 2
+    doc.line(15, 282, 195, 282); doc.setFontSize(8); doc.setTextColor(120, 120, 120);
     doc.text('Compostos Engenharia — Campos dos Goytacazes/RJ', 15, 287);
     doc.text('Página 2 de 2', 195, 287, {align: 'right'});
     
@@ -598,7 +546,7 @@ async function carregarOS() {
             DB.os = data;
         }
     } catch(e) {
-        console.error(e);
+        console.error("Erro ao carregar OS:", e);
     }
     renderOS();
 }
@@ -607,16 +555,16 @@ function renderOS() {
     const content = document.getElementById('content');
     content.innerHTML = `
         <div class="card">
-            <div class="card-title">🔧 Gerenciamento Operacional das Ordens de Serviço</div>
+            <div class="card-title">🔧 Painel de Gestão de Ordens de Serviço</div>
             <div class="filters">
                 <input type="number" id="new-os-num" placeholder="Nº da OS" style="width:110px">
-                <input type="text" id="new-os-cli" placeholder="Cliente">
-                <input type="number" id="new-os-val" placeholder="Valor de Fechamento (R$)">
-                <button class="btn btn-primary" onclick="addOSReal()">＋ Abrir OS</button>
+                <input type="text" id="new-os-cli" placeholder="Nome do Cliente">
+                <input type="number" id="new-os-val" placeholder="Valor Total (R$)">
+                <button class="btn btn-primary" onclick="addOSReal()">＋ Criar Nova OS</button>
             </div>
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>OS</th><th>Cliente</th><th>Status</th><th class="td-num">Total</th></tr></thead>
+                    <thead><tr><th>Nº OS</th><th>Cliente</th><th>Status</th><th class="td-num">Total</th></tr></thead>
                     <tbody>
                         ${DB.os.map(o => `
                             <tr>
@@ -639,31 +587,32 @@ async function addOSReal() {
     const val = parseFloat(document.getElementById('new-os-val').value);
 
     if(!num || !cli || !val){
-        alert('Preencha todos os campos.');
+        alert('Por favor, preencha todos os campos operacionais.');
         return;
     }
 
-    const { data, error } = await supabaseClient
-        .from('ordens_servico')
-        .insert([
-            {
-                numero_os: parseInt(num),
-                cliente_nome: cli,
-                servico: 'INSPEÇÃO OPERACIONAL',
-                status: 'A EXECUTAR',
-                valor_total: val,
-                data_abertura: hoje()
-            }
-        ]);
+    try {
+        const { error } = await supabaseClient
+            .from('ordens_servico')
+            .insert([
+                {
+                    numero_os: parseInt(num),
+                    cliente_nome: cli,
+                    servico: 'INSPEÇÃO OPERACIONAL',
+                    status: 'A EXECUTAR',
+                    valor_total: val,
+                    data_abertura: hoje()
+                }
+            ]);
 
-    if(error){
-        console.error(error);
-        alert('Erro ao salvar OS.');
-        return;
+        if(error) throw error;
+        
+        alert('Ordem de serviço aberta com sucesso no Supabase!');
+        carregarOS();
+    } catch (e) {
+        console.error(e);
+        alert('Erro ao persistir nova OS no banco.');
     }
-
-    alert('OS salva no Supabase com sucesso!');
-    carregarOS();
 }
 
 function darBaixaReceber(id) {
@@ -713,7 +662,7 @@ function renderCharts() {
     });
 }
 
-// Inicializações básicas do ecossistema local
+// Inicializações seguras do ecossistema
 initDB();
 </script>
 </body>
