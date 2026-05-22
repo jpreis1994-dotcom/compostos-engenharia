@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -148,6 +149,14 @@
 // ══════════════════════════════════════════════════════════════
 // BANCO DE DADOS E SEED DATA - ORDEM CORRIGIDA ⚙️
 // ══════════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://stfebxsmovcnlyzpcsoa.supabase.co';
+
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0ZmVieHNtb3Zjbmx5enBjc29hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0NTgyNjYsImV4cCI6MjA5NTAzNDI2Nn0.Oo8HQ9UA4RmTaPv-W8zgw0x3IV1PlOoOTuFZNfUd3mk';
+
+const supabaseClient = supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_KEY
+);
 let DB = null;
 const DB_KEY = 'compostos_db_prod_v4';
 
@@ -511,7 +520,23 @@ function renderCharts() {
 }
 
 // Iniciar o ecossistema local do banco
+async function testeSupabase() {
+
+    const { data, error } = await supabaseClient
+        .from('clientes')
+        .select('*');
+
+    console.log('SUPABASE:', data);
+
+    if(error){
+        console.error(error);
+        alert('Erro ao conectar no Supabase');
+    } else {
+        alert('Supabase conectado com sucesso!');
+    }
+}
 initDB();
+testeSupabase();
 </script>
 </body>
 </html>
