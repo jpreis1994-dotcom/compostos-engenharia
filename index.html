@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Compostos Engenharia</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
@@ -47,7 +47,7 @@
         #content { flex: 1; overflow-y: auto; padding: 24px; }
         .card { background: white; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--cinza-borda); padding: 20px 24px; margin-bottom: 16px; }
         .card-title { font-size: 13px; font-weight: 600; color: var(--azul); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
-        .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+        .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
         .kpi { background: white; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--cinza-borda); padding: 16px 20px; }
         .kpi-label { font-size: 11px; color: var(--cinza); text-transform: uppercase; margin-bottom: 6px; font-weight: 500; }
         .kpi-val { font-size: 22px; font-weight: 700; color: var(--azul); }
@@ -77,18 +77,10 @@
         .filter-label { font-size: 11px; color: var(--cinza); }
         select, input, textarea { border: 1px solid var(--cinza-borda); border-radius: 7px; padding: 7px 10px; font-size: 13px; outline: none; }
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .form-grid-3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 14px; }
         .form-group { display: flex; flex-direction: column; gap: 5px; }
         .form-group label { font-size: 12px; color: var(--cinza); font-weight: 500; }
         .span2 { grid-column: span 2; }
-        
-        /* ── TELA DE LOGIN ────────────────────────────────────── */
-        #login-screen { position: fixed; inset: 0; background: linear-gradient(135deg, #1A3C5E 0%, #0F2744 100%); display: flex; align-items: center; justify-content: center; z-index: 9999; }
-        .login-box { background: white; border-radius: 16px; padding: 40px; width: 380px; box-shadow: 0 24px 64px rgba(0,0,0,0.3); }
-        .login-title { text-align: center; font-size: 20px; font-weight: 700; color: var(--azul); margin-bottom: 4px; }
-        .login-sub { text-align: center; font-size: 13px; color: var(--cinza); margin-bottom: 24px; }
-        .btn-login { width: 100%; padding: 11px; font-size: 14px; font-weight: 600; margin-top: 12px; }
-        .alert { padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
-        .alert-danger { background: var(--vermelho-bg); color: #B71C1C; }
         .hidden { display: none; }
     </style>
 </head>
@@ -147,17 +139,13 @@
 
 <script>
 // ══════════════════════════════════════════════════════════════
-// BANCO DE DADOS E SEED DATA - ORDEM CORRIGIDA ⚙️
+// BANCO DE DADOS SUPABASE E CONFIGURAÇÕES CORES
 // ══════════════════════════════════════════════════════════════
 const SUPABASE_URL = 'https://stfebxsmovcnlyzpcsoa.supabase.co';
-
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0ZmVieHNtb3Zjbmx5enBjc29hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0NTgyNjYsImV4cCI6MjA5NTAzNDI2Nn0.Oo8HQ9UA4RmTaPv-W8zgw0x3IV1PlOoOTuFZNfUd3mk';
 
-const supabaseClient = supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-);
-let DB = null;
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let DB = { usuarios: [], orcamentos: [], os: [], fluxo: [], receber: [], pagar: [], tipos_servico: [] };
 const DB_KEY = 'compostos_db_prod_v4';
 
 function saveDB() {
@@ -177,8 +165,8 @@ function seedData() {
             { data: '2026-04-10', mes: 4, cliente: 'Posto Gatte Ibitirama', tipo: 'DESPESA', categoria: 'COMPRA DE EQUIPAMENTOS', valor: 52732 }
         ];
         DB.os = [
-            { numero: 101, cliente: 'Consórcio Jaracatiá', servico: 'OBRA TESTE', status: 'EM EXECUÇÃO', valor: 176392, data: '2026-03-01' },
-            { numero: 102, cliente: 'Posto Novo Horizonte', servico: 'ESTANQUEIDADE', status: 'A EXECUTAR', valor: 4800, data: '2026-04-15' }
+            { numero_os: 101, cliente_nome: 'Consórcio Jaracatiá', servico: 'OBRA TESTE', status: 'EM EXECUÇÃO', valor_total: 176392, data_abertura: '2026-03-01' },
+            { numero_os: 102, cliente_nome: 'Posto Novo Horizonte', servico: 'ESTANQUEIDADE', status: 'A EXECUTAR', valor_total: 4800, data_abertura: '2026-04-15' }
         ];
         DB.receber = [
             { id: 1, cliente: 'Posto Gatte Ibitirama', valor: 74300, vencimento: '2026-06-15', forma: 'Boleto', status: 'A VENCER' },
@@ -195,10 +183,22 @@ async function initDB() {
     const saved = localStorage.getItem(DB_KEY);
     if (saved) {
         DB = JSON.parse(saved);
-    } else {
-        DB = { usuarios: [], orcamentos: [], os: [], fluxo: [], receber: [], pagar: [] };
     }
-    seedData(); // Inicializa os dados com segurança antes do login rodar
+    seedData();
+    await buscarTiposServico();
+}
+
+// Carrega os tipos de serviço direto da tabela do Supabase
+async function buscarTiposServico() {
+    try {
+        const { data, error } = await supabaseClient.from('tipos_servico').select('*');
+        if (!error && data) {
+            DB.tipos_servico = data;
+            saveDB();
+        }
+    } catch (e) {
+        console.error("Erro ao carregar tipos de serviço do Supabase:", e);
+    }
 }
 
 // ── SISTEMA DE AUTENTICAÇÃO REAL ─────────────────────────────────────────────
@@ -230,13 +230,29 @@ function fmtData(d) { if(!d) return '—'; const p = d.split('-'); return `${p[2
 
 function badge(status) {
     let c = 'badge-azul';
-    if (['RECEBIDO','FINALIZADO','PAGO'].includes(status)) c = 'badge-verde';
+    if (['RECEBIDO','FINALIZADO','PAGO','CONCLUÍDA','FATURADA'].includes(status)) c = 'badge-verde';
     if (['EM ATRASO','VENCIDA'].includes(status)) c = 'badge-vermelho';
-    if (['A EXECUTAR','EM ABERTO'].includes(status)) c = 'badge-amarelo';
+    if (['A EXECUTAR','EM ABERTO','EM EXECUÇÃO'].includes(status)) c = 'badge-amarelo';
     return `<span class="badge ${c}">${status}</span>`;
 }
 
-// ── CONTROLE DE TELAS (100% OPERACIONAIS) ────────────────────────────────────
+// Atualiza o textarea com a descrição padrão e os prazos ao mudar o select de serviço
+function atualizarDescricaoServico() {
+    const select = document.getElementById('orc-servico-id');
+    const selectedOption = select.options[select.selectedIndex];
+    
+    const descricao = selectedOption.getAttribute('data-desc') || '';
+    const prazoExec = selectedOption.getAttribute('data-exec') || 'A combinar';
+    const prazoLaudo = selectedOption.getAttribute('data-laudo') || 'A combinar';
+    const validade = selectedOption.getAttribute('data-validade') || '15 dias';
+
+    document.getElementById('orc-desc-visual').value = descricao;
+    document.getElementById('orc-prazo-exec').value = prazoExec;
+    document.getElementById('orc-prazo-laudo').value = prazoLaudo;
+    document.getElementById('orc-validade').value = validade;
+}
+
+// ── CONTROLE DE TELAS ────────────────────────────────────────────────────────
 function nav(page) {
     document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
     document.getElementById('nav-'+page)?.classList.add('active');
@@ -267,7 +283,7 @@ function nav(page) {
                         <table>
                             <thead><tr><th>Nº OS</th><th>Cliente</th><th>Serviço</th><th>Status</th><th class="td-num">Valor</th></tr></thead>
                             <tbody>
-                                ${DB.os.map(o => `<tr><td><b>#${o.numero}</b></td><td>${o.cliente}</td><td>${o.servico}</td><td>${badge(o.status)}</td><td class="td-num">${fmtBRL(o.valor)}</td></tr>`).join('')}
+                                ${DB.os.map(o => `<tr><td><b>#${o.numero_os}</b></td><td>${o.cliente_nome}</td><td>${o.servico}</td><td>${badge(o.status)}</td><td class="td-num">${fmtBRL(o.valor_total)}</td></tr>`).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -277,9 +293,15 @@ function nav(page) {
         setTimeout(renderCharts, 100);
 
     } else if (page === 'orcamentos') {
+        // Fallback caso a tabela do Supabase esteja vazia temporariamente
+        const opcoesServico = DB.tipos_servico.length > 0 ? DB.tipos_servico : [
+            { id: 1, nome: "Teste de estanqueidade nos compartimentos de armazenamento e distribuição", descricao_padrao: "Execução de ensaio pneumático não destrutivo de estanqueidade em conformidade com as diretrizes da NBR 13784 e regulamentações vigentes ambientais.", prazo_execucao: "2 dias úteis", prazo_laudo: "5 dias úteis", validade_proposta: "15 dias" },
+            { id: 2, nome: "Inspeção e Medição de espessura de chapa por ultrassom (NR-13)", descricao_padrao: "Avaliação técnica de integridade estrutural em vasos de pressão e tubulações via ultrassom microprocessado, atendendo aos requisitos normativos da NR-13.", prazo_execucao: "3 dias úteis", prazo_laudo: "7 dias úteis", validade_proposta: "30 dias" }
+        ];
+
         content.innerHTML = `
             <div class="card">
-                <div class="card-title">📝 Módulo Real de Emissão de Orçamentos Técnicos</div>
+                <div class="card-title">📝 Módulo Avançado de Emissão de Orçamentos Técnicos</div>
                 <div class="form-grid">
                     <div class="form-group span2">
                         <label>Busca de Cadastro via API da Receita Federal (CNPJ)</label>
@@ -291,47 +313,38 @@ function nav(page) {
                     <div class="form-group span2"><label>Razão Social do Cliente</label><input type="text" id="orc-razao"></div>
                     <div class="form-group"><label>Cidade/Município</label><input type="text" id="orc-cidade"></div>
                     <div class="form-group"><label>Estado (UF)</label><input type="text" id="orc-uf" maxlength="2"></div>
-                    <div class="form-group span2"><label>Atividade Técnica da Proposta</label>
-                        <select id="orc-titulo">
-                            <option>Teste de estanqueidade nos compartimentos de armazenamento e distribuição de combustíveis</option>
-                            <option>Inspeção e Medição de espessura de chapa por ultrassom (NR-13)</option>
-                            <option>Adequação técnica e Laudo de Licenciamento Ambiental</option>
+                    
+                    <div class="form-group span2">
+                        <label>Serviço Técnico Integrado (Base de Dados Real)</label>
+                        <select id="orc-servico-id" onchange="atualizarDescricaoServico()">
+                            <option value="" disabled selected>Escolha um tipo de serviço cadastrado...</option>
+                            ${opcoesServico.map(s => `
+                                <option value="${s.id}" data-desc="${s.descricao_padrao || ''}" data-exec="${s.prazo_execucao || ''}" data-laudo="${s.prazo_laudo || ''}" data-validade="${s.validade_proposta || ''}">
+                                    ${s.nome}
+                                </option>
+                            `).join('')}
                         </select>
                     </div>
-                    <div class="form-group"><label>Quantidade de Compartimentos</label><input type="number" id="orc-qtd" value="6"></div>
-                    <div class="form-group"><label>Valor Unitário (R$)</label><input type="number" id="orc-val" value="300"></div>
+                    
+                    <div class="form-group span2">
+                        <label>Descrição Detalhada do Escopo Técnico</label>
+                        <textarea id="orc-desc-visual" rows="4" readonly style="background:#FAFBFB; color:#5A6B7C; font-size:12.5px; resize:none;"></textarea>
+                    </div>
+                    
+                    <div class="form-grid-3 span2">
+                        <div class="form-group"><label>Prazo de Execução</label><input type="text" id="orc-prazo-exec" readonly style="background:#FAFBFB;"></div>
+                        <div class="form-group"><label>Prazo do Laudo</label><input type="text" id="orc-prazo-laudo" readonly style="background:#FAFBFB;"></div>
+                        <div class="form-group"><label>Validade da Proposta</label><input type="text" id="orc-validade" readonly style="background:#FAFBFB;"></div>
+                    </div>
+
+                    <div class="form-group"><label>Quantidade de Atividades/Compartimentos</label><input type="number" id="orc-qtd" value="1"></div>
+                    <div class="form-group"><label>Valor Unitário (R$)</label><input type="number" id="orc-val" value="0" step="0.01"></div>
                 </div>
-                <button class="btn btn-primary" style="margin-top:20px" onclick="gerarOrcamentoPDFReal()">📄 Exportar Orçamento Oficial em PDF (2 Páginas)</button>
+                <button class="btn btn-primary" style="margin-top:20px" onclick="gerarOrcamentoPDFReal()">📄 Exportar Orçamento Oficial em PDF (Design Profissional)</button>
             </div>
         `;
     } else if (page === 'os') {
-
-    carregarOS();
-
-}
-carregarOS();
-        content.innerHTML = `
-            <div class="card">
-                <div class="card-title">🔧 Gerenciamento Operacional das Ordens de Serviço</div>
-                <div class="filters">
-                    <input type="number" id="new-os-num" placeholder="Nº da OS" style="width:110px">
-                    <input type="text" id="new-os-cli" placeholder="Cliente">
-                    <input type="number" id="new-os-val" placeholder="Valor de Fechamento (R$)">
-                    <button class="btn btn-primary" onclick="addOSReal()">＋ Abrir OS</button>
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr><th>OS</th><th>Cliente</th><th>Status</th><th class="td-num">Total</th><th>Ações</th></tr></thead>
-                        <tbody>
-                            ${DB.os.map(o => `<tr>
-                                <td><b>#${o.numero}</b></td><td>${o.cliente}</td><td>${badge(o.status)}</td><td class="td-num">${fmtBRL(o.valor)}</td>
-                                <td>${o.status !== 'FINALIZADO' ? `<button class="btn btn-sm btn-success" onclick="finalizarOSReal(${o.numero})">✅ Finalizar e Faturar</button>` : 'Faturado e Concluído'}</td>
-                            </tr>`).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        `;
+        carregarOS();
     } else if (page === 'receber') {
         content.innerHTML = `
             <div class="card">
@@ -393,9 +406,7 @@ carregarOS();
     }
 }
 
-// ══════════════════════════════════════════════════════════════
-// LOGICAS INTERNAS E INTEGRAÇÕES DE COMPORTAMENTO BANCÁRIO
-// ══════════════════════════════════════════════════════════════
+// ── LÓGICAS OPERACIONAIS E INTEGRAÇÕES ───────────────────────────────────────
 async function buscarCNPJReal() {
     const cnpj = document.getElementById('orc-cnpj').value.replace(/\D/g,'');
     if(cnpj.length !== 14) { alert('Digite os 14 números do CNPJ.'); return; }
@@ -411,53 +422,218 @@ async function buscarCNPJReal() {
 }
 
 function gerarOrcamentoPDFReal() {
-    const rz = document.getElementById('orc-razao').value || 'CONSORCIO PUBLICO INTERMUNICIPAL';
+    const select = document.getElementById('orc-servico-id');
+    if(!select.value) { alert('Selecione um tipo de serviço antes de exportar.'); return; }
+
+    const rz = (document.getElementById('orc-razao').value || 'CONSORCIO PUBLICO INTERMUNICIPAL').toUpperCase();
     const cid = document.getElementById('orc-cidade').value || 'Campos dos Goytacazes';
-    const uf = document.getElementById('orc-uf').value || 'RJ';
-    const tit = document.getElementById('orc-titulo').value;
+    const uf = (document.getElementById('orc-uf').value || 'RJ').toUpperCase();
+    const tit = select.options[select.selectedIndex].text.trim();
+    const desc = document.getElementById('orc-desc-visual').value;
     const qty = parseInt(document.getElementById('orc-qtd').value) || 1;
     const val = parseFloat(document.getElementById('orc-val').value) || 0;
+    
+    const pExec = document.getElementById('orc-prazo-exec').value;
+    const pLaudo = document.getElementById('orc-prazo-laudo').value;
+    const valProp = document.getElementById('orc-validade').value;
 
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     
-    // Página 1 - Estrutura Azul Corporativa da Compostos Engenharia
-    doc.setFillColor(26,60,94); doc.rect(15, 15, 180, 22, 'F');
-    doc.setTextColor(255,255,255); doc.setFontSize(10); doc.setFont('helvetica','bold');
-    doc.text('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇO', 20, 29);
+    // ── PÁGINA 1: IDENTIFICAÇÃO E ESCOPO TÉCNICO ──────────────────────────────
+    // Top Banner Corporativo
+    doc.setFillColor(26, 60, 94); 
+    doc.rect(0, 0, 210, 38, 'F');
     
-    doc.setTextColor(0,0,0); doc.setFontSize(12);
-    doc.text('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇOS TÉCNICOS', 105, 52, {align:'center'});
-    doc.setFontSize(10); doc.setFont('helvetica','normal');
-    doc.text(`CLIENTE: ${rz.toUpperCase()}`, 20, 70);
-    doc.text(`LOCALIZAÇÃO: ${cid} - ${uf}`, 20, 77);
-    doc.text(`TIPO DE SERVIÇO: ${tit}`, 20, 84);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('COMPOSTOS ENGENHARIA', 18, 16);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('Soluções em Engenharia Mecânica e Inspeções Técnicas', 18, 23);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-BR')}`, 192, 16, {align: 'right'});
+
+    // Seção Cliente
+    doc.setFillColor(245, 246, 250);
+    doc.rect(15, 48, 180, 32, 'F');
+    doc.setDrawColor(224, 230, 237);
+    doc.rect(15, 48, 180, 32, 'S');
     
-    doc.setFont('helvetica','bold'); doc.text('VALORES OPERACIONAIS:', 20, 100); doc.setFont('helvetica','normal');
-    doc.text(`Quantidade contratada: ${qty} compartimentos.`, 20, 108);
-    doc.text(`Preço Unitário por Atividade: ${fmtBRL(val)}`, 20, 115);
-    doc.setFont('helvetica','bold'); doc.text(`VALOR TOTAL GLOBAL DA PROPOSTA: ${fmtBRL(qty * val)}`, 20, 125);
+    doc.setTextColor(26, 60, 94);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('PROPOSTA COMERCIAL DESTINADA A:', 20, 55);
     
-    // Página 2 - Diretrizes Técnicas do Hugo
+    doc.setTextColor(40, 40, 40);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Razão Social: ${rz}`, 20, 62);
+    doc.text(`Localidade da Prestação: ${cid} — ${uf}`, 20, 69);
+    doc.text(`CNPJ informado: ${document.getElementById('orc-cnpj').value || 'Não informado'}`, 20, 75);
+
+    // Título do Objeto Técnico
+    doc.setTextColor(26, 60, 94);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('1. ESCOPO DO SERVIÇO PROPRASTADO', 15, 95);
+    
+    doc.setTextColor(50, 50, 50);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(tit, 15, 103, {maxWidth: 180});
+    
+    // Texto do Escopo / Descrição Padrão da Tabela
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(desc, 15, 114, {maxWidth: 180, align: 'justify', lineLeading: 5});
+
+    // Tabela Dinâmica de Valores (Desenho Vetorial Elegante)
+    doc.setTextColor(26, 60, 94);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('2. INVESTIMENTO E CONDIÇÕES COMERCIAIS', 15, 160);
+
+    // Cabeçalho da Tabela
+    doc.setFillColor(26, 60, 94);
+    doc.rect(15, 167, 180, 8, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(9);
+    doc.text('Item / Atividade Técnica', 18, 172.5);
+    doc.text('Qtd.', 125, 172.5);
+    doc.text('Valor Unitário', 145, 172.5);
+    doc.text('Valor Total', 175, 172.5);
+
+    // Linha de dados da Tabela
+    doc.setFillColor(255, 255, 255);
+    doc.rect(15, 175, 180, 10, 'F');
+    doc.setDrawColor(224, 230, 237);
+    doc.line(15, 185, 195, 185);
+    
+    doc.setTextColor(60, 60, 60);
+    doc.text(tit.length > 55 ? tit.substring(0,52) + '...' : tit, 18, 181);
+    doc.text(qty.toString(), 127, 181);
+    doc.text(fmtBRL(val), 145, 181);
+    doc.setFont('helvetica', 'bold');
+    doc.text(fmtBRL(qty * val), 175, 181);
+
+    // Bloco Resumo Geral
+    doc.setFillColor(232, 240, 248);
+    doc.rect(115, 190, 80, 12, 'F');
+    doc.setTextColor(26, 60, 94);
+    doc.setFontSize(10);
+    doc.text('VALOR GLOBAL:', 119, 197.5);
+    doc.text(fmtBRL(qty * val), 154, 197.5);
+
+    // Rodapé da primeira página
+    doc.setDrawColor(200, 200, 200);
+    doc.line(15, 282, 195, 282);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text('Compostos Engenharia — Campos dos Goytacazes/RJ', 15, 287);
+    doc.text('Página 1 de 2', 195, 287, {align: 'right'});
+
+    // ── PÁGINA 2: METODOLOGIA E RESPONSABILIDADE TÉCNICA ──────────────────────
     doc.addPage();
-    doc.setFillColor(26,60,94); doc.rect(15, 15, 180, 22, 'F');
-    doc.setTextColor(255,255,255); doc.text('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇO', 20, 29);
     
-    doc.setTextColor(0,0,0); doc.setFont('helvetica','bold');
-    doc.text('7. CERTIFICAÇÕES E CREDENCIAMENTOS DA EMPRESA PARA EXECUTAR O SERVIÇO', 20, 55);
-    doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
-    doc.text('* Medição de espessura de chapa por ultrassom feito com aparelho Instrutherm ME 260 calibrado.', 20, 65);
-    doc.text('* Empresa credenciada pelo INMETRO para testes de estanqueidade na NBR 13784.', 20, 73);
-    doc.text('* Empresa devidamente regularizada com ART e Engenheiro Mecânico Próprio.', 20, 81);
+    // Top Banner Pág 2
+    doc.setFillColor(26, 60, 94); 
+    doc.rect(0, 0, 210, 15, 'F');
+
+    doc.setTextColor(26, 60, 94);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('3. METODOLOGIA, CRONOGRAMA E VALIDADE', 15, 32);
+
+    // Tabela de Prazos
+    doc.setDrawColor(224, 230, 237);
+    doc.line(15, 38, 195, 38);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(50, 50, 50);
+    doc.text(`• Prazo de execução em campo: ${pExec}`, 18, 46);
+    doc.text(`• Prazo para emissão do laudo técnico conclusivo: ${pLaudo}`, 18, 54);
+    doc.text(`• Prazo de validade desta proposta comercial: ${valProp}`, 18, 62);
+    doc.line(15, 68, 195, 68);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('4. CERTIFICAÇÕES E ASSEGURAÇÃO DA QUALIDADE', 15, 82);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.text('* Equipamento Microprocessado de Ultrassom com Certificado de Calibração Rastreável.', 15, 92);
+    doc.text('* Metodologia de Ensaio Não Destrutivo conforme diretrizes da ABNT NBR 13784 (Estanqueidade).', 15, 100);
+    doc.text('* Emissão de Anotação de Responsabilidade Técnica (ART/CREA) inclusa nas obrigações escritas.', 15, 108);
+
+    // Assinatura e Encerramento
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('Ficamos à total disposição para esclarecimentos técnicos ou comerciais.', 15, 140);
     
-    doc.setFontSize(10); doc.text('Hugo Veloso Soares - Eng. Mecânico', 105, 140, {align:'center'});
-    doc.text('Registro Crea N° ES – 050105 /D', 105, 147, {align:'center'});
+    doc.line(55, 185, 155, 185);
+    doc.setFont('helvetica', 'bold');
+    doc.text('HUGO VELOSO SOARES', 105, 191, {align: 'center'});
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('Engenheiro Mecânico Responsável', 105, 196, {align: 'center'});
+    doc.text('Registro CREA N° ES – 050105/D', 105, 201, {align: 'center'});
+
+    // Rodapé da segunda página
+    doc.line(15, 282, 195, 282);
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text('Compostos Engenharia — Campos dos Goytacazes/RJ', 15, 287);
+    doc.text('Página 2 de 2', 195, 287, {align: 'right'});
     
-    doc.save(`Proposta_Oficial_Compostos_${rz.replace(/ /g,'_')}.pdf`);
+    doc.save(`Proposta_Compostos_${rz.replace(/[^a-zA-Z0-9]/g,'_')}.pdf`);
+}
+
+async function carregarOS() {
+    try {
+        const { data, error } = await supabaseClient
+            .from('ordens_servico')
+            .select('*')
+            .order('numero_os', { ascending: false });
+
+        if(!error && data){
+            DB.os = data;
+        }
+    } catch(e) {
+        console.error(e);
+    }
+    renderOS();
+}
+
+function renderOS() {
+    const content = document.getElementById('content');
+    content.innerHTML = `
+        <div class="card">
+            <div class="card-title">🔧 Gerenciamento Operacional das Ordens de Serviço</div>
+            <div class="filters">
+                <input type="number" id="new-os-num" placeholder="Nº da OS" style="width:110px">
+                <input type="text" id="new-os-cli" placeholder="Cliente">
+                <input type="number" id="new-os-val" placeholder="Valor de Fechamento (R$)">
+                <button class="btn btn-primary" onclick="addOSReal()">＋ Abrir OS</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>OS</th><th>Cliente</th><th>Status</th><th class="td-num">Total</th></tr></thead>
+                    <tbody>
+                        ${DB.os.map(o => `
+                            <tr>
+                                <td><b>#${o.numero_os}</b></td>
+                                <td>${o.cliente_nome || '—'}</td>
+                                <td>${badge(o.status)}</td>
+                                <td class="td-num">${fmtBRL(Number(o.valor_total))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
 }
 
 async function addOSReal() {
-
     const num = document.getElementById('new-os-num').value;
     const cli = document.getElementById('new-os-cli').value;
     const val = parseFloat(document.getElementById('new-os-val').value);
@@ -487,65 +663,13 @@ async function addOSReal() {
     }
 
     alert('OS salva no Supabase com sucesso!');
-
     carregarOS();
-}
-    const num = document.getElementById('new-os-num').value;
-    const cli = document.getElementById('new-os-cli').value;
-    const val = parseFloat(document.getElementById('new-os-val').value);
-    if(!num || !cli || !val) return;
-    DB.os.push({ numero: parseInt(num), cliente: cli, servico: 'INSPEÇÃO OPERACIONAL', status: 'A EXECUTAR', valor: val });
-    saveDB(); nav('os');
-}
-
-async function addOSReal() {
-
-    const num = document.getElementById('new-os-num').value;
-    const cli = document.getElementById('new-os-cli').value;
-    const val = parseFloat(document.getElementById('new-os-val').value);
-
-    if(!num || !cli || !val){
-        alert('Preencha todos os campos.');
-        return;
-    }
-
-    const { data, error } = await supabaseClient
-        .from('ordens_servico')
-        .insert([
-            {
-                numero_os: parseInt(num),
-                cliente_nome: cli,
-                servico: 'INSPEÇÃO OPERACIONAL',
-                status: 'A EXECUTAR',
-                valor_total: val,
-                data_abertura: hoje()
-            }
-        ]);
-
-    if(error){
-        console.error(error);
-        alert('Erro ao salvar OS.');
-        return;
-    }
-
-    alert('OS salva no Supabase com sucesso!');
-
-    carregarOS();
-} {
-    const os = DB.os.find(x => x.numero === numero);
-    if(os) {
-        os.status = 'FINALIZADO';
-        // Automação: Ativa parcela de faturamento na mesma hora no Contas a Receber
-        DB.receber.push({ id: Date.now(), cliente: os.cliente, valor: os.valor, vencimento: hoje(), forma: 'Pix', status: 'A VENCER' });
-        saveDB(); nav('os');
-    }
 }
 
 function darBaixaReceber(id) {
     const item = DB.receber.find(x => x.id === id);
     if(item) {
         item.status = 'RECEBIDO';
-        // Automação: Computa a entrada real de dinheiro no histórico do Fluxo de Caixa
         DB.fluxo.push({ data: hoje(), mes: new Date().getMonth()+1, cliente: item.cliente, tipo: 'RECEITA', categoria: 'BAIXA RECEBIMENTO', valor: item.valor });
         saveDB(); nav('receber');
     }
@@ -565,7 +689,6 @@ function darBaixaPagar(id) {
     const item = DB.pagar.find(x => x.id === id);
     if(item) {
         item.status = 'PAGO';
-        // Automação: Computa saída e deduz saldo do Fluxo de Caixa real
         DB.fluxo.push({ data: hoje(), mes: new Date().getMonth()+1, cliente: item.fornecedor, tipo: 'DESPESA', categoria: item.categoria, valor: item.valor });
         saveDB(); nav('pagar');
     }
@@ -590,122 +713,8 @@ function renderCharts() {
     });
 }
 
-// Iniciar o ecossistema local do banco
-async function testeSupabase() {
-
-    const { data, error } = await supabaseClient
-        .from('clientes')
-        .select('*');
-
-    console.log('SUPABASE:', data);
-
-    if(error){
-        console.error(error);
-        alert('Erro ao conectar no Supabase');
-    } else {
-        alert('Supabase conectado com sucesso!');
-    }
-}
+// Inicializações básicas do ecossistema local
 initDB();
-testeSupabase();
-async function carregarOS() {
-
-    const { data, error } = await supabaseClient
-        .from('ordens_servico')
-        .select('*')
-        .order('numero_os', { ascending: false });
-
-    if(error){
-        console.error(error);
-        alert('Erro ao carregar OS');
-        return;
-    }
-
-    DB.os = data;
-
-    renderOS();
-}
-
-function renderOS(){
-
-    const content = document.getElementById('content');
-
-    content.innerHTML = `
-        <div class="card">
-
-            <div class="card-title">
-                🔧 Gerenciamento Operacional das Ordens de Serviço
-            </div>
-
-            <div class="filters">
-                <input type="number"
-                    id="new-os-num"
-                    placeholder="Nº da OS"
-                    style="width:110px">
-
-                <input type="text"
-                    id="new-os-cli"
-                    placeholder="Cliente">
-
-                <input type="number"
-                    id="new-os-val"
-                    placeholder="Valor de Fechamento (R$)">
-
-                <button class="btn btn-primary"
-                    onclick="addOSReal()">
-
-                    ＋ Abrir OS
-                </button>
-            </div>
-
-            <div class="table-wrap">
-
-                <table>
-
-                    <thead>
-                        <tr>
-                            <th>OS</th>
-                            <th>Cliente</th>
-                            <th>Status</th>
-                            <th class="td-num">Total</th>
-                        </tr>
-                    </thead>
-
-                    <tbody>
-
-                        ${DB.os.map(o => `
-
-                            <tr>
-
-                                <td>
-                                    <b>#${o.numero_os}</b>
-                                </td>
-
-                                <td>
-                                    ${o.cliente_nome}
-                                </td>
-
-                                <td>
-                                    ${badge(o.status)}
-                                </td>
-
-                                <td class="td-num">
-                                    ${fmtBRL(Number(o.valor_total))}
-                                </td>
-
-                            </tr>
-
-                        `).join('')}
-
-                    </tbody>
-
-                </table>
-
-            </div>
-
-        </div>
-    `;
-}
 </script>
 </body>
 </html>
