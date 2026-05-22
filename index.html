@@ -4,109 +4,64 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Compostos Engenharia ERP</title>
+<title>Compostos Engenharia</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-
-*{
+body{
     margin:0;
-    padding:0;
+    font-family:Arial;
+    background:#f5f5f5;
+}
+
+#login{
+    width:320px;
+    margin:100px auto;
+    background:white;
+    padding:20px;
+    border-radius:10px;
+}
+
+input{
+    width:100%;
+    padding:10px;
+    margin-bottom:10px;
     box-sizing:border-box;
 }
 
-body{
-    font-family:Arial;
-    background:#f5f6fa;
-    display:flex;
-    height:100vh;
-}
-
-.sidebar{
-    width:240px;
+button{
+    padding:10px 15px;
     background:#16324F;
     color:white;
-    padding:20px;
-    display:flex;
-    flex-direction:column;
-}
-
-.logo{
-    font-size:22px;
-    font-weight:bold;
-    margin-bottom:30px;
-}
-
-.menu button{
-    width:100%;
-    padding:14px;
     border:none;
-    background:#234c75;
-    color:white;
-    margin-bottom:10px;
-    border-radius:8px;
+    border-radius:5px;
     cursor:pointer;
 }
 
-.menu button:hover{
-    background:#2f6498;
+#app{
+    display:none;
 }
 
-.main{
-    flex:1;
-    display:flex;
-    flex-direction:column;
-}
-
-.topbar{
-    background:white;
+.sidebar{
+    width:220px;
+    background:#16324F;
+    color:white;
+    height:100vh;
+    position:fixed;
     padding:20px;
-    border-bottom:1px solid #ddd;
 }
 
-#content{
+.content{
+    margin-left:240px;
     padding:20px;
-    overflow:auto;
 }
 
 .card{
     background:white;
     padding:20px;
-    border-radius:12px;
+    border-radius:10px;
     margin-bottom:20px;
-    box-shadow:0 2px 8px rgba(0,0,0,0.08);
-}
-
-.form-group{
-    margin-bottom:15px;
-}
-
-label{
-    display:block;
-    margin-bottom:6px;
-    font-size:14px;
-}
-
-input, select{
-    width:100%;
-    padding:10px;
-    border:1px solid #ccc;
-    border-radius:8px;
-}
-
-.btn{
-    padding:12px 18px;
-    border:none;
-    background:#16324F;
-    color:white;
-    border-radius:8px;
-    cursor:pointer;
-}
-
-.btn:hover{
-    background:#245280;
 }
 
 table{
@@ -114,138 +69,49 @@ table{
     border-collapse:collapse;
 }
 
-th, td{
-    padding:12px;
-    border-bottom:1px solid #eee;
-    text-align:left;
-}
-
-.badge{
-    padding:6px 10px;
-    border-radius:20px;
-    color:white;
-    font-size:12px;
-}
-
-.orcamento{
-    background:#E8A020;
-}
-
-.execucao{
-    background:#1A8F5A;
-}
-
-.finalizado{
-    background:#555;
-}
-
-#login-screen{
-    position:fixed;
-    inset:0;
-    background:#16324F;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-}
-
-.login-box{
-    background:white;
-    width:320px;
-    padding:30px;
-    border-radius:12px;
-}
-
-.login-box h1{
-    margin-bottom:20px;
-}
-
-.hidden{
-    display:none;
-}
-
-.kpis{
-    display:grid;
-    grid-template-columns:repeat(3,1fr);
-    gap:20px;
-}
-
-.kpi{
-    background:white;
-    padding:20px;
-    border-radius:12px;
-    box-shadow:0 2px 8px rgba(0,0,0,0.08);
-}
-
-.kpi h3{
-    font-size:14px;
-    margin-bottom:10px;
-}
-
-.kpi p{
-    font-size:24px;
-    font-weight:bold;
+th,td{
+    border-bottom:1px solid #ddd;
+    padding:10px;
 }
 
 </style>
-</head>
 
+</head>
 <body>
 
-<div id="login-screen">
+<div id="login">
 
-    <div class="login-box">
+    <h2>Compostos ERP</h2>
 
-        <h1>Compostos ERP</h1>
+    <input id="user" placeholder="Usuário">
 
-        <div class="form-group">
-            <label>Usuário</label>
-            <input id="login-user">
-        </div>
+    <input id="pass" type="password" placeholder="Senha">
 
-        <div class="form-group">
-            <label>Senha</label>
-            <input type="password" id="login-pass">
-        </div>
-
-        <button class="btn" onclick="doLogin()">
-            Entrar
-        </button>
-
-    </div>
+    <button onclick="doLogin()">
+        Entrar
+    </button>
 
 </div>
 
-<div class="sidebar hidden" id="sidebar">
+<div id="app">
 
-    <div class="logo">
-        COMPOSTOS
-    </div>
+    <div class="sidebar">
 
-    <div class="menu">
+        <h2>COMPOSTOS</h2>
 
-        <button onclick="nav('dashboard')">
+        <button onclick="carregarDashboard()">
             Dashboard
         </button>
 
-        <button onclick="nav('orcamentos')">
-            Orçamentos
-        </button>
+        <br><br>
 
-        <button onclick="nav('os')">
+        <button onclick="carregarOS()">
             Ordens de Serviço
         </button>
 
     </div>
 
-</div>
-
-<div class="main hidden" id="main">
-
-    <div class="topbar">
-        <h2 id="page-title">Dashboard</h2>
-    </div>
-
-    <div id="content"></div>
+    <div class="content" id="content"></div>
 
 </div>
 
@@ -253,232 +119,98 @@ th, td{
 
 const SUPABASE_URL = 'https://stfebxsmovcnlyzpcsoa.supabase.co';
 
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0ZmVieHNtb3Zjbmx5enBjc29hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0NTgyNjYsImV4cCI6MjA5NTAzNDI2Nn0.Oo8HQ9UA4RmTaPv-W8zgw0x3IV1PlOoOTuFZNfUd3mk';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInR5cCI6IkpXVCJ9';
 
 const supabaseClient = supabase.createClient(
     SUPABASE_URL,
     SUPABASE_KEY
 );
 
-const usuarios = [
-    {
-        usuario:'joao',
-        senha:'financeiro2024'
-    },
-    {
-        usuario:'hugo',
-        senha:'compostos2024'
-    }
-];
-
-function fmtBRL(valor){
-
-    return Number(valor || 0).toLocaleString(
-        'pt-BR',
-        {
-            style:'currency',
-            currency:'BRL'
-        }
-    );
-}
-
 function doLogin(){
 
-    const user = document
-        .getElementById('login-user')
-        .value
-        .trim()
-        .toLowerCase();
+    const user = document.getElementById('user').value;
+    const pass = document.getElementById('pass').value;
 
-    const pass = document
-        .getElementById('login-pass')
-        .value;
+    if(
+        (user === 'joao' && pass === 'financeiro2024')
+        ||
+        (user === 'hugo' && pass === 'compostos2024')
+    ){
 
-    const found = usuarios.find(
-        x => x.usuario === user && x.senha === pass
-    );
+        document.getElementById('login').style.display = 'none';
 
-    if(!found){
+        document.getElementById('app').style.display = 'block';
 
-        alert('Usuário inválido');
-        return;
+        carregarDashboard();
+
+    }else{
+
+        alert('Login inválido');
+
     }
 
-    document
-        .getElementById('login-screen')
-        .classList.add('hidden');
-
-    document
-        .getElementById('sidebar')
-        .classList.remove('hidden');
-
-    document
-        .getElementById('main')
-        .classList.remove('hidden');
-
-    nav('dashboard');
 }
 
-function nav(page){
-
-    document
-        .getElementById('page-title')
-        .innerText = page.toUpperCase();
-
-    if(page === 'dashboard'){
-        renderDashboard();
-    }
-
-    if(page === 'orcamentos'){
-        renderOrcamentos();
-    }
-
-    if(page === 'os'){
-        renderOS();
-    }
-}
-
-async function renderDashboard(){
-
-    const { data } = await supabaseClient
-        .from('ordens_servico')
-        .select('*');
-
-    const total = data ? data.length : 0;
-
-    document.getElementById('content').innerHTML = `
-
-        <div class="kpis">
-
-            <div class="kpi">
-                <h3>Total de OS</h3>
-                <p>${total}</p>
-            </div>
-
-            <div class="kpi">
-                <h3>Orçamentos</h3>
-                <p>
-                    ${data.filter(x => x.etapa === 'ORÇAMENTO').length}
-                </p>
-            </div>
-
-            <div class="kpi">
-                <h3>Execução</h3>
-                <p>
-                    ${data.filter(x => x.status === 'EM EXECUÇÃO').length}
-                </p>
-            </div>
-
-        </div>
-    `;
-}
-
-async function renderOrcamentos(){
-
-    const { data:servicos } = await supabaseClient
-        .from('tipos_servico')
-        .select('*');
+function carregarDashboard(){
 
     document.getElementById('content').innerHTML = `
 
         <div class="card">
 
-            <h2>Novo Orçamento</h2>
+            <h2>Dashboard</h2>
 
-            <br>
-
-            <div class="form-group">
-                <label>Cliente</label>
-                <input id="orc-cliente">
-            </div>
-
-            <div class="form-group">
-                <label>Tipo de Serviço</label>
-
-                <select id="orc-servico">
-
-                    ${servicos.map(s => `
-                        <option value="${s.id}">
-                            ${s.nome || s.descricao || 'Serviço'}
-                        </option>
-                    `).join('')}
-
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>Valor</label>
-                <input id="orc-valor" type="number">
-            </div>
-
-            <button class="btn" onclick="salvarOrcamento()">
-                Salvar Orçamento
-            </button>
+            <p>
+                Sistema funcionando corretamente.
+            </p>
 
         </div>
 
     `;
+
 }
 
-async function salvarOrcamento(){
-
-    const cliente = document
-        .getElementById('orc-cliente')
-        .value;
-
-    const servico = document
-        .getElementById('orc-servico')
-        .value;
-
-    const valor = document
-        .getElementById('orc-valor')
-        .value;
-
-    const { error } = await supabaseClient
-        .from('ordens_servico')
-        .insert([
-            {
-                cliente_nome:cliente,
-                tipo_servico_id:servico,
-                etapa:'ORÇAMENTO',
-                status:'ORÇAMENTO',
-                valor_total:valor
-            }
-        ]);
-
-    if(error){
-
-        console.error(error);
-        alert('Erro ao salvar orçamento');
-        return;
-    }
-
-    alert('Orçamento criado com sucesso');
-
-    renderOS();
-}
-
-async function renderOS(){
+async function carregarOS(){
 
     const { data, error } = await supabaseClient
         .from('ordens_servico')
-        .select('*')
-        .order('id', { ascending:false });
+        .select('*');
 
     if(error){
 
         console.error(error);
-        alert('Erro ao carregar OS');
+
+        alert('Erro Supabase');
+
         return;
     }
+
+    let linhas = '';
+
+    data.forEach(os => {
+
+        linhas += `
+
+            <tr>
+
+                <td>${os.id || ''}</td>
+
+                <td>${os.cliente_nome || ''}</td>
+
+                <td>${os.status || ''}</td>
+
+                <td>${os.valor_total || ''}</td>
+
+            </tr>
+
+        `;
+
+    });
 
     document.getElementById('content').innerHTML = `
 
         <div class="card">
 
             <h2>Ordens de Serviço</h2>
-
-            <br>
 
             <table>
 
@@ -489,51 +221,13 @@ async function renderOS(){
                         <th>Cliente</th>
                         <th>Status</th>
                         <th>Valor</th>
-                        <th>Ação</th>
                     </tr>
 
                 </thead>
 
                 <tbody>
 
-                    ${data.map(os => `
-
-                        <tr>
-
-                            <td>${os.id}</td>
-
-                            <td>
-                                ${os.cliente_nome || ''}
-                            </td>
-
-                            <td>
-
-                                <span class="badge ${os.status === 'FINALIZADO' ? 'finalizado' : os.status === 'EM EXECUÇÃO' ? 'execucao' : 'orcamento'}">
-
-                                    ${os.status || ''}
-
-                                </span>
-
-                            </td>
-
-                            <td>
-                                ${fmtBRL(os.valor_total)}
-                            </td>
-
-                            <td>
-
-                                <button class="btn"
-                                    onclick="finalizarOS(${os.id})">
-
-                                    Finalizar
-
-                                </button>
-
-                            </td>
-
-                        </tr>
-
-                    `).join('')}
+                    ${linhas}
 
                 </tbody>
 
@@ -542,27 +236,7 @@ async function renderOS(){
         </div>
 
     `;
-}
 
-async function finalizarOS(id){
-
-    const { error } = await supabaseClient
-        .from('ordens_servico')
-        .update({
-            status:'FINALIZADO'
-        })
-        .eq('id', id);
-
-    if(error){
-
-        console.error(error);
-        alert('Erro ao finalizar');
-        return;
-    }
-
-    alert('OS finalizada');
-
-    renderOS();
 }
 
 </script>
