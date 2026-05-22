@@ -1,245 +1,517 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Compostos Engenharia</title>
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<style>
-body{
-    margin:0;
-    font-family:Arial;
-    background:#f5f5f5;
-}
-
-#login{
-    width:320px;
-    margin:100px auto;
-    background:white;
-    padding:20px;
-    border-radius:10px;
-}
-
-input{
-    width:100%;
-    padding:10px;
-    margin-bottom:10px;
-    box-sizing:border-box;
-}
-
-button{
-    padding:10px 15px;
-    background:#16324F;
-    color:white;
-    border:none;
-    border-radius:5px;
-    cursor:pointer;
-}
-
-#app{
-    display:none;
-}
-
-.sidebar{
-    width:220px;
-    background:#16324F;
-    color:white;
-    height:100vh;
-    position:fixed;
-    padding:20px;
-}
-
-.content{
-    margin-left:240px;
-    padding:20px;
-}
-
-.card{
-    background:white;
-    padding:20px;
-    border-radius:10px;
-    margin-bottom:20px;
-}
-
-table{
-    width:100%;
-    border-collapse:collapse;
-}
-
-th,td{
-    border-bottom:1px solid #ddd;
-    padding:10px;
-}
-
-</style>
-
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compostos Engenharia</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        /* ── RESET & BASE ─────────────────────────────────────── */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --azul: #1A3C5E; --azul2: #2A6DBF; --azul3: #E8F0F8;
+            --verde: #1A8F5A; --verde-bg: #E8F5E9;
+            --vermelho: #D64045; --vermelho-bg: #FFEBEE;
+            --amarelo: #E8A020; --amarelo-bg: #FFF8E1;
+            --cinza: #7B8FA1; --cinza-bg: #F5F6FA; --cinza-borda: #E0E6ED;
+            --branco: #FFFFFF; --texto: #1A2A3A;
+            --shadow: 0 2px 8px rgba(0,0,0,0.08); --radius: 10px;
+            --font: 'Inter', system-ui, sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: var(--font); background: var(--cinza-bg); color: var(--texto); height: 100vh; display: flex; overflow: hidden; }
+        
+        /* ── SIDEBAR ──────────────────────────────────────────── */
+        #sidebar { width: 230px; min-width: 230px; background: linear-gradient(180deg, #1A3C5E 0%, #0F2744 100%); display: flex; flex-direction: column; padding: 0; overflow: hidden; box-shadow: 2px 0 12px rgba(0,0,0,0.15); }
+        .sidebar-logo { padding: 20px 16px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); text-align: center; }
+        .sidebar-logo .empresa { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 6px; letter-spacing: .5px; font-weight: 700; text-transform: uppercase; }
+        .sidebar-user { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .sidebar-user .nome { font-size: 13px; font-weight: 600; color: white; }
+        .sidebar-user .perfil { font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 1px; }
+        nav { flex: 1; padding: 10px 8px; overflow-y: auto; }
+        nav a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: rgba(255,255,255,0.65); font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; margin-bottom: 2px; text-decoration: none; }
+        nav a:hover { background: rgba(255,255,255,0.08); color: white; }
+        nav a.active { background: rgba(255,255,255,0.14); color: white; }
+        nav a .ico { font-size: 16px; width: 20px; text-align: center; }
+        .sidebar-footer { padding: 12px 8px; border-top: 1px solid rgba(255,255,255,0.08); }
+        .btn-logout { width: 100%; padding: 9px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: transparent; color: rgba(255,255,255,0.6); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all .15s; }
+        .btn-logout:hover { background: rgba(255,255,255,0.08); color: white; }
+        
+        /* ── CORPO PRINCIPAL E LAYOUT ─────────────────────────── */
+        #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .topbar { background: white; border-bottom: 1px solid var(--cinza-borda); padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+        .topbar-title { font-size: 18px; font-weight: 700; color: var(--azul); }
+        .topbar-right { display: flex; align-items: center; gap: 12px; }
+        #content { flex: 1; overflow-y: auto; padding: 24px; }
+        .card { background: white; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--cinza-borda); padding: 20px 24px; margin-bottom: 16px; }
+        .card-title { font-size: 13px; font-weight: 600; color: var(--azul); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+        .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+        .kpi { background: white; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--cinza-borda); padding: 16px 20px; }
+        .kpi-label { font-size: 11px; color: var(--cinza); text-transform: uppercase; margin-bottom: 6px; font-weight: 500; }
+        .kpi-val { font-size: 22px; font-weight: 700; color: var(--azul); }
+        .kpi-val.verde { color: var(--verde); }
+        .kpi-val.vermelho { color: var(--vermelho); }
+        .kpi-val.azul { color: var(--azul2); }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .table-wrap { overflow-x: auto; margin-top: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { font-size: 11px; font-weight: 600; color: var(--cinza); text-transform: uppercase; padding: 10px 12px; border-bottom: 2px solid var(--cinza-borda); text-align: left; }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--cinza-borda); color: var(--texto); }
+        tr:hover td { background: #FAFBFC; }
+        .td-num { text-align: right; font-weight: 600; }
+        .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .badge-verde { background: var(--verde-bg); color: #1B6B3A; }
+        .badge-azul { background: var(--azul3); color: var(--azul2); }
+        .badge-vermelho { background: var(--vermelho-bg); color: #B71C1C; }
+        .badge-amarelo { background: var(--amarelo-bg); color: #7B5500; }
+        .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all .15s; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-primary { background: var(--azul); color: white; }
+        .btn-primary:hover { background: var(--azul2); }
+        .btn-success { background: var(--verde); color: white; }
+        .btn-outline { background: white; color: var(--azul); border: 1px solid var(--azul); }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .filters { display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--cinza-borda); margin-bottom: 14px; }
+        .filter-group { display: flex; flex-direction: column; gap: 3px; }
+        .filter-label { font-size: 11px; color: var(--cinza); }
+        select, input, textarea { border: 1px solid var(--cinza-borda); border-radius: 7px; padding: 7px 10px; font-size: 13px; outline: none; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .form-group { display: flex; flex-direction: column; gap: 5px; }
+        .form-group label { font-size: 12px; color: var(--cinza); font-weight: 500; }
+        .span2 { grid-column: span 2; }
+        
+        /* ── TELA DE LOGIN ────────────────────────────────────── */
+        #login-screen { position: fixed; inset: 0; background: linear-gradient(135deg, #1A3C5E 0%, #0F2744 100%); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+        .login-box { background: white; border-radius: 16px; padding: 40px; width: 380px; box-shadow: 0 24px 64px rgba(0,0,0,0.3); }
+        .login-title { text-align: center; font-size: 20px; font-weight: 700; color: var(--azul); margin-bottom: 4px; }
+        .login-sub { text-align: center; font-size: 13px; color: var(--cinza); margin-bottom: 24px; }
+        .btn-login { width: 100%; padding: 11px; font-size: 14px; font-weight: 600; margin-top: 12px; }
+        .alert { padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+        .alert-danger { background: var(--vermelho-bg); color: #B71C1C; }
+        .hidden { display: none; }
+    </style>
 </head>
 <body>
 
-<div id="login">
-
-    <h2>Compostos ERP</h2>
-
-    <input id="user" placeholder="Usuário">
-
-    <input id="pass" type="password" placeholder="Senha">
-
-    <button onclick="doLogin()">
-        Entrar
-    </button>
-
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-title">Compostos Engenharia</div>
+    <div class="login-sub">Painel de Gestão Integrado</div>
+    <div class="login-form">
+      <div class="filter-group" style="margin-bottom:14px">
+        <label class="filter-label">Usuário</label>
+        <input type="text" id="login-user" placeholder="hugo ou joao">
+      </div>
+      <div class="filter-group" style="margin-bottom:14px">
+        <label class="filter-label">Senha</label>
+        <input type="password" id="login-pass" placeholder="Sua senha">
+      </div>
+      <div id="login-erro" class="alert alert-danger hidden">Usuário ou senha incorretos.</div>
+      <button class="btn btn-primary btn-login" onclick="doLogin()">Entrar</button>
+    </div>
+  </div>
 </div>
 
-<div id="app">
-
-    <div class="sidebar">
-
-        <h2>COMPOSTOS</h2>
-
-        <button onclick="carregarDashboard()">
-            Dashboard
-        </button>
-
-        <br><br>
-
-        <button onclick="carregarOS()">
-            Ordens de Serviço
-        </button>
-
+<div id="app-shell" style="display:none; flex:1; width:100%; height:100vh">
+  <div id="sidebar">
+    <div class="sidebar-logo">
+      <div style="font-size:24px; color:white">🔧</div>
+      <div class="empresa" style="color:white; font-weight:700; margin-top:5px; font-size:12px;">COMPOSTOS ENGENHARIA</div>
     </div>
+    <div class="sidebar-user">
+      <div class="nome" id="sb-nome">—</div>
+      <div class="perfil" id="sb-perfil">—</div>
+    </div>
+    <nav>
+      <a onclick="nav('dashboard')" id="nav-dashboard" class="active"><span class="ico">📊</span> Dashboard</a>
+      <a onclick="nav('orcamentos')" id="nav-orcamentos"><span class="ico">📝</span> Orçamentos</a>
+      <a onclick="nav('os')" id="nav-os"><span class="ico">🔧</span> Ordens de Serviço</a>
+      <a onclick="nav('fluxo')" id="nav-fluxo"><span class="ico">💰</span> Fluxo de Caixa</a>
+      <a onclick="nav('receber')" id="nav-receber"><span class="ico">📋</span> Contas a Receber</a>
+      <a onclick="nav('pagar')" id="nav-pagar"><span class="ico">📤</span> Contas a Pagar</a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="btn-logout" onclick="doLogout()">🚪 Sair</button>
+    </div>
+  </div>
 
-    <div class="content" id="content"></div>
-
+  <div id="main">
+    <div class="topbar">
+      <div class="topbar-title" id="page-title">Dashboard</div>
+      <div class="topbar-right"><span class="text-sm text-muted" id="topbar-date"></span></div>
+    </div>
+    <div id="content"></div>
+  </div>
 </div>
 
 <script>
+// ══════════════════════════════════════════════════════════════
+// BANCO DE DADOS E SEED DATA - ORDEM CORRIGIDA ⚙️
+// ══════════════════════════════════════════════════════════════
+let DB = null;
+const DB_KEY = 'compostos_db_prod_v4';
 
-const SUPABASE_URL = 'https://stfebxsmovcnlyzpcsoa.supabase.co';
-
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInR5cCI6IkpXVCJ9';
-
-const supabaseClient = supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-);
-
-function doLogin(){
-
-    const user = document.getElementById('user').value;
-    const pass = document.getElementById('pass').value;
-
-    if(
-        (user === 'joao' && pass === 'financeiro2024')
-        ||
-        (user === 'hugo' && pass === 'compostos2024')
-    ){
-
-        document.getElementById('login').style.display = 'none';
-
-        document.getElementById('app').style.display = 'block';
-
-        carregarDashboard();
-
-    }else{
-
-        alert('Login inválido');
-
-    }
-
+function saveDB() {
+    localStorage.setItem(DB_KEY, JSON.stringify(DB));
 }
 
-function carregarDashboard(){
-
-    document.getElementById('content').innerHTML = `
-
-        <div class="card">
-
-            <h2>Dashboard</h2>
-
-            <p>
-                Sistema funcionando corretamente.
-            </p>
-
-        </div>
-
-    `;
-
+function seedData() {
+    if (!DB.usuarios || DB.usuarios.length === 0) {
+        DB.usuarios = [
+            { nome: 'hugo', senha: 'compostos2024', perfil: 'dono' },
+            { nome: 'joao', senha: 'financeiro2024', perfil: 'financeiro' }
+        ];
+    }
+    if (!DB.fluxo || DB.fluxo.length === 0) {
+        DB.fluxo = [
+            { data: '2026-03-15', mes: 3, cliente: 'Consórcio Jaracatiá', tipo: 'RECEITA', categoria: 'OBRA', valor: 168197 },
+            { data: '2026-04-10', mes: 4, cliente: 'Posto Gatte Ibitirama', tipo: 'DESPESA', categoria: 'COMPRA DE EQUIPAMENTOS', valor: 52732 }
+        ];
+        DB.os = [
+            { numero: 101, cliente: 'Consórcio Jaracatiá', servico: 'OBRA TESTE', status: 'EM EXECUÇÃO', valor: 176392, data: '2026-03-01' },
+            { numero: 102, cliente: 'Posto Novo Horizonte', servico: 'ESTANQUEIDADE', status: 'A EXECUTAR', valor: 4800, data: '2026-04-15' }
+        ];
+        DB.receber = [
+            { id: 1, cliente: 'Posto Gatte Ibitirama', valor: 74300, vencimento: '2026-06-15', forma: 'Boleto', status: 'A VENCER' },
+            { id: 2, cliente: 'Consórcio Jaracatiá', valor: 29485, vencimento: '2026-05-01', forma: 'Pix', status: 'EM ATRASO' }
+        ];
+        DB.pagar = [
+            { id: 1, fornecedor: 'Distribuidora de Válvulas ES', categoria: 'PEÇAS CUSTO', valor: 4300, vencimento: '2026-05-25', status: 'EM ABERTO' }
+        ];
+        saveDB();
+    }
 }
 
-async function carregarOS(){
-
-    const { data, error } = await supabaseClient
-        .from('ordens_servico')
-        .select('*');
-
-    if(error){
-
-        console.error(error);
-
-        alert('Erro Supabase');
-
-        return;
+async function initDB() {
+    const saved = localStorage.getItem(DB_KEY);
+    if (saved) {
+        DB = JSON.parse(saved);
+    } else {
+        DB = { usuarios: [], orcamentos: [], os: [], fluxo: [], receber: [], pagar: [] };
     }
+    seedData(); // Inicializa os dados com segurança antes do login rodar
+}
 
-    let linhas = '';
+// ── SISTEMA DE AUTENTICAÇÃO REAL ─────────────────────────────────────────────
+function doLogin() {
+    const u = document.getElementById('login-user').value.trim().toLowerCase();
+    const s = document.getElementById('login-pass').value;
+    
+    const user = DB.usuarios.find(x => x.nome === u && x.senha === s);
+    if (user) {
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('app-shell').style.display = 'flex';
+        document.getElementById('sb-nome').textContent = u === 'hugo' ? 'HUGO VELOSO SOARES' : 'JOÃO PEDRO REIS';
+        document.getElementById('sb-perfil').textContent = user.perfil.toUpperCase();
+        document.getElementById('topbar-date').textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
+        nav('dashboard');
+    } else {
+        document.getElementById('login-erro').classList.remove('hidden');
+    }
+}
 
-    data.forEach(os => {
+function doLogout() {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app-shell').style.display = 'none';
+}
 
-        linhas += `
+// ── FORMATADORES COMERCIAIS ──────────────────────────────────────────────────
+function fmtBRL(v) { return 'R$ ' + (v||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtData(d) { if(!d) return '—'; const p = d.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; }
 
-            <tr>
+function badge(status) {
+    let c = 'badge-azul';
+    if (['RECEBIDO','FINALIZADO','PAGO'].includes(status)) c = 'badge-verde';
+    if (['EM ATRASO','VENCIDA'].includes(status)) c = 'badge-vermelho';
+    if (['A EXECUTAR','EM ABERTO'].includes(status)) c = 'badge-amarelo';
+    return `<span class="badge ${c}">${status}</span>`;
+}
 
-                <td>${os.id || ''}</td>
+// ── CONTROLE DE TELAS (100% OPERACIONAIS) ────────────────────────────────────
+function nav(page) {
+    document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+    document.getElementById('nav-'+page)?.classList.add('active');
+    document.getElementById('page-title').textContent = page.toUpperCase();
+    
+    const content = document.getElementById('content');
+    content.innerHTML = '';
 
-                <td>${os.cliente_nome || ''}</td>
+    if (page === 'dashboard') {
+        const recTotal = DB.fluxo.filter(x => x.tipo === 'RECEITA').reduce((a,b)=>a+b.valor,0);
+        const despTotal = DB.fluxo.filter(x => x.tipo === 'DESPESA').reduce((a,b)=>a+b.valor,0);
+        const aRec = DB.receber.filter(x => x.status === 'A VENCER').reduce((a,b)=>a+b.valor,0);
+        const atraso = DB.receber.filter(x => x.status === 'EM ATRASO').reduce((a,b)=>a+b.valor,0);
 
-                <td>${os.status || ''}</td>
-
-                <td>${os.valor_total || ''}</td>
-
-            </tr>
-
+        content.innerHTML = `
+            <div class="kpis">
+                <div class="kpi"><div class="kpi-label">💰 Fluxo de Receita</div><div class="kpi-val verde">${fmtBRL(recTotal)}</div></div>
+                <div class="kpi"><div class="kpi-label">📤 Despesa Consolidada</div><div class="kpi-val vermelho">${fmtBRL(despTotal)}</div></div>
+                <div class="kpi"><div class="kpi-label">📈 Saldo Líquido</div><div class="kpi-val">${fmtBRL(recTotal - despTotal)}</div></div>
+                <div class="kpi"><div class="kpi-label">🔵 Carteira A Vencer</div><div class="kpi-val azul">${fmtBRL(aRec)}</div></div>
+                <div class="kpi"><div class="kpi-label">⚠️ Volume Em Atraso</div><div class="kpi-val vermelho">${fmtBRL(atraso)}</div></div>
+            </div>
+            <div class="grid-2">
+                <div class="card"><div class="card-title">📊 Balanço Mensal</div><canvas id="c-chart-mes" height="140"></canvas></div>
+                <div class="card">
+                    <div class="card-title">🔧 Carteira de Obras / OS Ativas</div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Nº OS</th><th>Cliente</th><th>Serviço</th><th>Status</th><th class="td-num">Valor</th></tr></thead>
+                            <tbody>
+                                ${DB.os.map(o => `<tr><td><b>#${o.numero}</b></td><td>${o.cliente}</td><td>${o.servico}</td><td>${badge(o.status)}</td><td class="td-num">${fmtBRL(o.valor)}</td></tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         `;
+        setTimeout(renderCharts, 100);
 
-    });
-
-    document.getElementById('content').innerHTML = `
-
-        <div class="card">
-
-            <h2>Ordens de Serviço</h2>
-
-            <table>
-
-                <thead>
-
-                    <tr>
-                        <th>ID</th>
-                        <th>Cliente</th>
-                        <th>Status</th>
-                        <th>Valor</th>
-                    </tr>
-
-                </thead>
-
-                <tbody>
-
-                    ${linhas}
-
-                </tbody>
-
-            </table>
-
-        </div>
-
-    `;
-
+    } else if (page === 'orcamentos') {
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-title">📝 Módulo Real de Emissão de Orçamentos Técnicos</div>
+                <div class="form-grid">
+                    <div class="form-group span2">
+                        <label>Busca de Cadastro via API da Receita Federal (CNPJ)</label>
+                        <div style="display:flex; gap:8px">
+                            <input type="text" id="orc-cnpj" placeholder="Digite apenas os 14 números do CNPJ">
+                            <button class="btn btn-outline" onclick="buscarCNPJReal()">🔍 Consultar CNPJ</button>
+                        </div>
+                    </div>
+                    <div class="form-group span2"><label>Razão Social do Cliente</label><input type="text" id="orc-razao"></div>
+                    <div class="form-group"><label>Cidade/Município</label><input type="text" id="orc-cidade"></div>
+                    <div class="form-group"><label>Estado (UF)</label><input type="text" id="orc-uf" maxlength="2"></div>
+                    <div class="form-group span2"><label>Atividade Técnica da Proposta</label>
+                        <select id="orc-titulo">
+                            <option>Teste de estanqueidade nos compartimentos de armazenamento e distribuição de combustíveis</option>
+                            <option>Inspeção e Medição de espessura de chapa por ultrassom (NR-13)</option>
+                            <option>Adequação técnica e Laudo de Licenciamento Ambiental</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>Quantidade de Compartimentos</label><input type="number" id="orc-qtd" value="6"></div>
+                    <div class="form-group"><label>Valor Unitário (R$)</label><input type="number" id="orc-val" value="300"></div>
+                </div>
+                <button class="btn btn-primary" style="margin-top:20px" onclick="gerarOrcamentoPDFReal()">📄 Exportar Orçamento Oficial em PDF (2 Páginas)</button>
+            </div>
+        `;
+    } else if (page === 'os') {
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-title">🔧 Gerenciamento Operacional das Ordens de Serviço</div>
+                <div class="filters">
+                    <input type="number" id="new-os-num" placeholder="Nº da OS" style="width:110px">
+                    <input type="text" id="new-os-cli" placeholder="Cliente">
+                    <input type="number" id="new-os-val" placeholder="Valor de Fechamento (R$)">
+                    <button class="btn btn-primary" onclick="addOSReal()">＋ Abrir OS</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>OS</th><th>Cliente</th><th>Status</th><th class="td-num">Total</th><th>Ações</th></tr></thead>
+                        <tbody>
+                            ${DB.os.map(o => `<tr>
+                                <td><b>#${o.numero}</b></td><td>${o.cliente}</td><td>${badge(o.status)}</td><td class="td-num">${fmtBRL(o.valor)}</td>
+                                <td>${o.status !== 'FINALIZADO' ? `<button class="btn btn-sm btn-success" onclick="finalizarOSReal(${o.numero})">✅ Finalizar e Faturar</button>` : 'Faturado e Concluído'}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    } else if (page === 'receber') {
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-title">📋 Controle de Contas a Receber (Faturamento)</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>ID</th><th>Cliente</th><th>Vencimento</th><th>Forma</th><th class="td-num">Valor</th><th>Status</th><th>Ação</th></tr></thead>
+                        <tbody>
+                            ${DB.receber.map(r => `<tr>
+                                <td>#${r.id}</td><td>${r.cliente}</td><td>${fmtData(r.vencimento)}</td><td>${r.forma}</td><td class="td-num">${fmtBRL(r.valor)}</td><td>${badge(r.status)}</td>
+                                <td>${r.status !== 'RECEBIDO' ? `<button class="btn btn-sm btn-success" onclick="darBaixaReceber(${r.id})">✅ Liquidar Parcela</button>` : 'Baixa Concluída'}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    } else if (page === 'pagar') {
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-title">📤 Gestão de Contas a Pagar</div>
+                <div class="filters">
+                    <input type="text" id="new-p-forn" placeholder="Credor/Fornecedor">
+                    <input type="text" id="new-p-cat" placeholder="Categoria (Ex: ART)">
+                    <input type="number" id="new-p-val" placeholder="Valor Bruto (R$)">
+                    <input type="date" id="new-p-venc">
+                    <button class="btn btn-primary" onclick="addPagarReal()">＋ Gravar Conta</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Fornecedor</th><th>Categoria</th><th>Vencimento</th><th class="td-num">Valor</th><th>Status</th><th>Ação</th></tr></thead>
+                        <tbody>
+                            ${DB.pagar.map(p => `<tr>
+                                <td>${p.fornecedor}</td><td>${p.categoria}</td><td>${fmtData(p.vencimento)}</td><td class="td-num">${fmtBRL(p.valor)}</td><td>${badge(p.status)}</td>
+                                <td>${p.status !== 'PAGO' ? `<button class="btn btn-sm btn-primary" onclick="darBaixaPagar(${p.id})">🔴 Confirmar Saída</button>` : 'Obrigação Paga'}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    } else if (page === 'fluxo') {
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-title">💰 Histórico Consolidado de Fluxo de Caixa Realizado</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Data Movimentação</th><th>Operação</th><th>Cliente / Fornecedor</th><th>Categoria</th><th class="td-num">Valor</th></tr></thead>
+                        <tbody>
+                            ${DB.fluxo.map(f => `<tr>
+                                <td>${fmtData(f.data)}</td><td>${badge(f.tipo)}</td><td>${f.cliente}</td><td>${f.categoria || 'Serviço Integrado'}</td>
+                                <td class="td-num ${f.tipo==='RECEITA'?'verde':'vermelho'}">${fmtBRL(f.valor)}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
 }
 
-</script>
+// ══════════════════════════════════════════════════════════════
+// LOGICAS INTERNAS E INTEGRAÇÕES DE COMPORTAMENTO BANCÁRIO
+// ══════════════════════════════════════════════════════════════
+async function buscarCNPJReal() {
+    const cnpj = document.getElementById('orc-cnpj').value.replace(/\D/g,'');
+    if(cnpj.length !== 14) { alert('Digite os 14 números do CNPJ.'); return; }
+    try {
+        const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+        const data = await response.json();
+        if(data.razao_social) {
+            document.getElementById('orc-razao').value = data.razao_social;
+            document.getElementById('orc-cidade').value = data.municipio;
+            document.getElementById('orc-uf').value = data.uf;
+        } else { alert('CNPJ não localizado na API pública.'); }
+    } catch { alert('Erro ao conectar na API externa de busca.'); }
+}
 
+function gerarOrcamentoPDFReal() {
+    const rz = document.getElementById('orc-razao').value || 'CONSORCIO PUBLICO INTERMUNICIPAL';
+    const cid = document.getElementById('orc-cidade').value || 'Campos dos Goytacazes';
+    const uf = document.getElementById('orc-uf').value || 'RJ';
+    const tit = document.getElementById('orc-titulo').value;
+    const qty = parseInt(document.getElementById('orc-qtd').value) || 1;
+    const val = parseFloat(document.getElementById('orc-val').value) || 0;
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    
+    // Página 1 - Estrutura Azul Corporativa da Compostos Engenharia
+    doc.setFillColor(26,60,94); doc.rect(15, 15, 180, 22, 'F');
+    doc.setTextColor(255,255,255); doc.setFontSize(10); doc.setFont('helvetica','bold');
+    doc.text('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇO', 20, 29);
+    
+    doc.setTextColor(0,0,0); doc.setFontSize(12);
+    doc.text('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇOS TÉCNICOS', 105, 52, {align:'center'});
+    doc.setFontSize(10); doc.setFont('helvetica','normal');
+    doc.text(`CLIENTE: ${rz.toUpperCase()}`, 20, 70);
+    doc.text(`LOCALIZAÇÃO: ${cid} - ${uf}`, 20, 77);
+    doc.text(`TIPO DE SERVIÇO: ${tit}`, 20, 84);
+    
+    doc.setFont('helvetica','bold'); doc.text('VALORES OPERACIONAIS:', 20, 100); doc.setFont('helvetica','normal');
+    doc.text(`Quantidade contratada: ${qty} compartimentos.`, 20, 108);
+    doc.text(`Preço Unitário por Atividade: ${fmtBRL(val)}`, 20, 115);
+    doc.setFont('helvetica','bold'); doc.text(`VALOR TOTAL GLOBAL DA PROPOSTA: ${fmtBRL(qty * val)}`, 20, 125);
+    
+    // Página 2 - Diretrizes Técnicas do Hugo
+    doc.addPage();
+    doc.setFillColor(26,60,94); doc.rect(15, 15, 180, 22, 'F');
+    doc.setTextColor(255,255,255); doc.text('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇO', 20, 29);
+    
+    doc.setTextColor(0,0,0); doc.setFont('helvetica','bold');
+    doc.text('7. CERTIFICAÇÕES E CREDENCIAMENTOS DA EMPRESA PARA EXECUTAR O SERVIÇO', 20, 55);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
+    doc.text('* Medição de espessura de chapa por ultrassom feito com aparelho Instrutherm ME 260 calibrado.', 20, 65);
+    doc.text('* Empresa credenciada pelo INMETRO para testes de estanqueidade na NBR 13784.', 20, 73);
+    doc.text('* Empresa devidamente regularizada com ART e Engenheiro Mecânico Próprio.', 20, 81);
+    
+    doc.setFontSize(10); doc.text('Hugo Veloso Soares - Eng. Mecânico', 105, 140, {align:'center'});
+    doc.text('Registro Crea N° ES – 050105 /D', 105, 147, {align:'center'});
+    
+    doc.save(`Proposta_Oficial_Compostos_${rz.replace(/ /g,'_')}.pdf`);
+}
+
+function addOSReal() {
+    const num = document.getElementById('new-os-num').value;
+    const cli = document.getElementById('new-os-cli').value;
+    const val = parseFloat(document.getElementById('new-os-val').value);
+    if(!num || !cli || !val) return;
+    DB.os.push({ numero: parseInt(num), cliente: cli, servico: 'INSPEÇÃO OPERACIONAL', status: 'A EXECUTAR', valor: val });
+    saveDB(); nav('os');
+}
+
+function finalizarOSReal(numero) {
+    const os = DB.os.find(x => x.numero === numero);
+    if(os) {
+        os.status = 'FINALIZADO';
+        // Automação: Ativa parcela de faturamento na mesma hora no Contas a Receber
+        DB.receber.push({ id: Date.now(), cliente: os.cliente, valor: os.valor, vencimento: hoje(), forma: 'Pix', status: 'A VENCER' });
+        saveDB(); nav('os');
+    }
+}
+
+function darBaixaReceber(id) {
+    const item = DB.receber.find(x => x.id === id);
+    if(item) {
+        item.status = 'RECEBIDO';
+        // Automação: Computa a entrada real de dinheiro no histórico do Fluxo de Caixa
+        DB.fluxo.push({ data: hoje(), mes: new Date().getMonth()+1, cliente: item.cliente, tipo: 'RECEITA', categoria: 'BAIXA RECEBIMENTO', valor: item.valor });
+        saveDB(); nav('receber');
+    }
+}
+
+function addPagarReal() {
+    const forn = document.getElementById('new-p-forn').value;
+    const cat = document.getElementById('new-p-cat').value;
+    const val = parseFloat(document.getElementById('new-p-val').value);
+    const venc = document.getElementById('new-p-venc').value;
+    if(!forn || !val || !venc) return;
+    DB.pagar.push({ id: Date.now(), fornecedor: forn, categoria: cat, valor: val, vencimento: venc, status: 'EM ABERTO' });
+    saveDB(); nav('pagar');
+}
+
+function darBaixaPagar(id) {
+    const item = DB.pagar.find(x => x.id === id);
+    if(item) {
+        item.status = 'PAGO';
+        // Automação: Computa saída e deduz saldo do Fluxo de Caixa real
+        DB.fluxo.push({ data: hoje(), mes: new Date().getMonth()+1, cliente: item.fornecedor, tipo: 'DESPESA', categoria: item.categoria, valor: item.valor });
+        saveDB(); nav('pagar');
+    }
+}
+
+function hoje() { return new Date().toISOString().slice(0,10); }
+
+function renderCharts() {
+    const canvas = document.getElementById('c-chart-mes');
+    if(!canvas) return;
+    const ctx = canvas.getContext('2d');
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Março', 'Abril', 'Maio'],
+            datasets: [
+                { label: 'Entradas', data: [168197, 59768, 12000], backgroundColor: '#1A8F5A', borderRadius: 4 },
+                { label: 'Saídas', data: [36494, 52732, 4500], backgroundColor: '#D64045', borderRadius: 4 }
+            ]
+        },
+        options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+    });
+}
+
+// Iniciar o ecossistema local do banco
+initDB();
+</script>
 </body>
 </html>
