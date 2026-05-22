@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compostos Engenharia</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        /* ── RESET & BASE ─────────────────────────────────────── */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --azul: #1A3C5E; --azul2: #2A6DBF; --azul3: #E8F0F8;
+            --verde: #1A8F5A; --verde-bg: #E8F5E9;
+            --vermelho: #D64045; --vermelho-bg: #FFEBEE;
+            --amarelo: #E8A020; --amarelo-bg: #FFF8E1;
+            --cinza: #7B8FA1; --cinza-bg: #F5F6FA; --cinza-borda: #E0E6ED;
+            --branco: #FFFFFF; --texto: #1A2A3A;
+            --shadow: 0 2px 8px rgba(0,0,0,0.08); --radius: 10px;
+            --font: 'Inter', system-ui, sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: var(--font); background: var(--cinza-bg); color: var(--texto); height: 100vh; display: flex; overflow: hidden; }
+        
+        /* ── SIDEBAR ──────────────────────────────────────────── */
+        #sidebar { width: 220px; min-width: 220px; background: linear-gradient(180deg, #1A3C5E 0%, #0F2744 100%); display: flex; flex-direction: column; padding: 0; overflow: hidden; box-shadow: 2px 0 12px rgba(0,0,0,0.15); }
+        .sidebar-logo { padding: 20px 16px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); text-align: center; }
+        .sidebar-logo .empresa { font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 6px; letter-spacing: .5px; text-transform: uppercase; }
+        .sidebar-user { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+        .sidebar-user .nome { font-size: 13px; font-weight: 600; color: white; }
+        .sidebar-user .perfil { font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 1px; }
+        nav { flex: 1; padding: 10px 8px; overflow-y: auto; }
+        nav a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: rgba(255,255,255,0.65); font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; margin-bottom: 2px; text-decoration: none; }
+        nav a:hover { background: rgba(255,255,255,0.08); color: white; }
+        nav a.active { background: rgba(255,255,255,0.14); color: white; }
+        nav a .ico { font-size: 16px; width: 20px; text-align: center; }
+        .nav-section { font-size: 10px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: .8px; padding: 12px 12px 4px; font-weight: 600; }
+        .sidebar-footer { padding: 12px 8px; border-top: 1px solid rgba(255,255,255,0.08); }
+        .btn-logout { width: 100%; padding: 9px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: transparent; color: rgba(255,255,255,0.6); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all .15s; }
+        .btn-logout:hover { background: rgba(255,255,255,0.08); color: white; }
+        
+        /* ── INTERFACE COMPLEMENTAR ───────────────────────────── */
+        #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .topbar { background: white; border-bottom: 1px solid var(--cinza-borda); padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+        .topbar-title { font-size: 18px; font-weight: 700; color: var(--azul); }
+        .topbar-right { display: flex; align-items: center; gap: 12px; }
+        .badge-alert { background: var(--vermelho-bg); color: var(--vermelho); font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; cursor: pointer; }
+        #content { flex: 1; overflow-y: auto; padding: 24px; }
+        .card { background: white; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--cinza-borda); padding: 20px 24px; margin-bottom: 16px; }
+        .card-title { font-size: 13px; font-weight: 600; color: var(--azul); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+        .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+        .kpi { background: white; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--cinza-borda); padding: 16px 20px; transition: box-shadow .2s; }
+        .kpi-label { font-size: 11px; color: var(--cinza); text-transform: uppercase; margin-bottom: 6px; font-weight: 500; }
+        .kpi-val { font-size: 22px; font-weight: 700; color: var(--azul); }
+        .kpi-val.verde { color: var(--verde); }
+        .kpi-val.vermelho { color: var(--vermelho); }
+        .kpi-val.azul { color: var(--azul2); }
+        .kpi-val.amarelo { color: var(--amarelo); }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+        .table-wrap { overflow-x: auto; margin-top: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { font-size: 11px; font-weight: 600; color: var(--cinza); text-transform: uppercase; padding: 10px 12px; border-bottom: 2px solid var(--cinza-borda); text-align: left; }
+        td { padding: 10px 12px; border-bottom: 1px solid var(--cinza-borda); color: var(--texto); }
+        tr:hover td { background: #FAFBFC; }
+        .td-num { text-align: right; font-weight: 500; }
+        .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .badge-verde { background: var(--verde-bg); color: #1B6B3A; }
+        .badge-azul { background: var(--azul3); color: var(--azul2); }
+        .badge-vermelho { background: var(--vermelho-bg); color: #B71C1C; }
+        .badge-amarelo { background: var(--amarelo-bg); color: #7B5500; }
+        .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all .15s; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-primary { background: var(--azul); color: white; }
+        .btn-primary:hover { background: var(--azul2); }
+        .btn-success { background: var(--verde); color: white; }
+        .btn-outline { background: white; color: var(--azul); border: 1px solid var(--azul); }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        .filters { display: flex; gap: 10px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--cinza-borda); margin-bottom: 14px; }
+        .filter-group { display: flex; flex-direction: column; gap: 3px; }
+        .filter-label { font-size: 11px; color: var(--cinza); }
+        select, input, textarea { border: 1px solid var(--cinza-borda); border-radius: 7px; padding: 7px 10px; font-size: 13px; outline: none; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .form-group { display: flex; flex-direction: column; gap: 5px; }
+        .form-group label { font-size: 12px; color: var(--cinza); font-weight: 500; }
+        .span2 { grid-column: span 2; }
+        .item-row { display: grid; grid-template-columns: 3fr 1fr 1.2fr 1fr 0.5fr; gap: 8px; align-items: end; margin-bottom: 8px; }
+        .item-total { text-align: right; font-weight: 600; color: var(--azul); padding-top: 8px; font-size: 14px; }
+        
+        /* ── LOGIN SCREEN ─────────────────────────────────────── */
+        #login-screen { position: fixed; inset: 0; background: linear-gradient(135deg, #1A3C5E 0%, #0F2744 100%); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+        .login-box { background: white; border-radius: 16px; padding: 40px; width: 380px; box-shadow: 0 24px 64px rgba(0,0,0,0.3); }
+        .login-title { text-align: center; font-size: 20px; font-weight: 700; color: var(--azul); margin-bottom: 4px; }
+        .login-sub { text-align: center; font-size: 13px; color: var(--cinza); margin-bottom: 24px; }
+        .btn-login { width: 100%; padding: 11px; font-size: 14px; font-weight: 600; margin-top: 12px; }
+        .alert { padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+        .alert-danger { background: var(--vermelho-bg); color: #B71C1C; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-title">Compostos Engenharia</div>
+    <div class="login-sub">Painel de Gestão Integrado</div>
+    <div class="login-form">
+      <div class="filter-group" style="margin-bottom:14px">
+        <label class="filter-label">Usuário</label>
+        <input type="text" id="login-user" placeholder="hugo ou joao">
+      </div>
+      <div class="filter-group" style="margin-bottom:14px">
+        <label class="filter-label">Senha</label>
+        <input type="password" id="login-pass" placeholder="Sua senha">
+      </div>
+      <div id="login-erro" class="alert alert-danger hidden">Usuário ou senha incorretos.</div>
+      <button class="btn btn-primary btn-login" onclick="doLogin()">Entrar</button>
+    </div>
+  </div>
+</div>
+
+<div id="app-shell" style="display:none; flex:1; width:100%; height:100vh">
+  <div id="sidebar">
+    <div class="sidebar-logo">
+      <div style="font-size:24px; color:white">🔧</div>
+      <div class="empresa" style="color:white; font-weight:700; margin-top:5px; font-size:12px;">COMPOSTOS ENGENHARIA</div>
+    </div>
+    <div class="sidebar-user">
+      <div class="nome" id="sb-nome">—</div>
+      <div class="perfil" id="sb-perfil">—</div>
+    </div>
+    <nav>
+      <a onclick="nav('dashboard')" id="nav-dashboard" class="active"><span class="ico">📊</span> Dashboard</a>
+      <a onclick="nav('orcamentos')" id="nav-orcamentos"><span class="ico">📝</span> Orçamentos</a>
+      <a onclick="nav('os')" id="nav-os"><span class="ico">🔧</span> Ordens de Serviço</a>
+      <a onclick="nav('fluxo')" id="nav-fluxo"><span class="ico">💰</span> Fluxo de Caixa</a>
+      <a onclick="nav('receber')" id="nav-receber"><span class="ico">📋</span> Contas a Receber</a>
+      <a onclick="nav('pagar')" id="nav-pagar"><span class="ico">📤</span> Contas a Pagar</a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="btn-logout" onclick="doLogout()">🚪 Sair</button>
+    </div>
+  </div>
+
+  <div id="main">
+    <div class="topbar">
+      <div class="topbar-title" id="page-title">Dashboard</div>
+      <div class="topbar-right"><span class="text-sm text-muted" id="topbar-date"></span></div>
+    </div>
+    <div id="content"></div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// BANCO DE DADOS INTEGRADO (LÓGICA JAVASCRIPT LOCALSTORAGE)
+// ══════════════════════════════════════════════════════════════
+let DB = null;
+const DB_KEY = 'compostos_db_final_v3';
+
+async function initDB() {
+    const saved = localStorage.getItem(DB_KEY);
+    if (saved) {
+        DB = JSON.parse(saved);
+    } else {
+        DB = { usuarios: [], orcamentos: [], os: [], fluxo: [], receber: [], pagar:
