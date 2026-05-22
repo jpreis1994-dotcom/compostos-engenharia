@@ -305,6 +305,11 @@ function nav(page) {
             </div>
         `;
     } else if (page === 'os') {
+
+    carregarOS();
+
+}
+carregarOS();
         content.innerHTML = `
             <div class="card">
                 <div class="card-title">🔧 Gerenciamento Operacional das Ordens de Serviço</div>
@@ -451,7 +456,40 @@ function gerarOrcamentoPDFReal() {
     doc.save(`Proposta_Oficial_Compostos_${rz.replace(/ /g,'_')}.pdf`);
 }
 
-function addOSReal() {
+async function addOSReal() {
+
+    const num = document.getElementById('new-os-num').value;
+    const cli = document.getElementById('new-os-cli').value;
+    const val = parseFloat(document.getElementById('new-os-val').value);
+
+    if(!num || !cli || !val){
+        alert('Preencha todos os campos.');
+        return;
+    }
+
+    const { data, error } = await supabaseClient
+        .from('ordens_servico')
+        .insert([
+            {
+                numero_os: parseInt(num),
+                cliente_nome: cli,
+                servico: 'INSPEÇÃO OPERACIONAL',
+                status: 'A EXECUTAR',
+                valor_total: val,
+                data_abertura: hoje()
+            }
+        ]);
+
+    if(error){
+        console.error(error);
+        alert('Erro ao salvar OS.');
+        return;
+    }
+
+    alert('OS salva no Supabase com sucesso!');
+
+    carregarOS();
+}
     const num = document.getElementById('new-os-num').value;
     const cli = document.getElementById('new-os-cli').value;
     const val = parseFloat(document.getElementById('new-os-val').value);
@@ -460,7 +498,40 @@ function addOSReal() {
     saveDB(); nav('os');
 }
 
-function finalizarOSReal(numero) {
+async function addOSReal() {
+
+    const num = document.getElementById('new-os-num').value;
+    const cli = document.getElementById('new-os-cli').value;
+    const val = parseFloat(document.getElementById('new-os-val').value);
+
+    if(!num || !cli || !val){
+        alert('Preencha todos os campos.');
+        return;
+    }
+
+    const { data, error } = await supabaseClient
+        .from('ordens_servico')
+        .insert([
+            {
+                numero_os: parseInt(num),
+                cliente_nome: cli,
+                servico: 'INSPEÇÃO OPERACIONAL',
+                status: 'A EXECUTAR',
+                valor_total: val,
+                data_abertura: hoje()
+            }
+        ]);
+
+    if(error){
+        console.error(error);
+        alert('Erro ao salvar OS.');
+        return;
+    }
+
+    alert('OS salva no Supabase com sucesso!');
+
+    carregarOS();
+} {
     const os = DB.os.find(x => x.numero === numero);
     if(os) {
         os.status = 'FINALIZADO';
@@ -537,6 +608,104 @@ async function testeSupabase() {
 }
 initDB();
 testeSupabase();
+async function carregarOS() {
+
+    const { data, error } = await supabaseClient
+        .from('ordens_servico')
+        .select('*')
+        .order('numero_os', { ascending: false });
+
+    if(error){
+        console.error(error);
+        alert('Erro ao carregar OS');
+        return;
+    }
+
+    DB.os = data;
+
+    renderOS();
+}
+
+function renderOS(){
+
+    const content = document.getElementById('content');
+
+    content.innerHTML = `
+        <div class="card">
+
+            <div class="card-title">
+                🔧 Gerenciamento Operacional das Ordens de Serviço
+            </div>
+
+            <div class="filters">
+                <input type="number"
+                    id="new-os-num"
+                    placeholder="Nº da OS"
+                    style="width:110px">
+
+                <input type="text"
+                    id="new-os-cli"
+                    placeholder="Cliente">
+
+                <input type="number"
+                    id="new-os-val"
+                    placeholder="Valor de Fechamento (R$)">
+
+                <button class="btn btn-primary"
+                    onclick="addOSReal()">
+
+                    ＋ Abrir OS
+                </button>
+            </div>
+
+            <div class="table-wrap">
+
+                <table>
+
+                    <thead>
+                        <tr>
+                            <th>OS</th>
+                            <th>Cliente</th>
+                            <th>Status</th>
+                            <th class="td-num">Total</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        ${DB.os.map(o => `
+
+                            <tr>
+
+                                <td>
+                                    <b>#${o.numero_os}</b>
+                                </td>
+
+                                <td>
+                                    ${o.cliente_nome}
+                                </td>
+
+                                <td>
+                                    ${badge(o.status)}
+                                </td>
+
+                                <td class="td-num">
+                                    ${fmtBRL(Number(o.valor_total))}
+                                </td>
+
+                            </tr>
+
+                        `).join('')}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+    `;
+}
 </script>
 </body>
 </html>
