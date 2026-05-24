@@ -1245,87 +1245,242 @@ function gerarPDFOrcamento(id){
   const itens=Array.isArray(orc.itens)?orc.itens:(orc.itens?JSON.parse(orc.itens):[]);
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-  const W=210,ML=18,MR=18,CW=W-ML-MR;
-  const azul=[26,60,94],branco=[255,255,255],cinzaBg=[242,242,242];
-  let y=18;
 
-  function cabPag(pag,tot){
-    doc.setFillColor(...azul);doc.rect(ML,y,CW,22,'F');
-    try{doc.addImage('data:image/png;base64,'+LOGO_B64,'PNG',ML+1,y+1,26,18);}catch(e){}
-    doc.setTextColor(...branco);doc.setFont('helvetica','bold');doc.setFontSize(8);
-    doc.text('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇO',ML+30,y+5);
-    doc.text(`DATA: ${fmtData(orc.data_emissao)}`,W-MR-2,y+5,{align:'right'});
-    doc.setFont('helvetica','normal');doc.setFontSize(7.5);
-    doc.text(`CLIENTE: ${(orc.cli_razao||'').toUpperCase()}`,ML+30,y+10);
-    doc.text(`CID.: ${orc.cli_municipio||'—'} - ${orc.cli_uf||''}`,W-MR-2,y+10,{align:'right'});
-    doc.text(`CNPJ: ${orc.cli_cnpj||'—'}`,ML+30,y+15);
-    doc.text((orc.tipo_servico||'').slice(0,60),ML+30,y+19.5,{maxWidth:CW-50});
-    doc.text(`Página ${pag} de ${tot}`,W-MR-2,y+19.5,{align:'right'});
-    doc.setTextColor(0,0,0);y+=26;
+  // Constantes de layout
+  const W=210, H=297, ML=20, MR=20, CW=W-ML-MR;
+  const AZUL=[26,60,94], BRANCO=[255,255,255], CINZA_BG=[242,242,242], PRETO=[0,0,0], CINZA=[100,100,100];
+
+  // Dados dinâmicos — preenchidos pelas configurações e pelo orçamento
+  const EMPRESA_NOME   = 'H. VELOSO SOARES COMPOSTOS ENGENHARIA & MANUTENÇÃO ME';
+  const EMPRESA_END    = 'Av. Ney Siqueira Lopes, Bairro: Centro, Dores do Rio Preto / ES - CEP: 29580-000';
+  const EMPRESA_CNPJ   = D.config.empresa_cnpj   || '35.230.742/0001-98';
+  const EMPRESA_TEL    = D.config.empresa_telefone|| '(28) 99985-7915';
+  const EMPRESA_EMAIL  = D.config.empresa_email   || 'Com.postoseng@gmail.com';
+  const RESP_NOME      = D.config.responsavel_nome || 'Hugo Veloso Soares';
+  const RESP_CARGO     = D.config.responsavel_cargo|| 'Eng. Mecânico';
+  const CREA1          = `Registro Nacional CREA ${D.config.crea_nacional||'0818803134'}`;
+  const CREA2          = `Registro Crea N° ${D.config.crea_regional||'ES – 050105 /D'}`;
+  const LOCAL_ASSIN    = orc.local_assinatura || D.config.local_assinatura || 'Cachoeiro de Itapemirim – ES';
+  const DATA_STR       = fmtData(orc.data_emissao);
+  const DATA_EXTENSO   = (() => {
+    if(!orc.data_emissao) return DATA_STR;
+    const d=new Date(orc.data_emissao+'T12:00:00');
+    return d.toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
+  })();
+
+  let y=0;
+
+  // ── Helpers ────────────────────────────────────────────────
+  function setFont(style,size,color=PRETO){
+    doc.setFont('helvetica',style);
+    doc.setFontSize(size);
+    doc.setTextColor(...color);
   }
+  function txt(text,x,yy,opts={}){doc.text(String(text),x,yy,opts);}
+  function linha(x1,y1,x2,y2,cor=AZUL,lw=0.3){
+    doc.setDrawColor(...cor);doc.setLineWidth(lw);doc.line(x1,y1,x2,y2);
+  }
+  function rect(x,yy,w,h,cor,filled=true){
+    doc.setFillColor(...cor);
+    if(filled) doc.rect(x,yy,w,h,'F');
+    else {doc.setDrawColor(...cor);doc.rect(x,yy,w,h,'S');}
+  }
+  function paragrafo(text,x,yy,maxW,size=9,style='normal',color=PRETO){
+    setFont(style,size,color);
+    const ls=doc.splitTextToSize(text,maxW);
+    doc.text(ls,x,yy);
+    return ls.length*(size*0.3528*1.4);  // altura ocupada em mm
+  }
+
+  // ── Cabeçalho (igual em todas as páginas) ──────────────────
+  function cabecalho(pag,total){
+    y=15;
+    // Bloco empresa (topo — texto simples, sem caixa colorida)
+    setFont('bold',9,PRETO);
+    txt(EMPRESA_NOME, ML, y); y+=4.5;
+    setFont('normal',8,CINZA);
+    txt(EMPRESA_END, ML, y); y+=4;
+    txt(`CNPJ: ${EMPRESA_CNPJ}`, ML, y); y+=4;
+    txt(`Tel: ${EMPRESA_TEL}`, ML, y); y+=6;
+
+    // Linha separadora azul
+    linha(ML, y, W-MR, y, AZUL, 0.8); y+=2;
+
+    // Caixa de identificação da proposta (fundo azul)
+    const boxH=30;
+    rect(ML, y, CW, boxH, AZUL);
+
+    // Logo dentro da caixa (esquerda)
+    try{doc.addImage('data:image/png;base64,'+LOGO_B64,'PNG', ML+2, y+2, 28, 26);}catch(e){}
+
+    // Textos dentro da caixa (direita da logo)
+    const tx=ML+34;
+    setFont('bold',9,BRANCO);
+    txt('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇOS', tx, y+7);
+    setFont('normal',8,BRANCO);
+    txt(`DATA: ${DATA_STR}`, W-MR-2, y+7,{align:'right'});
+    txt(`CLIENTE: ${(orc.cli_razao||'').toUpperCase()}`, tx, y+13);
+    txt(`CID.: ${orc.cli_municipio||''}  -  ${orc.cli_uf||''}`, W-MR-2, y+13,{align:'right'});
+    txt(`CNPJ: ${orc.cli_cnpj||'—'}`, tx, y+19);
+    const tipoShort=doc.splitTextToSize(`TIPO DE SERVIÇO: ${orc.tipo_servico||''}`, CW-36);
+    txt(tipoShort[0]||'', tx, y+25);
+    txt(`Página ${pag} de ${total}`, W-MR-2, y+25,{align:'right'});
+
+    y+=boxH+6;
+  }
+
+  // ── Rodapé ─────────────────────────────────────────────────
   function rodape(){
-    doc.setDrawColor(...azul);doc.line(ML,280,W-MR,280);
-    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(60,60,60);
-    doc.text('H. VELOSO SOARES COMPOSTOS ENGENHARIA & MANUTENÇÃO ME',W/2,284,{align:'center'});
-    doc.text('Av. Ney Siqueira Lopes, Centro, Dores do Rio Preto/ES — CEP: 29580-000',W/2,288,{align:'center'});
-    doc.text('CNPJ: 35.230.742/0001-98   Tel: (28) 99985-7915',W/2,292,{align:'center'});
-    doc.setTextColor(0,0,0);
+    const ry=H-14;
+    linha(ML,ry,W-MR,ry,AZUL,0.5);
+    setFont('normal',7.5,CINZA);
+    txt(EMPRESA_NOME,     W/2, ry+4, {align:'center'});
+    txt(EMPRESA_END,      W/2, ry+8, {align:'center'});
+    txt(`CNPJ: ${EMPRESA_CNPJ}   Tel: ${EMPRESA_TEL}`, W/2, ry+12, {align:'center'});
   }
-  function titulo(txt){doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(txt,ML,y);y+=5;doc.setFont('helvetica','normal');}
-  function paragrafo(txt){const ls=doc.splitTextToSize(txt,CW);doc.setFontSize(9);doc.text(ls,ML,y);y+=ls.length*4.5+4;}
 
-  // PÁG 1
-  cabPag(1,2);
-  doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇOS',W/2,y,{align:'center'});y+=8;
-  doc.setFont('helvetica','normal');doc.setFontSize(9);
-  doc.text(`Proposta que faz ${D.config.responsavel_nome||'Hugo Veloso Soares'}, ${D.config.responsavel_cargo||'Eng. Mecânico'}.`,ML,y);y+=5;
-  doc.setFont('helvetica','bold');doc.text('Ao(à) Interessado(a):',ML,y);y+=8;
-  titulo('1. TIPO DE SERVIÇO');
-  paragrafo(`Conforme o contato e, na intenção de atender vossa necessidade de ${orc.tipo_servico||''}, em ${orc.cli_municipio||''}/${orc.cli_uf||''} (MÃO DE OBRA), apresentamos nossa proposta para os serviços.`);
-  titulo('2. PRAZO PARA REALIZAÇÃO DOS SERVIÇOS');
-  paragrafo(`Os serviços de inspeção inicial serão realizados em aproximadamente ${orc.prazo_execucao||'01 (um) dia útil'}. A entrega dos laudos será de no máximo ${orc.prazo_laudos||'7 dias'}. O prazo indicado considera que o ambiente da empresa, onde será realizado o trabalho, esteja disponível para a realização dos serviços.`);
-  titulo('3. VALOR DA PROPOSTA');
-  // Tabela de itens
-  const cols=[CW*0.42,CW*0.22,CW*0.18,CW*0.18];
-  const hdrs=['Descrição do serviço','Quantidade','Valor unitário','Valor total'];
-  doc.setFillColor(...azul);doc.rect(ML,y,CW,8,'F');
-  doc.setTextColor(...branco);doc.setFontSize(8.5);doc.setFont('helvetica','bold');
-  let cx=ML;hdrs.forEach((h,i)=>{doc.text(h,cx+cols[i]/2,y+5.5,{align:'center'});cx+=cols[i];});
-  doc.setTextColor(0,0,0);y+=8;
+  // ══════════════════════════════════════════════════════════
+  // PÁGINA 1
+  // ══════════════════════════════════════════════════════════
+  cabecalho(1,2);
+
+  // Título central
+  setFont('bold',12,PRETO);
+  txt('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇOS', W/2, y,{align:'center'}); y+=7;
+  linha(ML+20,y,W-MR-20,y,AZUL,0.4); y+=6;
+
+  // Apresentação
+  setFont('normal',9,PRETO);
+  txt(`Proposta que faz ${RESP_NOME}, ${RESP_CARGO}.`, ML, y); y+=5;
+  setFont('bold',9,PRETO);
+  txt('Ao(à) Interessado(a):', ML, y); y+=7;
+
+  // 1. TIPO DE SERVIÇO
+  setFont('bold',9,PRETO); txt('1. TIPO DE SERVIÇO', ML, y); y+=5;
+  setFont('normal',9,PRETO);
+  const desc1=`Conforme solicitado, apresentamos proposta comercial para execução de ${orc.tipo_servico||'serviços técnicos'}, na unidade localizada em ${orc.cli_municipio||''}/${orc.cli_uf||''}, conforme normas técnicas aplicáveis.`;
+  const ls1=doc.splitTextToSize(desc1,CW); doc.text(ls1,ML,y); y+=ls1.length*4.8+5;
+
+  // 2. PRAZO
+  setFont('bold',9,PRETO); txt('2. PRAZO PARA REALIZAÇÃO DOS SERVIÇOS', ML, y); y+=5;
+  setFont('normal',9,PRETO);
+  const desc2=`Os serviços serão executados em aproximadamente ${orc.prazo_execucao||'01 (um) dia útil'}, considerando a disponibilidade da unidade para realização dos trabalhos. Os laudos técnicos serão entregues em até ${orc.prazo_laudos||'7 dias'} após a execução dos ensaios.`;
+  const ls2=doc.splitTextToSize(desc2,CW); doc.text(ls2,ML,y); y+=ls2.length*4.8+5;
+
+  // 3. VALOR DA PROPOSTA
+  setFont('bold',9,PRETO); txt('3. VALOR DA PROPOSTA', ML, y); y+=5;
+
+  // Cabeçalho da tabela
+  const cw1=CW*0.45, cw2=CW*0.18, cw3=CW*0.18, cw4=CW*0.19;
+  rect(ML,y,CW,8,AZUL);
+  setFont('bold',8.5,BRANCO);
+  txt('Descrição do serviço',  ML+cw1/2,    y+5.5,{align:'center'});
+  txt('Quantidade',            ML+cw1+cw2/2,y+5.5,{align:'center'});
+  txt('Valor unitário',        ML+cw1+cw2+cw3/2,y+5.5,{align:'center'});
+  txt('Valor total',           ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
+  y+=8;
+
+  // Linhas de itens
   let totalGeral=0;
   itens.forEach((item,idx)=>{
-    const q=Number(item.quantidade||item.qtd||1),v=Number(item.valor_unit||item.valor_unitario||0),d=Number(item.desconto||0);
-    const tot=q*v*(1-d/100);totalGeral+=tot;
-    doc.setFillColor(...(idx%2===0?cinzaBg:branco));doc.rect(ML,y,CW,8,'F');
-    doc.setFont('helvetica','bold');doc.setFontSize(8.5);cx=ML;
-    [item.descricao||item.nome||'Serviço',String(q),fmtBRL(v),fmtBRL(tot)].forEach((t,i)=>{doc.text(t,cx+cols[i]/2,y+5.5,{align:'center'});cx+=cols[i];});y+=8;
+    const q=Number(item.quantidade||item.qtd||1);
+    const v=Number(item.valor_unit||item.valor_unitario||0);
+    const d=Number(item.desconto||0);
+    const tot=q*v*(1-d/100); totalGeral+=tot;
+    const bg=idx%2===0?CINZA_BG:BRANCO;
+    rect(ML,y,CW,9,bg);
+    // bordas laterais suaves
+    doc.setDrawColor(220,220,220); doc.setLineWidth(0.2);
+    doc.line(ML,y,ML,y+9); doc.line(ML+CW,y,ML+CW,y+9); doc.line(ML,y+9,ML+CW,y+9);
+    // separadores de coluna
+    [cw1,cw1+cw2,cw1+cw2+cw3].forEach(cx=>doc.line(ML+cx,y,ML+cx,y+9));
+    setFont('bold',8.5,PRETO);
+    // texto de cada célula (trunca se muito longo)
+    const desc=(item.descricao||item.nome||'Serviço');
+    const descShort=doc.splitTextToSize(desc,cw1-4);
+    txt(descShort[0], ML+cw1/2,        y+5.5,{align:'center'});
+    txt(String(q),    ML+cw1+cw2/2,    y+5.5,{align:'center'});
+    txt(fmtBRL(v),    ML+cw1+cw2+cw3/2,y+5.5,{align:'center'});
+    txt(fmtBRL(tot),  ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
+    y+=9;
   });
-  doc.setFillColor(...azul);doc.rect(ML,y,CW,8,'F');
-  doc.setTextColor(...branco);doc.setFont('helvetica','bold');
-  doc.text('VALOR TOTAL SERVIÇOS',ML+cols[0]/2,y+5.5,{align:'center'});
-  doc.text(fmtBRL(totalGeral),W-MR-cols[3]/2,y+5.5,{align:'center'});
-  doc.setTextColor(0,0,0);y+=12;
-  titulo('4. FORMA DE PAGAMENTO');paragrafo(orc.condicoes||'A combinar.');
-  titulo('5. VALIDADE DA PROPOSTA');paragrafo(`A presente proposta é válida por ${orc.validade_dias||15} dias a contar desta data.`);
-  titulo('6. OBSERVAÇÕES');
-  const obsFixas=['Os serviços propostos serão realizados através da empresa Compostos Engenharia e Manutenção.','Em caso de aprovação desta proposta, entrar em contato com a Compostos Engenharia e Manutenção, no telefone (28) 99985-7915, ou no e-mail – Com.postoseng@gmail.com.','Deve ser disponibilizado pela empresa toda a documentação anterior dos tanques.'];
-  obsFixas.forEach((o,i)=>paragrafo(`6.${i+1}. ${o}`));
-  if(orc.observacoes) paragrafo(orc.observacoes);
+
+  // Linha total
+  rect(ML,y,CW,9,AZUL);
+  setFont('bold',9,BRANCO);
+  txt('VALOR TOTAL SERVIÇOS', ML+cw1/2, y+5.5,{align:'center'});
+  txt(fmtBRL(totalGeral), ML+cw1+cw2+cw3+cw4/2, y+5.5,{align:'center'});
+  y+=13;
+
+  // 4. FORMA DE PAGAMENTO
+  setFont('bold',9,PRETO); txt('4. FORMA DE PAGAMENTO', ML, y); y+=5;
+  setFont('normal',9,PRETO);
+  const pg=orc.condicoes||'Condições de pagamento a serem definidas entre as partes.';
+  const lspg=doc.splitTextToSize(pg,CW); doc.text(lspg,ML,y); y+=lspg.length*4.8+5;
+
+  // 5. VALIDADE
+  setFont('bold',9,PRETO); txt('5. VALIDADE DA PROPOSTA', ML, y); y+=5;
+  setFont('normal',9,PRETO);
+  txt(`A presente proposta possui validade de ${orc.validade_dias||15} dias a contar da data de emissão.`, ML, y); y+=9;
+
+  // 6. OBSERVAÇÕES
+  setFont('bold',9,PRETO); txt('6. OBSERVAÇÕES', ML, y); y+=5;
+  setFont('normal',9,PRETO);
+  const obs=[
+    `6.1. Os serviços serão executados pela empresa ${EMPRESA_NOME.split(' ').slice(0,4).join(' ')}, com acompanhamento de responsável técnico habilitado.`,
+    `6.2. Para execução dos serviços, deverá ser disponibilizada toda a documentação anterior dos tanques e linhas da unidade.`,
+    `6.3. Em caso de aprovação desta proposta, favor entrar em contato através do telefone ${EMPRESA_TEL} ou pelo e-mail ${EMPRESA_EMAIL}.`,
+  ];
+  if(orc.observacoes) obs.push(`6.4. ${orc.observacoes}`);
+  obs.forEach(o=>{
+    const lo=doc.splitTextToSize(o,CW);
+    doc.text(lo,ML,y); y+=lo.length*4.8+2;
+  });
+  y+=3;
+
+  // 7. CERTIFICAÇÕES (ainda na pág 1 se couber, senão pág 2)
+  setFont('bold',9,PRETO); txt('7. CERTIFICAÇÕES E CREDENCIAMENTOS DA EMPRESA PARA EXECUTAR O SERVIÇO', ML, y); y+=5;
+  setFont('normal',9,PRETO);
+  const certs=[
+    '• Serviços executados por engenheiro mecânico e equipe técnica especializada;',
+    '• Equipamentos de medição com calibração periódica;',
+    '• Utilização de ultrassom calibrado para medição de espessura;',
+    '• Equitest, manômetros e vacuômetros com calibração anual;',
+    '• Empresa credenciada para execução de testes de estanqueidade conforme ABNT NBR 13784;',
+    '• Empresa cadastrada junto ao CTF/IBAMA para emissão de documentação ambiental;',
+    '• Regularidade junto ao Corpo de Bombeiros.',
+  ];
+  certs.forEach(c=>{ txt(c,ML,y); y+=5; });
+
   rodape();
 
-  // PÁG 2
-  doc.addPage();y=18;cabPag(2,2);
-  titulo('7. CERTIFICAÇÕES E CREDENCIAMENTOS DA EMPRESA PARA EXECUTAR O SERVIÇO');
-  ['Medição de espessura de chapa por ultrassom feito com aparelho Instrutherm ME 260 ultrassom (Calibrado).','Todo o trabalho feito por engenheiro mecânico e equipe especializada.','Equitest, Manômetro e Vacuômetro com calibração anual.','Empresa credenciada pelo INMETRO para testes de estanqueidade na NBR 13784.','Empresa credenciada pelo CTF/AINDA (ibama) para laudos de licenciamento ambiental.','Empresa credenciada pelo Corpo de Bombeiros do ES (CPES).'].forEach(ct=>{doc.setFontSize(9);doc.text(`* ${ct}`,ML,y);y+=5;});
-  y+=10;
-  doc.setFontSize(9);doc.text('Para qualquer esclarecimento ou negociação, entrar em contato.',W/2,y,{align:'center'});y+=6;
-  doc.text(`${orc.local_assinatura||D.config.local_assinatura||'Cachoeiro de Itapemirim – ES'}, ${fmtData(orc.data_emissao)}`,W/2,y,{align:'center'});y+=35;
-  doc.text(D.config.responsavel_nome||'Hugo Veloso Soares',W/2,y,{align:'center'});y+=5;
-  doc.text(D.config.responsavel_cargo||'Eng. Mecânico',W/2,y,{align:'center'});y+=5;
-  doc.text(`Registro Nacional CREA ${D.config.crea_nacional||'0818803134'}`,W/2,y,{align:'center'});y+=5;
-  doc.text(`Registro Crea N° ${D.config.crea_regional||'ES – 050105 /D'}`,W/2,y,{align:'center'});
+  // ══════════════════════════════════════════════════════════
+  // PÁGINA 2 — continuação e assinatura
+  // ══════════════════════════════════════════════════════════
+  doc.addPage();
+  cabecalho(2,2);
+
+  // Continuação das certificações (página 2 se necessário) — já na pág 2 coloca encerramento
+  setFont('normal',9,PRETO);
+  txt('Permanecemos à disposição para quaisquer esclarecimentos técnicos ou comerciais.', ML, y); y+=10;
+
+  // Local e data
+  setFont('normal',9,PRETO);
+  txt(`${LOCAL_ASSIN}, ${DATA_EXTENSO}`, W/2, y,{align:'center'}); y+=20;
+
+  // Linha de assinatura
+  const linhaX1=W/2-35, linhaX2=W/2+35;
+  linha(linhaX1, y, linhaX2, y, PRETO, 0.4); y+=5;
+  setFont('bold',9,PRETO);   txt(RESP_NOME,  W/2, y,{align:'center'}); y+=5;
+  setFont('normal',9,PRETO); txt(RESP_CARGO, W/2, y,{align:'center'}); y+=5;
+  txt(CREA1, W/2, y,{align:'center'}); y+=5;
+  txt(CREA2, W/2, y,{align:'center'});
+
   rodape();
-  doc.save(`Orcamento_${(orc.numero||'').replace('/','_')}_${(orc.cli_razao||'Cliente').slice(0,20).replace(/[^a-zA-Z0-9]/g,'_')}.pdf`);
+
+  // Salva o arquivo
+  const nomeArq=`Proposta_${(orc.numero||'').replace('/','_')}_${(orc.cli_razao||'Cliente').slice(0,25).replace(/[^a-zA-Z0-9]/g,'_')}.pdf`;
+  doc.save(nomeArq);
 }
 
 // ══════════════════════════════════════════════════════════════
