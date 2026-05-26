@@ -361,34 +361,113 @@ async function nav(page){
 }
 
 // ══════════════════════════════════════════════════════════════
+// FILTRO GLOBAL DE MÊS/ANO (compartilhado entre abas)
+// ══════════════════════════════════════════════════════════════
+let FILTRO = { mes: '', ano: String(new Date().getFullYear()) };
+
+function gerarOpcoesAno(dados){
+  const anos = new Set();
+  dados.forEach(r => {
+    const d = r.data_movimento || r.vencimento || r.data_vencimento || r.criado_em || '';
+    const a = d.slice(0,4);
+    if(a && a>'2000') anos.add(a);
+  });
+  const lista = [...anos].sort().reverse();
+  if(!lista.length) lista.push(String(new Date().getFullYear()));
+  return lista;
+}
+
+function seletorMesAno(anosExtras=[], onchange='atualizarFiltro()'){
+  const anosBase = [...new Set([
+    ...gerarOpcoesAno(D.fluxo),
+    ...gerarOpcoesAno(D.receber),
+    ...gerarOpcoesAno(D.pagar),
+    ...anosExtras
+  ])].sort().reverse();
+  const anos = anosBase.length ? anosBase : [String(new Date().getFullYear())];
+  return `
+    <div class="filter-group">
+      <div class="filter-label">Mês</div>
+      <select id="fil-mes" onchange="${onchange}">
+        <option value="">Todos</option>
+        ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${String(m).padStart(2,'0')}" ${FILTRO.mes===String(m).padStart(2,'0')?'selected':''}>${MESES[m]}</option>`).join('')}
+      </select>
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Ano</div>
+      <select id="fil-ano" onchange="${onchange}">
+        <option value="">Todos</option>
+        ${anos.map(a=>`<option value="${a}" ${FILTRO.ano===a?'selected':''}>${a}</option>`).join('')}
+      </select>
+    </div>`;
+}
+
+function lerFiltro(){
+  const m = document.getElementById('fil-mes');
+  const a = document.getElementById('fil-ano');
+  if(m) FILTRO.mes = m.value;
+  if(a) FILTRO.ano = a.value;
+}
+
+// Filtra registros de fluxo, receber ou pagar pelo campo de data
+function filtrarPorPeriodo(arr, campoData){
+  return arr.filter(r => {
+    const d = (r[campoData]||'').slice(0,10);
+    const mes = d.slice(5,7);
+    const ano = d.slice(0,4);
+    return (!FILTRO.mes || mes===FILTRO.mes) && (!FILTRO.ano || ano===FILTRO.ano);
+  });
+}
+
+function labelPeriodo(){
+  if(!FILTRO.mes && !FILTRO.ano) return 'Todo o período';
+  if(FILTRO.mes && FILTRO.ano) return `${MESES[parseInt(FILTRO.mes)]} / ${FILTRO.ano}`;
+  if(FILTRO.mes) return MESES[parseInt(FILTRO.mes)];
+  return FILTRO.ano;
+}
+
+// ══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ══════════════════════════════════════════════════════════════
+function atualizarFiltro(){ lerFiltro(); render_dashboard(); }
+
 function render_dashboard(){
-  const recTotal = D.fluxo.filter(x=>x.tipo==='RECEITA').reduce((a,b)=>a+Number(b.valor),0);
-  const despTotal= D.fluxo.filter(x=>x.tipo==='DESPESA').reduce((a,b)=>a+Number(b.valor),0);
-  const aRec     = D.receber.filter(x=>['A VENCER','VENCE HOJE'].includes(x.status)).reduce((a,b)=>a+Number(b.valor),0);
-  const atraso   = D.receber.filter(x=>x.status==='EM ATRASO').reduce((a,b)=>a+Number(b.valor),0);
-  const aPagar   = D.pagar.filter(x=>x.status==='EM ABERTO').reduce((a,b)=>a+Number(b.valor),0);
+  const fluxoF  = filtrarPorPeriodo(D.fluxo,   'data_movimento');
+  const receberF = filtrarPorPeriodo(D.receber, 'vencimento');
+  const pagarF   = filtrarPorPeriodo(D.pagar,   'data_vencimento');
+
+  const recTotal = fluxoF.filter(x=>x.tipo==='RECEITA').reduce((a,b)=>a+Number(b.valor),0);
+  const despTotal= fluxoF.filter(x=>x.tipo==='DESPESA').reduce((a,b)=>a+Number(b.valor),0);
+  const aRec     = receberF.filter(x=>['A VENCER','VENCE HOJE'].includes(x.status)).reduce((a,b)=>a+Number(b.valor),0);
+  const atraso   = receberF.filter(x=>x.status==='EM ATRASO').reduce((a,b)=>a+Number(b.valor),0);
+  const aPagar   = pagarF.filter(x=>x.status==='EM ABERTO').reduce((a,b)=>a+Number(b.valor),0);
   const limite30 = new Date(); limite30.setDate(limite30.getDate()+30);
   const lim30str = limite30.toISOString().slice(0,10);
-  const prev30   = D.receber.filter(r=>r.status==='A VENCER'&&r.vencimento<=lim30str).reduce((a,b)=>a+Number(b.valor),0);
+  const prev30   = D.receber.filter(r=>r.status==='A VENCER'&&(r.vencimento||'')<=lim30str).reduce((a,b)=>a+Number(b.valor),0);
   const osExec   = D.os.filter(o=>o.status==='EM EXECUÇÃO');
 
   const c = document.getElementById('content');
   c.innerHTML = `
+  <div class="filters" style="margin-bottom:16px">
+    ${seletorMesAno()}
+    <div style="font-size:13px;font-weight:600;color:var(--azul);align-self:center;margin-left:4px">
+      📅 Exibindo: <span style="color:var(--azul2)">${labelPeriodo()}</span>
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="FILTRO={mes:'',ano:''};render_dashboard()" style="margin-left:auto">✕ Limpar filtro</button>
+  </div>
   <div class="kpis">
-    <div class="kpi"><div class="kpi-label">💰 Receita Total</div><div class="kpi-val verde">${fmtBRL(recTotal)}</div></div>
+    <div class="kpi"><div class="kpi-label">💰 Receita</div><div class="kpi-val verde">${fmtBRL(recTotal)}</div></div>
     <div class="kpi"><div class="kpi-label">📤 Despesas</div><div class="kpi-val vermelho">${fmtBRL(despTotal)}</div></div>
     <div class="kpi"><div class="kpi-label">📈 Resultado</div><div class="kpi-val ${recTotal-despTotal>=0?'verde':'vermelho'}">${fmtBRL(recTotal-despTotal)}</div>
       <div class="kpi-delta">${recTotal?((recTotal-despTotal)/recTotal*100).toFixed(1)+'% margem':''}</div></div>
-    <div class="kpi"><div class="kpi-label">🔵 A Receber</div><div class="kpi-val azul">${fmtBRL(aRec)}</div>
+    <div class="kpi"><div class="kpi-label">🔵 A Receber (período)</div><div class="kpi-val azul">${fmtBRL(aRec)}</div>
       <div class="kpi-delta">Próx. 30d: ${fmtBRL(prev30)}</div></div>
-    <div class="kpi"><div class="kpi-label">🔴 Em Atraso</div><div class="kpi-val vermelho">${fmtBRL(atraso)}</div></div>
+    <div class="kpi"><div class="kpi-label">🔴 Em Atraso (período)</div><div class="kpi-val vermelho">${fmtBRL(atraso)}</div></div>
   </div>
   <div class="grid-3" style="margin-bottom:16px">
     <div class="kpi"><div class="kpi-label">🔧 OS em Execução</div><div class="kpi-val azul">${osExec.length}</div>
       <div class="kpi-delta">Carteira: ${fmtBRL(osExec.reduce((a,o)=>a+Number(o.valor_total),0))}</div></div>
-    <div class="kpi"><div class="kpi-label">📤 A Pagar</div><div class="kpi-val amarelo">${fmtBRL(aPagar)}</div></div>
+    <div class="kpi"><div class="kpi-label">📤 A Pagar (período)</div><div class="kpi-val amarelo">${fmtBRL(aPagar)}</div></div>
     <div class="kpi"><div class="kpi-label">📝 Orçamentos Pendentes</div><div class="kpi-val">${D.orcamentos.filter(o=>o.status==='PENDENTE').length}</div></div>
   </div>
   <div class="grid-2">
@@ -396,33 +475,41 @@ function render_dashboard(){
     <div class="card"><div class="card-title">🥧 Contas a Receber por Status</div><canvas id="c-chart-rec" height="170"></canvas></div>
   </div>
   <div class="grid-2">
-    <div class="card"><div class="card-title">⚠️ Parcelas em Atraso</div>${renderAlertaAtraso()}</div>
+    <div class="card"><div class="card-title">⚠️ Parcelas em Atraso</div>${renderAlertaAtraso(receberF)}</div>
     <div class="card"><div class="card-title">🔧 OS em Execução</div>${renderOsExecDash()}</div>
   </div>
   <div class="grid-2">
-    <div class="card"><div class="card-title">📤 Próximas Contas a Pagar</div>${renderProxPagar()}</div>
+    <div class="card"><div class="card-title">📤 Próximas Contas a Pagar</div>${renderProxPagar(pagarF)}</div>
     <div class="card"><div class="card-title">📈 Top Clientes por Receita</div><canvas id="c-chart-cli" height="170"></canvas></div>
   </div>`;
 
-  // Gráfico meses
+  // Gráfico meses — sempre mostra todos os meses do ano filtrado (ou todos)
+  const fluxoGraf = FILTRO.ano ? D.fluxo.filter(r=>(r.data_movimento||'').startsWith(FILTRO.ano)) : D.fluxo;
   const byMes={};
-  D.fluxo.forEach(r=>{const k=r.data_movimento?.slice(5,7)||'00';if(!byMes[k])byMes[k]={r:0,d:0};if(r.tipo==='RECEITA')byMes[k].r+=Number(r.valor);else byMes[k].d+=Number(r.valor);});
+  fluxoGraf.forEach(r=>{const k=r.data_movimento?.slice(5,7)||'00';if(!byMes[k])byMes[k]={r:0,d:0};if(r.tipo==='RECEITA')byMes[k].r+=Number(r.valor);else byMes[k].d+=Number(r.valor);});
   const mks=Object.keys(byMes).sort();
   new Chart(document.getElementById('c-chart-mes'),{type:'bar',data:{labels:mks.map(m=>MESES_A[parseInt(m)]),datasets:[{label:'Receita',data:mks.map(m=>byMes[m].r),backgroundColor:'#1A8F5A',borderRadius:4},{label:'Despesa',data:mks.map(m=>byMes[m].d),backgroundColor:'#D64045',borderRadius:4}]},options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
 
-  // Gráfico receber
-  const rs={};D.receber.forEach(r=>{rs[r.status]=(rs[r.status]||0)+Number(r.valor);});
-  new Chart(document.getElementById('c-chart-rec'),{type:'doughnut',data:{labels:Object.keys(rs),datasets:[{data:Object.values(rs),backgroundColor:['#1A8F5A','#2A6DBF','#D64045','#E8A020'],borderWidth:0}]},options:{responsive:true,cutout:'55%',plugins:{legend:{position:'bottom'}}}});
+  // Gráfico receber — usa dados filtrados
+  const rs={};receberF.forEach(r=>{rs[r.status]=(rs[r.status]||0)+Number(r.valor);});
+  if(Object.keys(rs).length){
+    new Chart(document.getElementById('c-chart-rec'),{type:'doughnut',data:{labels:Object.keys(rs),datasets:[{data:Object.values(rs),backgroundColor:['#1A8F5A','#2A6DBF','#D64045','#E8A020'],borderWidth:0}]},options:{responsive:true,cutout:'55%',plugins:{legend:{position:'bottom'}}}});
+  } else {
+    document.getElementById('c-chart-rec').parentElement.innerHTML+='<p class="text-muted text-sm" style="text-align:center">Sem dados no período</p>';
+  }
 
-  // Gráfico clientes
-  const cr={};D.fluxo.filter(r=>r.tipo==='RECEITA').forEach(r=>{const k=r.cliente||r.cliente_nome||'—';cr[k]=(cr[k]||0)+Number(r.valor);});
+  // Gráfico clientes — usa fluxo filtrado
+  const cr={};fluxoF.filter(r=>r.tipo==='RECEITA').forEach(r=>{const k=r.cliente||r.cliente_nome||'—';cr[k]=(cr[k]||0)+Number(r.valor);});
   const topCli=Object.entries(cr).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  new Chart(document.getElementById('c-chart-cli'),{type:'bar',data:{labels:topCli.map(e=>e[0].length>18?e[0].slice(0,18)+'…':e[0]),datasets:[{data:topCli.map(e=>e[1]),backgroundColor:'#1A3C5E',borderRadius:3}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
+  if(topCli.length){
+    new Chart(document.getElementById('c-chart-cli'),{type:'bar',data:{labels:topCli.map(e=>e[0].length>18?e[0].slice(0,18)+'…':e[0]),datasets:[{data:topCli.map(e=>e[1]),backgroundColor:'#1A3C5E',borderRadius:3}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
+  }
 }
 
-function renderAlertaAtraso(){
-  const at=D.receber.filter(r=>r.status==='EM ATRASO');
-  if(!at.length) return alertaBox('success','✅ Nenhuma parcela em atraso');
+function renderAlertaAtraso(rec){
+  rec = rec || D.receber;
+  const at=rec.filter(r=>r.status==='EM ATRASO');
+  if(!at.length) return alertaBox('success','✅ Nenhuma parcela em atraso no período');
   return `${alertaBox('danger',`${at.length} parcelas — Total: <b>${fmtBRL(at.reduce((a,r)=>a+Number(r.valor),0))}</b>`)}<div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Vencimento</th><th class="td-num">Valor</th></tr></thead><tbody>${at.slice(0,5).map(r=>`<tr><td>${r.cliente_nome||r.cliente||'—'}</td><td>${fmtData(r.vencimento||r.data_vencimento)}</td><td class="td-num">${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function renderOsExecDash(){
@@ -430,9 +517,10 @@ function renderOsExecDash(){
   if(!os.length) return alertaBox('info','Nenhuma OS em execução no momento');
   return `<div class="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Execução</th><th class="td-num">Valor</th></tr></thead><tbody>${os.slice(0,5).map(o=>`<tr><td>#${o.numero_os}</td><td>${o.cliente_nome||'—'}</td><td>${fmtData(o.data_execucao)}</td><td class="td-num">${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table></div>`;
 }
-function renderProxPagar(){
-  const p=D.pagar.filter(x=>x.status==='EM ABERTO').sort((a,b)=>(a.data_vencimento||'').localeCompare(b.data_vencimento||'')).slice(0,5);
-  if(!p.length) return alertaBox('success','✅ Nenhuma conta a pagar pendente');
+function renderProxPagar(pagar){
+  pagar = pagar || D.pagar;
+  const p=pagar.filter(x=>x.status==='EM ABERTO').sort((a,b)=>(a.data_vencimento||'').localeCompare(b.data_vencimento||'')).slice(0,5);
+  if(!p.length) return alertaBox('success','✅ Nenhuma conta a pagar no período');
   return `<div class="table-wrap"><table><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Vencimento</th><th class="td-num">Valor</th></tr></thead><tbody>${p.map(x=>`<tr><td>${x.fornecedor}</td><td><span class="text-xs">${x.categoria||'—'}</span></td><td>${fmtData(x.data_vencimento)}</td><td class="td-num">${fmtBRL(x.valor)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
@@ -696,7 +784,9 @@ function render_os(){
   </div>`;
 }
 
+let _laudoIdx = 0;
 function modalNovaOS(){
+  _laudoIdx = 0;
   const proxNum=(D.os.reduce((m,o)=>Math.max(m,o.numero_os||0),0))+1;
   abrirModal('Nova Ordem de Serviço',`
   <div class="form-grid">
@@ -709,18 +799,81 @@ function modalNovaOS(){
     <div class="form-group"><label>Valor Total (R$)</label><input type="number" id="os-valor" value="0" step="0.01"></div>
     <div class="form-group"><label>Data de Abertura</label><input type="date" id="os-abertura" value="${hoje()}"></div>
     <div class="form-group"><label>Data de Execução em Campo</label><input type="date" id="os-execucao"></div>
-    <div class="form-group"><label>Prazo Entrega do Laudo</label><input type="date" id="os-laudo"></div>
     <div class="form-group span2"><label>Observação</label><textarea id="os-obs" rows="2"></textarea></div>
+  </div>
+
+  <hr class="divider">
+  <div class="flex flex-center gap-8" style="margin-bottom:10px">
+    <input type="checkbox" id="os-tem-laudos" onchange="toggleLaudos()" style="width:16px;height:16px;cursor:pointer">
+    <label for="os-tem-laudos" style="font-size:13px;font-weight:600;color:var(--azul);cursor:pointer">
+      📋 Adicionar prazos de entrega de laudos
+    </label>
+  </div>
+  <div id="os-laudos-wrap" style="display:none">
+    <div style="font-size:11px;color:var(--cinza);display:grid;grid-template-columns:3fr 1fr auto;gap:8px;padding:0 2px;margin-bottom:6px">
+      <span>Descrição do Laudo</span><span>Data de Entrega</span><span></span>
+    </div>
+    <div id="os-laudos-list"></div>
+    <button class="btn btn-sm btn-outline mt-8" onclick="addLaudoRow()">＋ Adicionar Laudo</button>
   </div>`,
-  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarOS()">💾 Salvar</button>`);
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarOS()">💾 Salvar</button>`,false);
+}
+
+function toggleLaudos(){
+  const wrap = document.getElementById('os-laudos-wrap');
+  const checked = document.getElementById('os-tem-laudos').checked;
+  wrap.style.display = checked ? 'block' : 'none';
+  if(checked && document.getElementById('os-laudos-list').children.length === 0) addLaudoRow();
+}
+
+function addLaudoRow(){
+  const idx = _laudoIdx++;
+  document.getElementById('os-laudos-list').insertAdjacentHTML('beforeend',`
+    <div class="item-row" id="laudo-row-${idx}" style="grid-template-columns:3fr 1fr auto;margin-bottom:8px">
+      <input type="text" id="laudo-desc-${idx}" placeholder="Ex: Laudo de estanqueidade — Tanque 1">
+      <input type="date" id="laudo-data-${idx}">
+      <button class="btn btn-sm btn-danger btn-icon" onclick="document.getElementById('laudo-row-${idx}').remove()">✕</button>
+    </div>`);
+}
+
+function coletarLaudos(){
+  const laudos = [];
+  document.querySelectorAll('#os-laudos-list .item-row').forEach(row => {
+    const idx = row.id.split('-')[2];
+    const desc = document.getElementById('laudo-desc-'+idx)?.value?.trim();
+    const data = document.getElementById('laudo-data-'+idx)?.value;
+    if(desc && data) laudos.push({descricao: desc, data_entrega: data});
+  });
+  return laudos;
 }
 
 async function salvarOS(){
   const cli=document.getElementById('os-cli').value.trim();
   if(!cli){alert('Informe o cliente.');return;}
-  const dados={numero_os:parseInt(document.getElementById('os-num').value),cliente_nome:cli,cnpj:document.getElementById('os-cnpj').value,servico:document.getElementById('os-serv').value,status:document.getElementById('os-status').value,valor_total:parseFloat(document.getElementById('os-valor').value)||0,data_abertura:document.getElementById('os-abertura').value,data_execucao:document.getElementById('os-execucao').value||null,data_entrega_laudo:document.getElementById('os-laudo').value||null,observacao:document.getElementById('os-obs').value};
+  const temLaudos = document.getElementById('os-tem-laudos')?.checked;
+  const laudos = temLaudos ? coletarLaudos() : [];
+  const dados={
+    numero_os:parseInt(document.getElementById('os-num').value),
+    cliente_nome:cli,
+    cnpj:document.getElementById('os-cnpj').value,
+    servico:document.getElementById('os-serv').value,
+    status:document.getElementById('os-status').value,
+    valor_total:parseFloat(document.getElementById('os-valor').value)||0,
+    data_abertura:document.getElementById('os-abertura').value,
+    data_execucao:document.getElementById('os-execucao').value||null,
+    data_entrega_laudo: laudos.length ? laudos[0].data_entrega : null,
+    observacao:document.getElementById('os-obs').value,
+    laudos_prazos: laudos.length ? JSON.stringify(laudos) : null
+  };
   const ok=await sbInsert('ordens_servico',dados);
-  if(ok){await gcalOS(dados);fecharModal();nav('os');}
+  if(ok){
+    // Envia cada laudo pro Google Calendar
+    for(const l of laudos){
+      await gcalOS({...dados, data_entrega_laudo: l.data_entrega, _laudo_desc: l.descricao});
+    }
+    if(!laudos.length) await gcalOS(dados);
+    fecharModal();nav('os');
+  }
 }
 
 function editarOS(id){
@@ -801,58 +954,79 @@ async function delFuncOS(id,osId){if(!confirm('Remover?'))return;await sbDelete(
 // FLUXO DE CAIXA
 // ══════════════════════════════════════════════════════════════
 function render_fluxo(){
-  const rec=D.fluxo.filter(x=>x.tipo==='RECEITA').reduce((a,b)=>a+Number(b.valor),0);
-  const desp=D.fluxo.filter(x=>x.tipo==='DESPESA').reduce((a,b)=>a+Number(b.valor),0);
+  const fluxoF = filtrarPorPeriodo(D.fluxo,'data_movimento');
+  const rec  = fluxoF.filter(x=>x.tipo==='RECEITA').reduce((a,b)=>a+Number(b.valor),0);
+  const desp = fluxoF.filter(x=>x.tipo==='DESPESA').reduce((a,b)=>a+Number(b.valor),0);
   const servicos=[...new Set(D.fluxo.map(r=>r.categoria||r.tipo_servico).filter(Boolean))];
+  const osNums=[...new Set(D.fluxo.map(r=>r.os_id).filter(Boolean))].sort((a,b)=>a-b);
   const c=document.getElementById('content');
   c.innerHTML=`
+  <div class="filters" style="margin-bottom:16px">
+    ${seletorMesAno([],'aplicarFiltroFluxo()')}
+    <div style="font-size:13px;font-weight:600;color:var(--azul);align-self:center;margin-left:4px">
+      📅 <span style="color:var(--azul2)">${labelPeriodo()}</span>
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="FILTRO={mes:'',ano:''};render_fluxo()" style="margin-left:auto">✕ Limpar</button>
+  </div>
   <div class="grid-4" style="margin-bottom:16px">
     <div class="kpi"><div class="kpi-label">Receitas</div><div class="kpi-val verde">${fmtBRL(rec)}</div></div>
     <div class="kpi"><div class="kpi-label">Despesas</div><div class="kpi-val vermelho">${fmtBRL(desp)}</div></div>
     <div class="kpi"><div class="kpi-label">Resultado</div><div class="kpi-val ${rec-desp>=0?'verde':'vermelho'}">${fmtBRL(rec-desp)}</div></div>
-    <div class="kpi"><div class="kpi-label">Lançamentos</div><div class="kpi-val">${D.fluxo.length}</div></div>
+    <div class="kpi"><div class="kpi-label">Lançamentos</div><div class="kpi-val">${fluxoF.length}</div></div>
   </div>
   <div class="card">
     <div class="flex flex-between flex-center" style="margin-bottom:12px">
       <div class="filters" style="margin-bottom:0;flex-wrap:wrap">
-        <div class="filter-group"><div class="filter-label">Mês</div>
-          <select id="f-fc-mes" onchange="filtrarFluxo()"><option value="">Todos</option>
-          ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${String(m).padStart(2,'0')}">${MESES[m]}</option>`).join('')}</select></div>
         <div class="filter-group"><div class="filter-label">Tipo</div>
           <select id="f-fc-tipo" onchange="filtrarFluxo()"><option value="">Todos</option><option>RECEITA</option><option>DESPESA</option></select></div>
         <div class="filter-group"><div class="filter-label">Categoria</div>
           <select id="f-fc-cat" onchange="filtrarFluxo()"><option value="">Todas</option>${servicos.map(s=>`<option>${s}</option>`).join('')}</select></div>
+        <div class="filter-group"><div class="filter-label">OS</div>
+          <select id="f-fc-os" onchange="filtrarFluxo()">
+            <option value="">Todas</option>
+            ${osNums.map(n=>{const o=D.os.find(x=>x.numero_os==n);return`<option value="${n}">#${n}${o?' — '+o.cliente_nome.slice(0,15):''}</option>`;}).join('')}
+          </select></div>
         <div class="filter-group"><div class="filter-label">Buscar</div>
           <input type="text" id="f-fc-busca" placeholder="Cliente..." oninput="filtrarFluxo()"></div>
       </div>
       <button class="btn btn-primary" onclick="modalNovoLancamento()">＋ Lançamento</button>
     </div>
     <div class="table-wrap">
-      <table><thead><tr><th>Data</th><th>Cliente</th><th>Tipo</th><th>Categoria</th><th class="td-num">Valor</th><th></th></tr></thead>
+      <table><thead><tr><th>Data</th><th>OS</th><th>Cliente</th><th>Tipo</th><th>Categoria</th><th class="td-num">Valor</th><th></th></tr></thead>
       <tbody id="tb-fluxo">
-      ${D.fluxo.map(r=>`<tr data-mes="${(r.data_movimento||'').slice(5,7)}" data-tipo="${r.tipo}" data-cat="${r.categoria||r.tipo_servico||''}" data-cli="${r.cliente||r.cliente_nome||''}">
-        <td>${fmtData(r.data_movimento)}</td>
-        <td>${r.cliente||r.cliente_nome||'—'}</td>
-        <td>${badge(r.tipo)}</td>
-        <td><span class="text-xs">${r.categoria||r.tipo_servico||r.tipo_despesa||'—'}</span></td>
-        <td class="td-num" style="color:${r.tipo==='RECEITA'?'#1A8F5A':'#D64045'};font-weight:700">${fmtBRL(r.valor)}</td>
-        <td><button class="btn btn-sm btn-danger btn-icon" onclick="deletarFluxo(${r.id})">✕</button></td>
-      </tr>`).join('')}
+      ${fluxoF.map(r=>{
+        const osVinc = r.os_id ? D.os.find(o=>o.numero_os==r.os_id) : null;
+        const osLabel = r.os_id ? `<span class="badge badge-azul" title="${osVinc?osVinc.cliente_nome:''}">#${r.os_id}</span>` : '<span class="text-muted">—</span>';
+        return`<tr data-tipo="${r.tipo}" data-cat="${r.categoria||r.tipo_servico||''}" data-cli="${r.cliente||r.cliente_nome||''}" data-os="${r.os_id||''}">
+          <td>${fmtData(r.data_movimento)}</td>
+          <td>${osLabel}</td>
+          <td>${r.cliente||r.cliente_nome||'—'}</td>
+          <td>${badge(r.tipo)}</td>
+          <td><span class="text-xs">${r.categoria||r.tipo_servico||r.tipo_despesa||'—'}</span></td>
+          <td class="td-num" style="color:${r.tipo==='RECEITA'?'#1A8F5A':'#D64045'};font-weight:700">${fmtBRL(r.valor)}</td>
+          <td><button class="btn btn-sm btn-danger btn-icon" onclick="deletarFluxo(${r.id})">✕</button></td>
+        </tr>`;
+      }).join('')}
       </tbody></table>
     </div>
   </div>`;
 }
+function aplicarFiltroFluxo(){ lerFiltro(); render_fluxo(); }
 function filtrarFluxo(){
-  const mes=document.getElementById('f-fc-mes')?.value;
   const tipo=document.getElementById('f-fc-tipo')?.value;
   const cat=document.getElementById('f-fc-cat')?.value;
+  const os=document.getElementById('f-fc-os')?.value;
   const busca=document.getElementById('f-fc-busca')?.value.toLowerCase();
   document.querySelectorAll('#tb-fluxo tr').forEach(tr=>{
-    const ok=(!mes||tr.dataset.mes===mes)&&(!tipo||tr.dataset.tipo===tipo)&&(!cat||tr.dataset.cat===cat)&&(!busca||tr.dataset.cli.toLowerCase().includes(busca));
+    const ok=(!tipo||tr.dataset.tipo===tipo)
+           &&(!cat||tr.dataset.cat===cat)
+           &&(!os||tr.dataset.os===os)
+           &&(!busca||tr.dataset.cli.toLowerCase().includes(busca));
     tr.style.display=ok?'':'none';
   });
 }
 function modalNovoLancamento(){
+  const osAtivas = D.os.filter(o=>['EM EXECUÇÃO','A EXECUTAR','FINALIZADO'].includes(o.status));
   abrirModal('Novo Lançamento',`
   <div class="form-grid">
     <div class="form-group"><label>Data</label><input type="date" id="fc-data" value="${hoje()}"></div>
@@ -861,8 +1035,15 @@ function modalNovoLancamento(){
     <div class="form-group"><label>Valor (R$)</label><input type="number" id="fc-valor" value="0" step="0.01"></div>
     <div class="form-group" id="fc-cat-wrap">
       <label>Categoria</label>
-      <select id="fc-cat-rec"><option>OBRA</option><option>ESTANQUEIDADE</option><option>INTEGRIDADE</option><option>NR 11</option><option>NR 12</option><option>NR 13</option><option>LIMPEZA DE TANQUE</option><option>TANQUE AEREO</option><option>RESPONSABILIDADE TECNICA</option><option>RECEBIMENTO</option><option>COMISSÃO</option><option>OUTRO</option></select>
-      <select id="fc-cat-desp" style="display:none"><option>FUNCIONÁRIO</option><option>SALARIO</option><option>IMPOSTO</option><option>ART</option><option>CONTADOR</option><option>ROYALTES</option><option>FINANCIAMENTO CARRO</option><option>SEGURO</option><option>PEÇAS CUSTO</option><option>COMPRA DE EQUIPAMENTOS</option><option>ALUGUEL DE EQUIPAMENTOS</option><option>ALIMENTAÇÃO E DESLOCAMENTO</option><option>DEMAIS GASTOS</option></select>
+      <select id="fc-cat-rec"><option>OBRA</option><option>ESTANQUEIDADE</option><option>INTEGRIDADE</option><option>NR 11</option><option>NR 12</option><option>NR 13</option><option>LIMPEZA DE TANQUE</option><option>TANQUE AEREO</option><option>RESPONSABILIDADE TECNICA</option><option>RECEBIMENTO</option><option>COMISSÃO</option><option>VENDA DE PEÇAS</option><option>OUTRO</option></select>
+      <select id="fc-cat-desp" style="display:none"><option>FUNCIONÁRIO</option><option>SALARIO</option><option>IMPOSTO</option><option>ART</option><option>CONTADOR</option><option>ROYALTES</option><option>FINANCIAMENTO CARRO</option><option>SEGURO</option><option>PEÇAS CUSTO</option><option>COMPRA DE EQUIPAMENTOS</option><option>ALUGUEL DE EQUIPAMENTOS</option><option>ALIMENTAÇÃO E DESLOCAMENTO</option><option>DESLOCAMENTO</option><option>DEMAIS GASTOS</option><option>SERVENTE DE PEDREIRO</option><option>MULTA</option><option>FERRAMENTAS</option><option>VALE</option></select>
+    </div>
+    <div class="form-group span2">
+      <label>🔧 Vincular à OS (opcional)</label>
+      <select id="fc-os-id">
+        <option value="">— Sem vínculo —</option>
+        ${osAtivas.map(o=>`<option value="${o.numero_os}">#${o.numero_os} — ${o.cliente_nome} (${o.servico})</option>`).join('')}
+      </select>
     </div>
     <div class="form-group span2"><label>Observação</label><textarea id="fc-obs" rows="2"></textarea></div>
   </div>`,
@@ -870,10 +1051,25 @@ function modalNovoLancamento(){
 }
 function toggleCatFC(){const t=document.getElementById('fc-tipo').value;document.getElementById('fc-cat-rec').style.display=t==='RECEITA'?'':'none';document.getElementById('fc-cat-desp').style.display=t==='DESPESA'?'':'none';}
 async function salvarLancamento(){
-  const data=document.getElementById('fc-data').value,tipo=document.getElementById('fc-tipo').value,cli=document.getElementById('fc-cli').value.trim(),valor=parseFloat(document.getElementById('fc-valor').value)||0;
+  const data=document.getElementById('fc-data').value,
+        tipo=document.getElementById('fc-tipo').value,
+        cli=document.getElementById('fc-cli').value.trim(),
+        valor=parseFloat(document.getElementById('fc-valor').value)||0,
+        osIdSel=document.getElementById('fc-os-id').value;
   if(!cli||!valor){alert('Informe cliente e valor.');return;}
   const cat=tipo==='RECEITA'?document.getElementById('fc-cat-rec').value:document.getElementById('fc-cat-desp').value;
-  const ok=await sbInsert('fluxo_caixa',{data_movimento:data,cliente:cli,tipo,categoria:cat,valor,mes:parseInt(data.slice(5,7)),ano:parseInt(data.slice(0,4)),observacao:document.getElementById('fc-obs').value});
+  const osId = osIdSel ? parseInt(osIdSel) : null;
+  const ok=await sbInsert('fluxo_caixa',{
+    data_movimento:data,
+    cliente:cli,
+    tipo,
+    categoria:cat,
+    valor,
+    mes:parseInt(data.slice(5,7)),
+    ano:parseInt(data.slice(0,4)),
+    os_id:osId,
+    observacao:document.getElementById('fc-obs').value
+  });
   if(ok){fecharModal();nav('fluxo');}
 }
 async function deletarFluxo(id){if(!confirm('Excluir este lançamento?'))return;await sbDelete('fluxo_caixa','id',id);nav('fluxo');}
@@ -882,9 +1078,17 @@ async function deletarFluxo(id){if(!confirm('Excluir este lançamento?'))return;
 // CONTAS A RECEBER
 // ══════════════════════════════════════════════════════════════
 function render_receber(){
-  const byS={};D.receber.forEach(r=>{byS[r.status]=(byS[r.status]||0)+Number(r.valor);});
+  const recF = filtrarPorPeriodo(D.receber,'vencimento');
+  const byS={};recF.forEach(r=>{byS[r.status]=(byS[r.status]||0)+Number(r.valor);});
   const c=document.getElementById('content');
   c.innerHTML=`
+  <div class="filters" style="margin-bottom:16px">
+    ${seletorMesAno([],'aplicarFiltroReceber()')}
+    <div style="font-size:13px;font-weight:600;color:var(--azul);align-self:center;margin-left:4px">
+      📅 <span style="color:var(--azul2)">${labelPeriodo()}</span>
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="FILTRO={mes:'',ano:''};render_receber()" style="margin-left:auto">✕ Limpar</button>
+  </div>
   <div class="grid-4" style="margin-bottom:16px">
     <div class="kpi"><div class="kpi-label">✅ Recebido</div><div class="kpi-val verde">${fmtBRL(byS['RECEBIDO']||0)}</div></div>
     <div class="kpi"><div class="kpi-label">🔵 A Vencer</div><div class="kpi-val azul">${fmtBRL(byS['A VENCER']||0)}</div></div>
@@ -894,15 +1098,18 @@ function render_receber(){
   <div class="card">
     <div class="flex flex-between flex-center" style="margin-bottom:12px">
       <div class="filters" style="margin-bottom:0">
-        <div class="filter-group"><div class="filter-label">Status</div><select onchange="filtrarTblCol('tbl-rec',5,this.value)"><option value="">Todos</option><option>A VENCER</option><option>EM ATRASO</option><option>RECEBIDO</option><option>VENCE HOJE</option></select></div>
-        <div class="filter-group"><div class="filter-label">Forma</div><select onchange="filtrarTblCol('tbl-rec',4,this.value)"><option value="">Todas</option><option>Pix</option><option>Boleto</option><option>Cheque</option><option>Transferência</option></select></div>
-        <div class="filter-group"><div class="filter-label">Buscar</div><input type="text" placeholder="Cliente..." oninput="filtrarTbl('tbl-rec',this.value)"></div>
+        <div class="filter-group"><div class="filter-label">Status</div>
+          <select onchange="filtrarTblCol('tbl-rec',5,this.value)"><option value="">Todos</option><option>A VENCER</option><option>EM ATRASO</option><option>RECEBIDO</option><option>VENCE HOJE</option></select></div>
+        <div class="filter-group"><div class="filter-label">Forma</div>
+          <select onchange="filtrarTblCol('tbl-rec',4,this.value)"><option value="">Todas</option><option>Pix</option><option>Boleto</option><option>Cheque</option><option>Transferência</option></select></div>
+        <div class="filter-group"><div class="filter-label">Buscar</div>
+          <input type="text" placeholder="Cliente..." oninput="filtrarTbl('tbl-rec',this.value)"></div>
       </div>
       <button class="btn btn-primary" onclick="modalNovaCobranca()">＋ Nova Cobrança</button>
     </div>
     <div class="table-wrap">
       <table id="tbl-rec"><thead><tr><th>ID</th><th>OS</th><th>Vencimento</th><th>Cliente</th><th>Forma</th><th>Status</th><th class="td-num">Valor</th><th>Ações</th></tr></thead>
-      <tbody>${D.receber.map(r=>`<tr>
+      <tbody>${recF.map(r=>`<tr>
         <td class="text-xs text-muted">#${r.id}</td>
         <td>${r.os_id?`#${r.os_id}`:'—'}</td>
         <td>${fmtData(r.vencimento||r.data_vencimento)}</td>
@@ -918,6 +1125,7 @@ function render_receber(){
     </div>
   </div>`;
 }
+function aplicarFiltroReceber(){ lerFiltro(); render_receber(); }
 async function marcarRecebido(id,valor,cliente,data){
   if(!confirm(`Marcar ${fmtBRL(valor)} de ${cliente} como RECEBIDO e lançar no fluxo?`))return;
   await sbUpdate('contas_receber',{status:'RECEBIDO'},'id',id);
@@ -949,27 +1157,39 @@ async function salvarCobranca(){
 // CONTAS A PAGAR
 // ══════════════════════════════════════════════════════════════
 function render_pagar(){
-  const byS={};D.pagar.forEach(p=>{byS[p.status]=(byS[p.status]||0)+Number(p.valor);});
+  const pagF = filtrarPorPeriodo(D.pagar,'data_vencimento');
+  const byS={};pagF.forEach(p=>{byS[p.status]=(byS[p.status]||0)+Number(p.valor);});
+  const cats=[...new Set(D.pagar.map(p=>p.categoria).filter(Boolean))];
   const c=document.getElementById('content');
   c.innerHTML=`
+  <div class="filters" style="margin-bottom:16px">
+    ${seletorMesAno([],'aplicarFiltroPagar()')}
+    <div style="font-size:13px;font-weight:600;color:var(--azul);align-self:center;margin-left:4px">
+      📅 <span style="color:var(--azul2)">${labelPeriodo()}</span>
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="FILTRO={mes:'',ano:''};render_pagar()" style="margin-left:auto">✕ Limpar</button>
+  </div>
   <div class="grid-4" style="margin-bottom:16px">
     <div class="kpi"><div class="kpi-label">✅ Pago</div><div class="kpi-val verde">${fmtBRL(byS['PAGO']||0)}</div></div>
     <div class="kpi"><div class="kpi-label">🔵 Em Aberto</div><div class="kpi-val azul">${fmtBRL(byS['EM ABERTO']||0)}</div></div>
     <div class="kpi"><div class="kpi-label">🔴 Vencida</div><div class="kpi-val vermelho">${fmtBRL(byS['VENCIDA']||0)}</div></div>
-    <div class="kpi"><div class="kpi-label">Total</div><div class="kpi-val">${fmtBRL(Object.values(byS).reduce((a,v)=>a+v,0))}</div></div>
+    <div class="kpi"><div class="kpi-label">Total período</div><div class="kpi-val">${fmtBRL(Object.values(byS).reduce((a,v)=>a+v,0))}</div></div>
   </div>
   <div class="card">
     <div class="flex flex-between flex-center" style="margin-bottom:12px">
       <div class="filters" style="margin-bottom:0">
-        <div class="filter-group"><div class="filter-label">Status</div><select onchange="filtrarTblCol('tbl-pag',4,this.value)"><option value="">Todos</option><option>EM ABERTO</option><option>VENCIDA</option><option>PAGO</option></select></div>
-        <div class="filter-group"><div class="filter-label">Categoria</div><select onchange="filtrarTblCol('tbl-pag',1,this.value)"><option value="">Todas</option>${[...new Set(D.pagar.map(p=>p.categoria).filter(Boolean))].map(c=>`<option>${c}</option>`).join('')}</select></div>
-        <div class="filter-group"><div class="filter-label">Buscar</div><input type="text" placeholder="Fornecedor..." oninput="filtrarTbl('tbl-pag',this.value)"></div>
+        <div class="filter-group"><div class="filter-label">Status</div>
+          <select onchange="filtrarTblCol('tbl-pag',4,this.value)"><option value="">Todos</option><option>EM ABERTO</option><option>VENCIDA</option><option>PAGO</option></select></div>
+        <div class="filter-group"><div class="filter-label">Categoria</div>
+          <select onchange="filtrarTblCol('tbl-pag',1,this.value)"><option value="">Todas</option>${cats.map(c=>`<option>${c}</option>`).join('')}</select></div>
+        <div class="filter-group"><div class="filter-label">Buscar</div>
+          <input type="text" placeholder="Fornecedor..." oninput="filtrarTbl('tbl-pag',this.value)"></div>
       </div>
       <button class="btn btn-primary" onclick="modalNovaPagar()">＋ Nova Conta</button>
     </div>
     <div class="table-wrap">
       <table id="tbl-pag"><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Vencimento</th><th class="td-num">Valor</th><th>Status</th><th>Ações</th></tr></thead>
-      <tbody>${D.pagar.map(p=>`<tr>
+      <tbody>${pagF.map(p=>`<tr>
         <td>${p.fornecedor}</td><td><span class="text-xs">${p.categoria||'—'}</span></td>
         <td>${fmtData(p.data_vencimento)}</td>
         <td class="td-num font-600">${fmtBRL(p.valor)}</td>
@@ -982,6 +1202,7 @@ function render_pagar(){
     </div>
   </div>`;
 }
+function aplicarFiltroPagar(){ lerFiltro(); render_pagar(); }
 function modalNovaPagar(){
   abrirModal('Nova Conta a Pagar',`
   <div class="form-grid">
@@ -1225,8 +1446,19 @@ async function gcalPost(evento){
   return null;
 }
 async function gcalOS(o){
-  if(o.data_execucao) await gcalPost({summary:`🔧 OS #${o.numero_os} — ${o.cliente_nome}`,description:`Serviço: ${o.servico}`,start:{date:o.data_execucao},end:{date:o.data_execucao},colorId:'7'});
-  if(o.data_entrega_laudo) await gcalPost({summary:`📋 Laudo OS #${o.numero_os} — ${o.cliente_nome}`,description:`Entrega do laudo: ${o.servico}`,start:{date:o.data_entrega_laudo},end:{date:o.data_entrega_laudo},colorId:'5'});
+  if(o.data_execucao) await gcalPost({
+    summary:`🔧 OS #${o.numero_os} — ${o.cliente_nome}`,
+    description:`Serviço: ${o.servico}`,
+    start:{date:o.data_execucao},end:{date:o.data_execucao},colorId:'7'
+  });
+  if(o.data_entrega_laudo){
+    const descLaudo = o._laudo_desc || `Entrega do laudo: ${o.servico}`;
+    await gcalPost({
+      summary:`📋 Laudo OS #${o.numero_os} — ${o.cliente_nome}`,
+      description:descLaudo,
+      start:{date:o.data_entrega_laudo},end:{date:o.data_entrega_laudo},colorId:'5'
+    });
+  }
 }
 async function gcalReceber(r){
   const d=r.vencimento||r.data_vencimento;if(!d)return;
