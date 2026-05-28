@@ -1418,8 +1418,9 @@ function renderCalendario(ano, mes){
   </div>
   <div class="card">
     <div class="card-title">🔗 Google Agenda</div>
-    ${D.config.gcal_key?alertaBox('success','✅ Google Agenda conectado. Novos eventos são sincronizados automaticamente.'):alertaBox('info','Configure a API do Google Calendar em <b>Configurações</b> para sincronizar eventos.')}
-    <button class="btn btn-outline btn-sm mt-8" onclick="nav('config')">⚙️ Configurar</button>
+    ${window._gcalToken?alertaBox('success','✅ Google Agenda conectado. Novos eventos são sincronizados automaticamente.'):alertaBox('info','Para sincronizar eventos, acesse <b>Configurações → Conectar com Google</b>.')}
+    <button class="btn btn-outline btn-sm mt-8" onclick="nav('config')">⚙️ Configurar Google Agenda</button>
+    ${window._gcalToken?`<button class="btn btn-success btn-sm mt-8" onclick="sincronizarTodosEventos()">🔄 Sincronizar Eventos Existentes</button>`:''}
   </div>`;
 }
 
@@ -1522,23 +1523,34 @@ function exportCSV(dados, nome){
 // ══════════════════════════════════════════════════════════════
 function render_config(){
   const c=document.getElementById('content');
+  const gcalConectado = !!D.config.gcal_client_id;
+  const tokenOk = !!window._gcalToken;
   c.innerHTML=`
   <div class="grid-2">
     <div class="card">
       <div class="card-title">📅 Google Agenda</div>
-      ${alertaBox('info','Configure abaixo para sincronizar OS, laudos e vencimentos automaticamente com o Google Calendar.')}
-      <div class="form-group" style="margin-bottom:10px"><label>API Key do Google Calendar</label>
-        <input type="text" id="cfg-gcal-key" value="${D.config.gcal_key||''}" placeholder="AIzaSy..."></div>
-      <div class="form-group" style="margin-bottom:10px"><label>ID da Agenda (Calendar ID)</label>
-        <input type="text" id="cfg-gcal-id" value="${D.config.gcal_calendar_id||'primary'}" placeholder="primary ou email@gmail.com"></div>
-      <button class="btn btn-primary btn-sm" onclick="salvarConfigGcal()">💾 Salvar</button>
+      ${tokenOk
+        ? alertaBox('success','✅ Conectado ao Google Agenda! Novos eventos serão sincronizados automaticamente.')
+        : alertaBox('info','Para sincronizar, informe o Client ID OAuth 2.0 do seu projeto Google Cloud e clique em Conectar.')}
+      <div class="form-group" style="margin-bottom:10px">
+        <label>Client ID (OAuth 2.0)</label>
+        <input type="text" id="cfg-gcal-cid" value="${D.config.gcal_client_id||''}"
+          placeholder="000000000000-xxxxxxxx.apps.googleusercontent.com" style="font-size:12px">
+      </div>
+      <div class="flex gap-8 mt-8">
+        <button class="btn btn-primary btn-sm" onclick="salvarConfigGcal()">💾 Salvar Client ID</button>
+        <button class="btn btn-success btn-sm" onclick="gcalLogin()">🔗 Conectar com Google</button>
+        ${tokenOk?'<button class="btn btn-outline btn-sm" onclick="gcalLogout()">Desconectar</button>':''}
+      </div>
       <hr class="divider">
       <div class="text-sm text-muted">
-        <b>Como obter a API Key:</b><br>
+        <b>Como configurar (uma única vez):</b><br><br>
         1. Acesse <a href="https://console.cloud.google.com" target="_blank" style="color:var(--azul2)">console.cloud.google.com</a><br>
-        2. Crie um projeto → APIs e serviços → Google Calendar API → Ativar<br>
-        3. Credenciais → Criar credenciais → Chave de API<br>
-        4. Cole a chave acima e salve.
+        2. Crie um projeto → <b>APIs → Google Calendar API → Ativar</b><br>
+        3. <b>Credenciais → Criar → ID do cliente OAuth 2.0 → Aplicativo da Web</b><br>
+        4. Em <b>Origens JavaScript autorizadas</b> adicione a URL do seu site<br>
+        5. Copie o <b>Client ID</b>, cole acima e salve<br>
+        6. Clique em <b>Conectar com Google</b> e faça login com Com.postoseng@gmail.com
       </div>
     </div>
     <div class="card">
@@ -1554,18 +1566,21 @@ function render_config(){
     <div class="card-title">⚠️ Dados do Sistema</div>
     ${alertaBox('warning','Atenção: as ações abaixo afetam o banco de dados real no Supabase.')}
     <div class="flex gap-8 mt-8">
-      <button class="btn btn-outline" onclick="exportCSV(D.fluxo,'backup_fluxo')">⬇️ Backup Fluxo</button>
-      <button class="btn btn-outline" onclick="exportCSV(D.os,'backup_os')">⬇️ Backup OS</button>
+      <button class="btn btn-outline" onclick="exportCSV(D.fluxo,\'backup_fluxo\')">⬇️ Backup Fluxo</button>
+      <button class="btn btn-outline" onclick="exportCSV(D.os,\'backup_os\')">⬇️ Backup OS</button>
     </div>
   </div>`;
 }
+
 async function salvarConfigGcal(){
-  const key=document.getElementById('cfg-gcal-key').value.trim();
-  const id=document.getElementById('cfg-gcal-id').value.trim();
-  await sb.from('configuracoes').upsert([{chave:'gcal_key',valor:key},{chave:'gcal_calendar_id',valor:id}],{onConflict:'chave'});
-  D.config.gcal_key=key;D.config.gcal_calendar_id=id;
-  alert('✅ Configuração salva!');
+  const cid = document.getElementById('cfg-gcal-cid').value.trim();
+  if(!cid){ alert('Informe o Client ID.'); return; }
+  await sb.from('configuracoes').upsert([{chave:'gcal_client_id',valor:cid}],{onConflict:'chave'});
+  D.config.gcal_client_id = cid;
+  alert('✅ Client ID salvo! Agora clique em Conectar com Google.');
+  render_config();
 }
+
 function modalNovoServico(){
   abrirModal('Novo Tipo de Serviço',`
   <div class="form-grid">
@@ -1585,43 +1600,112 @@ async function salvarNovoServico(){
 }
 
 // ══════════════════════════════════════════════════════════════
-// GOOGLE CALENDAR
+// GOOGLE CALENDAR — OAuth 2.0
 // ══════════════════════════════════════════════════════════════
+window._gcalToken = sessionStorage.getItem('gcal_token') || null;
+
+const GCAL_API = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+
+function _loadGIS(){
+  return new Promise((res,rej)=>{
+    if(window.google?.accounts?.oauth2){res();return;}
+    const s=document.createElement('script');
+    s.src='https://accounts.google.com/gsi/client';
+    s.onload=()=>res();
+    s.onerror=()=>rej(new Error('Falha ao carregar Google Identity Services'));
+    document.head.appendChild(s);
+  });
+}
+
+async function sincronizarTodosEventos(){
+  if(!window._gcalToken){ alert('Conecte ao Google Agenda primeiro nas Configurações.'); return; }
+  const btn = event.target; btn.disabled=true; btn.textContent='⏳ Sincronizando...';
+  let count=0;
+  // OS com data de execução
+  for(const o of D.os){
+    if(o.data_execucao||o.data_entrega_laudo){
+      await gcalOS(o); count++;
+    }
+    // laudos cadastrados
+    const laudos=o.laudos_prazos?(typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos):[];
+    for(const l of laudos){
+      await gcalOS({...o, data_entrega_laudo:l.data_entrega, _laudo_desc:l.descricao, _laudo_venc:l.data_vencimento});
+      count++;
+    }
+  }
+  // Contas a receber pendentes
+  for(const r of D.receber.filter(x=>x.status!=='RECEBIDO')){
+    await gcalReceber(r); count++;
+  }
+  // Contas a pagar pendentes
+  for(const p of D.pagar.filter(x=>x.status!=='PAGO')){
+    await gcalPagar(p); count++;
+  }
+  btn.disabled=false; btn.textContent='🔄 Sincronizar Eventos Existentes';
+  alert(`✅ ${count} eventos sincronizados com o Google Agenda!`);
+}
+
+async function gcalLogin(){
+  const clientId=D.config.gcal_client_id;
+  if(!clientId){alert('Configure e salve o Client ID primeiro.');return;}
+  try{
+    await _loadGIS();
+    google.accounts.oauth2.initTokenClient({
+      client_id:clientId,
+      scope:'https://www.googleapis.com/auth/calendar.events',
+      callback:(resp)=>{
+        if(resp.error){alert('Erro ao conectar: '+resp.error);return;}
+        window._gcalToken=resp.access_token;
+        sessionStorage.setItem('gcal_token',resp.access_token);
+        alert('✅ Google Agenda conectado! Eventos serão sincronizados automaticamente.');
+        render_config();
+      }
+    }).requestAccessToken();
+  }catch(e){alert('Erro: '+e.message);}
+}
+
+function gcalLogout(){
+  window._gcalToken=null;
+  sessionStorage.removeItem('gcal_token');
+  if(window.google?.accounts?.oauth2&&D.config.gcal_client_id)
+    google.accounts.oauth2.revoke(D.config.gcal_client_id,()=>{});
+  alert('Desconectado.');
+  render_config();
+}
+
 async function gcalPost(evento){
-  const key=D.config.gcal_key;const calId=D.config.gcal_calendar_id||'primary';
-  if(!key)return null;
-  try{const r=await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?key=${key}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(evento)});if(r.ok){const d=await r.json();return d.id;}}catch(e){console.warn('GCal:',e);}
+  if(!window._gcalToken){
+    if(D.config.gcal_client_id) console.info('GCal: sem token. Acesse Configurações → Conectar com Google.');
+    return null;
+  }
+  try{
+    const r=await fetch(GCAL_API,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
+      body:JSON.stringify(evento)
+    });
+    if(r.status===401){window._gcalToken=null;sessionStorage.removeItem('gcal_token');console.warn('GCal: token expirado. Reconecte nas Configurações.');return null;}
+    if(r.ok){const d=await r.json();return d.id;}
+    const err=await r.json();console.error('GCal erro:',err);
+  }catch(e){console.warn('GCal:',e);}
   return null;
 }
+
 async function gcalOS(o){
-  if(o.data_execucao) await gcalPost({
-    summary:`🔧 OS #${o.numero_os} — ${o.cliente_nome}`,
-    description:`Serviço: ${o.servico}`,
-    start:{date:o.data_execucao},end:{date:o.data_execucao},colorId:'7'
-  });
+  if(o.data_execucao) await gcalPost({summary:`🔧 OS #${o.numero_os} — ${o.cliente_nome}`,description:`Serviço: ${o.servico}`,start:{date:o.data_execucao},end:{date:o.data_execucao},colorId:'7'});
   if(o.data_entrega_laudo){
-    const descLaudo = o._laudo_desc ? `Entrega: ${o._laudo_desc}` : `Entrega do laudo: ${o.servico}`;
-    await gcalPost({
-      summary:`📋 Entrega Laudo — OS #${o.numero_os} ${o.cliente_nome}`,
-      description:descLaudo,
-      start:{date:o.data_entrega_laudo},end:{date:o.data_entrega_laudo},colorId:'5'
-    });
+    const dl=o._laudo_desc?`Entrega: ${o._laudo_desc}`:`Entrega do laudo: ${o.servico}`;
+    await gcalPost({summary:`📋 Entrega Laudo — OS #${o.numero_os} ${o.cliente_nome}`,description:dl,start:{date:o.data_entrega_laudo},end:{date:o.data_entrega_laudo},colorId:'5'});
   }
-  if(o._laudo_venc){
-    await gcalPost({
-      summary:`⚠️ Vencimento Laudo — OS #${o.numero_os} ${o.cliente_nome}`,
-      description:`Laudo a vencer/renovar: ${o._laudo_desc||o.servico}`,
-      start:{date:o._laudo_venc},end:{date:o._laudo_venc},colorId:'11'
-    });
-  }
+  if(o._laudo_venc) await gcalPost({summary:`⚠️ Vencimento Laudo — OS #${o.numero_os} ${o.cliente_nome}`,description:`Renovar: ${o._laudo_desc||o.servico}`,start:{date:o._laudo_venc},end:{date:o._laudo_venc},colorId:'11'});
 }
 async function gcalReceber(r){
   const d=r.vencimento||r.data_vencimento;if(!d)return;
-  await gcalPost({summary:`💰 Receber: ${r.cliente_nome||r.cliente} — ${fmtBRL(r.valor)}`,description:'Vencimento conta a receber — Compostos Engenharia',start:{date:d},end:{date:d},colorId:'2'});
+  await gcalPost({summary:`💰 Receber: ${r.cliente_nome||r.cliente} — ${fmtBRL(r.valor)}`,description:'Vencimento conta a receber',start:{date:d},end:{date:d},colorId:'2'});
 }
 async function gcalPagar(p){
   const d=p.data_vencimento;if(!d)return;
-  await gcalPost({summary:`📤 Pagar: ${p.fornecedor} — ${fmtBRL(p.valor)}`,description:'Vencimento conta a pagar — Compostos Engenharia',start:{date:d},end:{date:d},colorId:'11'});
+  await gcalPost({summary:`📤 Pagar: ${p.fornecedor} — ${fmtBRL(p.valor)}`,description:'Vencimento conta a pagar',start:{date:d},end:{date:d},colorId:'11'});
 }
 
 // ══════════════════════════════════════════════════════════════
