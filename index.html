@@ -281,25 +281,31 @@ function checkAlertas(){
 // CARREGAMENTO DE DADOS DO SUPABASE
 // ══════════════════════════════════════════════════════════════
 async function carregarTudo(){
-  const [resOS, resFluxo, resRec, resPag, resOrc, resTipos, resFuncs, resCfg] = await Promise.all([
+  const [resOS, resFluxo, resRec, resOrc, resTipos, resFuncs, resCfg] = await Promise.all([
     sb.from('ordens_servico').select('*').order('numero_os',{ascending:false}),
     sb.from('fluxo_caixa').select('*').order('data_movimento',{ascending:false}),
     sb.from('contas_receber').select('*').order('vencimento',{ascending:true}),
-    sb.from('contas_pagar').select('*').order('data_vencimento',{ascending:true}),
     sb.from('orcamentos').select('*').order('id',{ascending:false}),
     sb.from('tipos_servico').select('*').order('nome',{ascending:true}),
     sb.from('funcionarios_os').select('*').order('data',{ascending:false}),
     sb.from('configuracoes').select('*'),
   ]);
-  if(!resOS.error)    D.os           = resOS.data||[];
-  if(!resFluxo.error) D.fluxo        = resFluxo.data||[];
-  if(!resRec.error)   D.receber      = resRec.data||[];
-  if(!resPag.error)   D.pagar        = resPag.data||[];
-  if(!resOrc.error)   D.orcamentos   = resOrc.data||[];
-  if(!resTipos.error) D.tipos_servico= resTipos.data||[];
-  if(!resFuncs.error) D.funcionarios_os= resFuncs.data||[];
+  if(!resOS.error)    D.os            = resOS.data||[];
+  if(!resFluxo.error) D.fluxo         = resFluxo.data||[];
+  if(!resRec.error)   D.receber       = resRec.data||[];
+  if(!resOrc.error)   D.orcamentos    = resOrc.data||[];
+  if(!resTipos.error) D.tipos_servico = resTipos.data||[];
+  if(!resFuncs.error) D.funcionarios_os = resFuncs.data||[];
   if(!resCfg.error)   (resCfg.data||[]).forEach(c=>D.config[c.chave]=c.valor);
+
+  // Carrega contas_pagar separado (tabela pode não existir ainda)
+  try {
+    const resPag = await sb.from('contas_pagar').select('*').order('data_vencimento',{ascending:true});
+    if(!resPag.error) D.pagar = resPag.data||[];
+  } catch(e) { D.pagar = []; }
+
   checkAlertas();
+  verificarAlertasLaudos();
 }
 
 async function sbInsert(tabela, dados){
@@ -903,7 +909,7 @@ async function salvarOS(){
     for(const l of laudos){
       await gcalOS({...dados, data_entrega_laudo: l.data_entrega, _laudo_desc: l.descricao, _laudo_venc: l.data_vencimento});
     }
-    if(!laudos.length) await gcalOS(dados);
+    if(!laudos.length) 
     fecharModal();nav('os');
   }
 }
@@ -1298,7 +1304,7 @@ async function salvarCobranca(){
   if(!cli||!val){alert('Informe cliente e valor.');return;}
   const status=document.getElementById('cr-status').value;
   const ok=await sbInsert('contas_receber',{cliente_nome:cli,valor:val,vencimento:venc,forma_pagamento:document.getElementById('cr-forma').value,status,observacao:document.getElementById('cr-obs').value});
-  if(ok){await gcalReceber({cliente_nome:cli,valor:val,vencimento:venc});fecharModal();nav('receber');}
+  if(ok){fecharModal();nav('receber');}
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1369,7 +1375,7 @@ async function salvarPagar(){
   if(!forn||!val){alert('Informe fornecedor e valor.');return;}
   const status=document.getElementById('pg-status').value;
   const ok=await sbInsert('contas_pagar',{fornecedor:forn,categoria:document.getElementById('pg-cat').value,valor:val,data_vencimento:venc,tipo_pagamento:document.getElementById('pg-forma').value,status,observacao:document.getElementById('pg-obs').value});
-  if(ok){await gcalPagar({fornecedor:forn,valor:val,data_vencimento:venc});fecharModal();nav('pagar');}
+  if(ok){fecharModal();nav('pagar');}
 }
 async function marcarPago(id,valor,forn,data){
   if(!confirm(`Marcar ${fmtBRL(valor)} para ${forn} como PAGO e lançar no fluxo?`))return;
@@ -1418,9 +1424,8 @@ function renderCalendario(ano, mes){
   </div>
   <div class="card">
     <div class="card-title">🔗 Google Agenda</div>
-    ${window._gcalToken?alertaBox('success','✅ Google Agenda conectado. Novos eventos são sincronizados automaticamente.'):alertaBox('info','Para sincronizar eventos, acesse <b>Configurações → Conectar com Google</b>.')}
-    <button class="btn btn-outline btn-sm mt-8" onclick="nav('config')">⚙️ Configurar Google Agenda</button>
-    ${window._gcalToken?`<button class="btn btn-success btn-sm mt-8" onclick="sincronizarTodosEventos()">🔄 Sincronizar Eventos Existentes</button>`:''}
+    ${alertaBox('info','A agenda mostra suas OS, laudos e vencimentos. Configure as datas nas Ordens de Serviço para aparecerem aqui.')}
+    <button class="btn btn-outline btn-sm mt-8" onclick="verificarAlertasLaudos()">🔔 Ver alertas de vencimento</button>
   </div>`;
 }
 
@@ -1523,35 +1528,23 @@ function exportCSV(dados, nome){
 // ══════════════════════════════════════════════════════════════
 function render_config(){
   const c=document.getElementById('content');
-  const gcalConectado = !!D.config.gcal_client_id;
-  const tokenOk = !!window._gcalToken;
   c.innerHTML=`
   <div class="grid-2">
     <div class="card">
-      <div class="card-title">📅 Google Agenda</div>
-      ${tokenOk
-        ? alertaBox('success','✅ Conectado ao Google Agenda! Novos eventos serão sincronizados automaticamente.')
-        : alertaBox('info','Para sincronizar, informe o Client ID OAuth 2.0 do seu projeto Google Cloud e clique em Conectar.')}
-      <div class="form-group" style="margin-bottom:10px">
-        <label>Client ID (OAuth 2.0)</label>
-        <input type="text" id="cfg-gcal-cid" value="${D.config.gcal_client_id||''}"
-          placeholder="000000000000-xxxxxxxx.apps.googleusercontent.com" style="font-size:12px">
-      </div>
-      <div class="flex gap-8 mt-8">
-        <button class="btn btn-primary btn-sm" onclick="salvarConfigGcal()">💾 Salvar Client ID</button>
-        <button class="btn btn-success btn-sm" onclick="gcalLogin()">🔗 Conectar com Google</button>
-        ${tokenOk?'<button class="btn btn-outline btn-sm" onclick="gcalLogout()">Desconectar</button>':''}
+      <div class="card-title">🔔 Alertas de Vencimento de Laudos</div>
+      ${alertaBox('info','O sistema alerta 30 dias antes do vencimento de cada laudo. Os alertas aparecem no topo ao fazer login.')}
+      <div class="mt-8">
+        <div style="font-size:13px;font-weight:600;color:var(--azul);margin-bottom:8px">Como funciona:</div>
+        <ul style="font-size:13px;color:var(--cinza);line-height:1.9;padding-left:18px">
+          <li>Cadastre laudos com data de vencimento na OS (botão ✏️ → Gerenciar Laudos)</li>
+          <li>30 dias antes aparece alerta colorido no topo de todas as telas</li>
+          <li><b>✅ Já entrei em contato</b> — alerta some permanentemente</li>
+          <li><b>🔔 Lembrar depois</b> — some até o próximo login</li>
+          <li>🔴 Vencido &nbsp; 🟡 Até 7 dias &nbsp; 🔵 Até 30 dias</li>
+        </ul>
       </div>
       <hr class="divider">
-      <div class="text-sm text-muted">
-        <b>Como configurar (uma única vez):</b><br><br>
-        1. Acesse <a href="https://console.cloud.google.com" target="_blank" style="color:var(--azul2)">console.cloud.google.com</a><br>
-        2. Crie um projeto → <b>APIs → Google Calendar API → Ativar</b><br>
-        3. <b>Credenciais → Criar → ID do cliente OAuth 2.0 → Aplicativo da Web</b><br>
-        4. Em <b>Origens JavaScript autorizadas</b> adicione a URL do seu site<br>
-        5. Copie o <b>Client ID</b>, cole acima e salve<br>
-        6. Clique em <b>Conectar com Google</b> e faça login com Com.postoseng@gmail.com
-      </div>
+      <button class="btn btn-outline btn-sm" onclick="verificarAlertasLaudos()">🔄 Verificar alertas agora</button>
     </div>
     <div class="card">
       <div class="card-title">📋 Tabela de Preços dos Serviços</div>
@@ -1566,19 +1559,10 @@ function render_config(){
     <div class="card-title">⚠️ Dados do Sistema</div>
     ${alertaBox('warning','Atenção: as ações abaixo afetam o banco de dados real no Supabase.')}
     <div class="flex gap-8 mt-8">
-      <button class="btn btn-outline" onclick="exportCSV(D.fluxo,\'backup_fluxo\')">⬇️ Backup Fluxo</button>
-      <button class="btn btn-outline" onclick="exportCSV(D.os,\'backup_os\')">⬇️ Backup OS</button>
+      <button class="btn btn-outline" onclick="exportCSV(D.fluxo,'backup_fluxo')">⬇️ Backup Fluxo</button>
+      <button class="btn btn-outline" onclick="exportCSV(D.os,'backup_os')">⬇️ Backup OS</button>
     </div>
   </div>`;
-}
-
-async function salvarConfigGcal(){
-  const cid = document.getElementById('cfg-gcal-cid').value.trim();
-  if(!cid){ alert('Informe o Client ID.'); return; }
-  await sb.from('configuracoes').upsert([{chave:'gcal_client_id',valor:cid}],{onConflict:'chave'});
-  D.config.gcal_client_id = cid;
-  alert('✅ Client ID salvo! Agora clique em Conectar com Google.');
-  render_config();
 }
 
 function modalNovoServico(){
@@ -1600,113 +1584,173 @@ async function salvarNovoServico(){
 }
 
 // ══════════════════════════════════════════════════════════════
-// GOOGLE CALENDAR — OAuth 2.0
+// ALERTAS DE VENCIMENTO DE LAUDOS
 // ══════════════════════════════════════════════════════════════
-window._gcalToken = sessionStorage.getItem('gcal_token') || null;
 
-const GCAL_API = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+// Chaves de sessão para alertas dispensados
+const SESS_LEMBRAR_DEPOIS = 'alertas_lembrar_depois'; // some no próximo login
+const LOCAL_CONTATO_FEITO  = 'alertas_contato_feito';  // permanente
 
-function _loadGIS(){
-  return new Promise((res,rej)=>{
-    if(window.google?.accounts?.oauth2){res();return;}
-    const s=document.createElement('script');
-    s.src='https://accounts.google.com/gsi/client';
-    s.onload=()=>res();
-    s.onerror=()=>rej(new Error('Falha ao carregar Google Identity Services'));
-    document.head.appendChild(s);
-  });
+function getContatoFeito(){
+  try{ return JSON.parse(localStorage.getItem(LOCAL_CONTATO_FEITO)||'[]'); }
+  catch{ return []; }
+}
+function getLembrarDepois(){
+  try{ return JSON.parse(sessionStorage.getItem(SESS_LEMBRAR_DEPOIS)||'[]'); }
+  catch{ return []; }
+}
+function setContatoFeito(key){
+  const arr = getContatoFeito();
+  if(!arr.includes(key)){ arr.push(key); localStorage.setItem(LOCAL_CONTATO_FEITO, JSON.stringify(arr)); }
+}
+function setLembrarDepois(key){
+  const arr = getLembrarDepois();
+  if(!arr.includes(key)){ arr.push(key); sessionStorage.setItem(SESS_LEMBRAR_DEPOIS, JSON.stringify(arr)); }
 }
 
-async function sincronizarTodosEventos(){
-  if(!window._gcalToken){ alert('Conecte ao Google Agenda primeiro nas Configurações.'); return; }
-  const btn = event.target; btn.disabled=true; btn.textContent='⏳ Sincronizando...';
-  let count=0;
-  // OS com data de execução
-  for(const o of D.os){
-    if(o.data_execucao||o.data_entrega_laudo){
-      await gcalOS(o); count++;
-    }
-    // laudos cadastrados
-    const laudos=o.laudos_prazos?(typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos):[];
-    for(const l of laudos){
-      await gcalOS({...o, data_entrega_laudo:l.data_entrega, _laudo_desc:l.descricao, _laudo_venc:l.data_vencimento});
-      count++;
-    }
-  }
-  // Contas a receber pendentes
-  for(const r of D.receber.filter(x=>x.status!=='RECEBIDO')){
-    await gcalReceber(r); count++;
-  }
-  // Contas a pagar pendentes
-  for(const p of D.pagar.filter(x=>x.status!=='PAGO')){
-    await gcalPagar(p); count++;
-  }
-  btn.disabled=false; btn.textContent='🔄 Sincronizar Eventos Existentes';
-  alert(`✅ ${count} eventos sincronizados com o Google Agenda!`);
-}
+function verificarAlertasLaudos(){
+  const hoje      = new Date();
+  hoje.setHours(0,0,0,0);
+  const limite    = new Date(hoje); limite.setDate(limite.getDate()+30);
+  const contatoF  = getContatoFeito();
+  const lembrarD  = getLembrarDepois();
+  const alertas   = [];
 
-async function gcalLogin(){
-  const clientId=D.config.gcal_client_id;
-  if(!clientId){alert('Configure e salve o Client ID primeiro.');return;}
-  try{
-    await _loadGIS();
-    google.accounts.oauth2.initTokenClient({
-      client_id:clientId,
-      scope:'https://www.googleapis.com/auth/calendar.events',
-      callback:(resp)=>{
-        if(resp.error){alert('Erro ao conectar: '+resp.error);return;}
-        window._gcalToken=resp.access_token;
-        sessionStorage.setItem('gcal_token',resp.access_token);
-        alert('✅ Google Agenda conectado! Eventos serão sincronizados automaticamente.');
-        render_config();
-      }
-    }).requestAccessToken();
-  }catch(e){alert('Erro: '+e.message);}
-}
+  D.os.forEach(o => {
+    const laudos = o.laudos_prazos
+      ? (typeof o.laudos_prazos==='string' ? JSON.parse(o.laudos_prazos) : o.laudos_prazos)
+      : [];
 
-function gcalLogout(){
-  window._gcalToken=null;
-  sessionStorage.removeItem('gcal_token');
-  if(window.google?.accounts?.oauth2&&D.config.gcal_client_id)
-    google.accounts.oauth2.revoke(D.config.gcal_client_id,()=>{});
-  alert('Desconectado.');
-  render_config();
-}
+    laudos.forEach((l, idx) => {
+      if(!l.data_vencimento) return;
+      const venc = new Date(l.data_vencimento+'T12:00:00');
+      if(venc > limite) return; // mais de 30 dias — não alerta ainda
 
-async function gcalPost(evento){
-  if(!window._gcalToken){
-    if(D.config.gcal_client_id) console.info('GCal: sem token. Acesse Configurações → Conectar com Google.');
-    return null;
-  }
-  try{
-    const r=await fetch(GCAL_API,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
-      body:JSON.stringify(evento)
+      const key = `os${o.numero_os}_laudo${idx}`;
+      if(contatoF.includes(key)) return;  // já entrou em contato
+      if(lembrarD.includes(key)) return;  // pediu pra lembrar depois (some até próximo login)
+
+      const diasRestantes = Math.ceil((venc - hoje) / (1000*60*60*24));
+      const vencido = diasRestantes < 0;
+
+      alertas.push({
+        key, os: o, laudo: l,
+        diasRestantes,
+        vencido,
+        urgencia: vencido ? 'vermelho' : diasRestantes <= 7 ? 'amarelo' : 'azul'
+      });
     });
-    if(r.status===401){window._gcalToken=null;sessionStorage.removeItem('gcal_token');console.warn('GCal: token expirado. Reconecte nas Configurações.');return null;}
-    if(r.ok){const d=await r.json();return d.id;}
-    const err=await r.json();console.error('GCal erro:',err);
-  }catch(e){console.warn('GCal:',e);}
-  return null;
+  });
+
+  // Também alerta laudos próximos via data_entrega_laudo nas OS sem laudos_prazos detalhados
+  D.os.forEach(o => {
+    if(o.laudos_prazos && JSON.parse(o.laudos_prazos||'[]').length > 0) return;
+    if(!o.data_entrega_laudo) return;
+    const key = `os${o.numero_os}_entrega`;
+    if(getContatoFeito().includes(key)) return;
+    if(getLembrarDepois().includes(key)) return;
+    const venc = new Date(o.data_entrega_laudo+'T12:00:00');
+    const diasRestantes = Math.ceil((venc - hoje) / (1000*60*60*24));
+    if(diasRestantes > 30) return;
+    const vencido = diasRestantes < 0;
+    alertas.push({
+      key,
+      os: o,
+      laudo: {descricao: 'Entrega de laudo — '+o.servico, data_vencimento: o.data_entrega_laudo},
+      diasRestantes, vencido,
+      urgencia: vencido ? 'vermelho' : diasRestantes <= 7 ? 'amarelo' : 'azul'
+    });
+  });
+
+  if(!alertas.length){ removerBannerAlertas(); return; }
+  exibirBannerAlertas(alertas);
 }
 
-async function gcalOS(o){
-  if(o.data_execucao) await gcalPost({summary:`🔧 OS #${o.numero_os} — ${o.cliente_nome}`,description:`Serviço: ${o.servico}`,start:{date:o.data_execucao},end:{date:o.data_execucao},colorId:'7'});
-  if(o.data_entrega_laudo){
-    const dl=o._laudo_desc?`Entrega: ${o._laudo_desc}`:`Entrega do laudo: ${o.servico}`;
-    await gcalPost({summary:`📋 Entrega Laudo — OS #${o.numero_os} ${o.cliente_nome}`,description:dl,start:{date:o.data_entrega_laudo},end:{date:o.data_entrega_laudo},colorId:'5'});
-  }
-  if(o._laudo_venc) await gcalPost({summary:`⚠️ Vencimento Laudo — OS #${o.numero_os} ${o.cliente_nome}`,description:`Renovar: ${o._laudo_desc||o.servico}`,start:{date:o._laudo_venc},end:{date:o._laudo_venc},colorId:'11'});
+function removerBannerAlertas(){
+  document.getElementById('banner-alertas')?.remove();
 }
-async function gcalReceber(r){
-  const d=r.vencimento||r.data_vencimento;if(!d)return;
-  await gcalPost({summary:`💰 Receber: ${r.cliente_nome||r.cliente} — ${fmtBRL(r.valor)}`,description:'Vencimento conta a receber',start:{date:d},end:{date:d},colorId:'2'});
+
+function exibirBannerAlertas(alertas){
+  document.getElementById('banner-alertas')?.remove();
+
+  const cores = {
+    vermelho: { bg:'#FFEBEE', borda:'#D64045', texto:'#B71C1C', icon:'🔴' },
+    amarelo:  { bg:'#FFF8E1', borda:'#E8A020', texto:'#7B5500', icon:'🟡' },
+    azul:     { bg:'#E3F2FD', borda:'#2A6DBF', texto:'#1565C0', icon:'🔵' },
+  };
+
+  const itens = alertas.map(a => {
+    const c = cores[a.urgencia];
+    const dias = a.vencido
+      ? `<b>VENCIDO há ${Math.abs(a.diasRestantes)} dia(s)</b>`
+      : a.diasRestantes === 0
+        ? '<b>Vence HOJE</b>'
+        : `Vence em <b>${a.diasRestantes} dia(s)</b>`;
+    return `
+    <div id="alerta-item-${a.key}" style="
+      background:${c.bg};border-left:4px solid ${c.borda};
+      border-radius:8px;padding:12px 16px;margin-bottom:8px;
+      display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap
+    ">
+      <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:200px">
+        <span style="font-size:20px">${c.icon}</span>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:${c.texto}">
+            OS #${a.os.numero_os} — ${a.os.cliente_nome}
+          </div>
+          <div style="font-size:12px;color:${c.texto};opacity:.85">
+            ${a.laudo.descricao} &nbsp;·&nbsp; ${dias} &nbsp;·&nbsp; Vencimento: ${fmtData(a.laudo.data_vencimento)}
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button onclick="alertaContatoFeito('${a.key}')" style="
+          background:#1A8F5A;color:white;border:none;border-radius:7px;
+          padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer
+        ">✅ Já entrei em contato</button>
+        <button onclick="alertaLembrarDepois('${a.key}')" style="
+          background:white;color:#7B8FA1;border:1px solid #D0D7DE;border-radius:7px;
+          padding:6px 14px;font-size:12px;cursor:pointer
+        ">🔔 Lembrar depois</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const banner = document.createElement('div');
+  banner.id = 'banner-alertas';
+  banner.style.cssText = 'position:fixed;top:56px;left:230px;right:0;z-index:500;padding:12px 20px;background:#F5F6FA;border-bottom:1px solid #E0E6ED;max-height:50vh;overflow-y:auto;';
+  banner.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:700;color:#1A3C5E">
+        ⚠️ ${alertas.length} laudo(s) com vencimento nos próximos 30 dias
+      </div>
+      <button onclick="document.getElementById('banner-alertas').style.display='none'"
+        style="background:none;border:none;font-size:18px;cursor:pointer;color:#7B8FA1">✕</button>
+    </div>
+    ${itens}`;
+  document.body.appendChild(banner);
 }
-async function gcalPagar(p){
-  const d=p.data_vencimento;if(!d)return;
-  await gcalPost({summary:`📤 Pagar: ${p.fornecedor} — ${fmtBRL(p.valor)}`,description:'Vencimento conta a pagar',start:{date:d},end:{date:d},colorId:'11'});
+
+function alertaContatoFeito(key){
+  setContatoFeito(key);
+  document.getElementById('alerta-item-'+key)?.remove();
+  const banner = document.getElementById('banner-alertas');
+  if(banner && banner.querySelectorAll('[id^="alerta-item-"]').length === 0)
+    banner.remove();
 }
+function alertaLembrarDepois(key){
+  setLembrarDepois(key);
+  document.getElementById('alerta-item-'+key)?.remove();
+  const banner = document.getElementById('banner-alertas');
+  if(banner && banner.querySelectorAll('[id^="alerta-item-"]').length === 0)
+    banner.remove();
+}
+
+// Stubs vazios — mantidos para não quebrar chamadas residuais
+async function gcalPost(e){ return null; }
+async function gcalOS(o){}
+async function gcalReceber(r){}
+async function gcalPagar(p){}
 
 // ══════════════════════════════════════════════════════════════
 // PDF ORÇAMENTO — modelo oficial 2 páginas
