@@ -1948,18 +1948,14 @@ function gerarPDFOrcamento(id){
   ];
   certs.forEach(c=>{ checkPag(7); txt(c,ML,y); y+=5; });
 
-  rodape();
+  // ── Encerramento e assinatura — na mesma pág 2, logo após as certificações ──
+  // Espaço necessário: encerramento + data + espaço + linha + assinatura = ~55mm
+  const BLOCO_ASSIN = 60;
+  checkPag(BLOCO_ASSIN);  // se não couber, vira página automaticamente
 
-  // ── PÁG 2 — encerramento e assinatura ──────────────────────
-  doc.addPage();
-  paginaAtual=2;
-  cabecalho(2, totalPaginas);
-
-  checkPag(12);
+  y+=6;
   setFont('normal',9,PRETO);
   txt('Permanecemos à disposição para quaisquer esclarecimentos técnicos ou comerciais.', ML, y); y+=10;
-
-  checkPag(55);
   txt(`${LOCAL_ASSIN}, ${DATA_EXTENSO}`, W/2, y,{align:'center'}); y+=20;
   const linhaX1=W/2-35, linhaX2=W/2+35;
   linha(linhaX1, y, linhaX2, y, PRETO, 0.4); y+=5;
