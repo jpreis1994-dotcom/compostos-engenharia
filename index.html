@@ -1763,9 +1763,10 @@ function gerarPDFOrcamento(id){
 
   // Constantes de layout
   const W=210, H=297, ML=20, MR=20, CW=W-ML-MR;
+  const RODAPE_H = 18;           // altura reservada pro rodapé
+  const LIMITE_Y = H - RODAPE_H - 10; // y máximo antes do rodapé
   const AZUL=[26,60,94], BRANCO=[255,255,255], CINZA_BG=[242,242,242], PRETO=[0,0,0], CINZA=[100,100,100];
 
-  // Dados dinâmicos — preenchidos pelas configurações e pelo orçamento
   const EMPRESA_NOME   = 'H. VELOSO SOARES COMPOSTOS ENGENHARIA & MANUTENÇÃO ME';
   const EMPRESA_END    = 'Av. Ney Siqueira Lopes, Bairro: Centro, Dores do Rio Preto / ES - CEP: 29580-000';
   const EMPRESA_CNPJ   = D.config.empresa_cnpj   || '35.230.742/0001-98';
@@ -1784,51 +1785,35 @@ function gerarPDFOrcamento(id){
   })();
 
   let y=0;
+  let paginaAtual=1;
+  let totalPaginas=2;
 
-  // ── Helpers ────────────────────────────────────────────────
-  function setFont(style,size,color=PRETO){
-    doc.setFont('helvetica',style);
-    doc.setFontSize(size);
-    doc.setTextColor(...color);
-  }
+  function setFont(style,size,color=PRETO){doc.setFont('helvetica',style);doc.setFontSize(size);doc.setTextColor(...color);}
   function txt(text,x,yy,opts={}){doc.text(String(text),x,yy,opts);}
-  function linha(x1,y1,x2,y2,cor=AZUL,lw=0.3){
-    doc.setDrawColor(...cor);doc.setLineWidth(lw);doc.line(x1,y1,x2,y2);
-  }
-  function rect(x,yy,w,h,cor,filled=true){
-    doc.setFillColor(...cor);
-    if(filled) doc.rect(x,yy,w,h,'F');
-    else {doc.setDrawColor(...cor);doc.rect(x,yy,w,h,'S');}
-  }
-  function paragrafo(text,x,yy,maxW,size=9,style='normal',color=PRETO){
-    setFont(style,size,color);
-    const ls=doc.splitTextToSize(text,maxW);
-    doc.text(ls,x,yy);
-    return ls.length*(size*0.3528*1.4);  // altura ocupada em mm
+  function linha(x1,y1,x2,y2,cor=AZUL,lw=0.3){doc.setDrawColor(...cor);doc.setLineWidth(lw);doc.line(x1,y1,x2,y2);}
+
+  function rodape(){
+    const ry=H-RODAPE_H+2;
+    linha(ML,ry,W-MR,ry,AZUL,0.5);
+    setFont('normal',7.5,CINZA);
+    txt(EMPRESA_NOME,     W/2, ry+4,  {align:'center'});
+    txt(EMPRESA_END,      W/2, ry+8,  {align:'center'});
+    txt(`CNPJ: ${EMPRESA_CNPJ}   Tel: ${EMPRESA_TEL}`, W/2, ry+12, {align:'center'});
+    doc.setTextColor(0,0,0);
   }
 
-  // ── Cabeçalho (igual em todas as páginas) ──────────────────
   function cabecalho(pag,total){
     y=15;
-    // Bloco empresa (topo — texto simples, sem caixa colorida)
     setFont('bold',9,PRETO);
     txt(EMPRESA_NOME, ML, y); y+=4.5;
     setFont('normal',8,CINZA);
     txt(EMPRESA_END, ML, y); y+=4;
     txt(`CNPJ: ${EMPRESA_CNPJ}`, ML, y); y+=4;
     txt(`Tel: ${EMPRESA_TEL}`, ML, y); y+=6;
-
-    // Linha separadora azul
     linha(ML, y, W-MR, y, AZUL, 0.8); y+=2;
-
-    // Caixa de identificação da proposta (fundo azul)
     const boxH=30;
-    rect(ML, y, CW, boxH, AZUL);
-
-    // Logo dentro da caixa (esquerda)
+    doc.setFillColor(...AZUL);doc.rect(ML,y,CW,boxH,'F');
     try{doc.addImage('data:image/png;base64,'+LOGO_B64,'PNG', ML+2, y+2, 28, 26);}catch(e){}
-
-    // Textos dentro da caixa (direita da logo)
     const tx=ML+34;
     setFont('bold',9,BRANCO);
     txt('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇOS', tx, y+7);
@@ -1840,62 +1825,66 @@ function gerarPDFOrcamento(id){
     const tipoShort=doc.splitTextToSize(`TIPO DE SERVIÇO: ${orc.tipo_servico||''}`, CW-36);
     txt(tipoShort[0]||'', tx, y+25);
     txt(`Página ${pag} de ${total}`, W-MR-2, y+25,{align:'right'});
-
+    doc.setTextColor(0,0,0);
     y+=boxH+6;
   }
 
-  // ── Rodapé ─────────────────────────────────────────────────
-  function rodape(){
-    const ry=H-14;
-    linha(ML,ry,W-MR,ry,AZUL,0.5);
-    setFont('normal',7.5,CINZA);
-    txt(EMPRESA_NOME,     W/2, ry+4, {align:'center'});
-    txt(EMPRESA_END,      W/2, ry+8, {align:'center'});
-    txt(`CNPJ: ${EMPRESA_CNPJ}   Tel: ${EMPRESA_TEL}`, W/2, ry+12, {align:'center'});
+  // Verifica se cabe na página — se não, vira a página
+  function checkPag(alturaNeeded){
+    if(y + alturaNeeded > LIMITE_Y){
+      rodape();
+      doc.addPage();
+      paginaAtual++;
+      cabecalho(paginaAtual, totalPaginas);
+    }
   }
 
-  // ══════════════════════════════════════════════════════════
-  // PÁGINA 1
-  // ══════════════════════════════════════════════════════════
-  cabecalho(1,2);
+  function secTitulo(txt_){
+    checkPag(12);
+    setFont('bold',9,PRETO); txt(txt_, ML, y); y+=5;
+    setFont('normal',9,PRETO);
+  }
 
-  // Título central
+  function paragrafoBloco(text){
+    const ls=doc.splitTextToSize(text,CW);
+    const h=ls.length*4.8+5;
+    checkPag(h);
+    doc.text(ls,ML,y); y+=h;
+  }
+
+  // ── PÁG 1 ────────────────────────────────────────────────────
+  cabecalho(1, totalPaginas);
+
   setFont('bold',12,PRETO);
+  checkPag(18);
   txt('PROPOSTA COMERCIAL PARA PRESTAÇÃO DE SERVIÇOS', W/2, y,{align:'center'}); y+=7;
   linha(ML+20,y,W-MR-20,y,AZUL,0.4); y+=6;
 
-  // Apresentação
   setFont('normal',9,PRETO);
+  checkPag(10);
   txt(`Proposta que faz ${RESP_NOME}, ${RESP_CARGO}.`, ML, y); y+=5;
   setFont('bold',9,PRETO);
   txt('Ao(à) Interessado(a):', ML, y); y+=7;
 
-  // 1. TIPO DE SERVIÇO
-  setFont('bold',9,PRETO); txt('1. TIPO DE SERVIÇO', ML, y); y+=5;
-  setFont('normal',9,PRETO);
-  const desc1=`Conforme solicitado, apresentamos proposta comercial para execução de ${orc.tipo_servico||'serviços técnicos'}, na unidade localizada em ${orc.cli_municipio||''}/${orc.cli_uf||''}, conforme normas técnicas aplicáveis.`;
-  const ls1=doc.splitTextToSize(desc1,CW); doc.text(ls1,ML,y); y+=ls1.length*4.8+5;
+  // 1.
+  secTitulo('1. TIPO DE SERVIÇO');
+  paragrafoBloco(`Conforme solicitado, apresentamos proposta comercial para execução de ${orc.tipo_servico||'serviços técnicos'}, na unidade localizada em ${orc.cli_municipio||''}/${orc.cli_uf||''}, conforme normas técnicas aplicáveis.`);
 
-  // 2. PRAZO
-  setFont('bold',9,PRETO); txt('2. PRAZO PARA REALIZAÇÃO DOS SERVIÇOS', ML, y); y+=5;
-  setFont('normal',9,PRETO);
-  const desc2=`Os serviços serão executados em aproximadamente ${orc.prazo_execucao||'01 (um) dia útil'}, considerando a disponibilidade da unidade para realização dos trabalhos. Os laudos técnicos serão entregues em até ${orc.prazo_laudos||'7 dias'} após a execução dos ensaios.`;
-  const ls2=doc.splitTextToSize(desc2,CW); doc.text(ls2,ML,y); y+=ls2.length*4.8+5;
+  // 2.
+  secTitulo('2. PRAZO PARA REALIZAÇÃO DOS SERVIÇOS');
+  paragrafoBloco(`Os serviços serão executados em aproximadamente ${orc.prazo_execucao||'01 (um) dia útil'}, considerando a disponibilidade da unidade para realização dos trabalhos. Os laudos técnicos serão entregues em até ${orc.prazo_laudos||'7 dias'} após a execução dos ensaios.`);
 
-  // 3. VALOR DA PROPOSTA
-  setFont('bold',9,PRETO); txt('3. VALOR DA PROPOSTA', ML, y); y+=5;
-
-  // Cabeçalho da tabela
+  // 3. Tabela
+  secTitulo('3. VALOR DA PROPOSTA');
   const cw1=CW*0.45, cw2=CW*0.18, cw3=CW*0.18, cw4=CW*0.19;
-  rect(ML,y,CW,8,AZUL);
+  checkPag(8 + itens.length*9 + 13);
+  doc.setFillColor(...AZUL);doc.rect(ML,y,CW,8,'F');
   setFont('bold',8.5,BRANCO);
-  txt('Descrição do serviço',  ML+cw1/2,    y+5.5,{align:'center'});
-  txt('Quantidade',            ML+cw1+cw2/2,y+5.5,{align:'center'});
-  txt('Valor unitário',        ML+cw1+cw2+cw3/2,y+5.5,{align:'center'});
-  txt('Valor total',           ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
+  txt('Descrição do serviço', ML+cw1/2,    y+5.5,{align:'center'});
+  txt('Quantidade',           ML+cw1+cw2/2,y+5.5,{align:'center'});
+  txt('Valor unitário',       ML+cw1+cw2+cw3/2,y+5.5,{align:'center'});
+  txt('Valor total',          ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
   y+=8;
-
-  // Linhas de itens
   let totalGeral=0;
   itens.forEach((item,idx)=>{
     const q=Number(item.quantidade||item.qtd||1);
@@ -1903,44 +1892,35 @@ function gerarPDFOrcamento(id){
     const d=Number(item.desconto||0);
     const tot=q*v*(1-d/100); totalGeral+=tot;
     const bg=idx%2===0?CINZA_BG:BRANCO;
-    rect(ML,y,CW,9,bg);
-    // bordas laterais suaves
-    doc.setDrawColor(220,220,220); doc.setLineWidth(0.2);
-    doc.line(ML,y,ML,y+9); doc.line(ML+CW,y,ML+CW,y+9); doc.line(ML,y+9,ML+CW,y+9);
-    // separadores de coluna
+    doc.setFillColor(...bg);doc.rect(ML,y,CW,9,'F');
+    doc.setDrawColor(220,220,220);doc.setLineWidth(0.2);
+    doc.line(ML,y,ML,y+9);doc.line(ML+CW,y,ML+CW,y+9);doc.line(ML,y+9,ML+CW,y+9);
     [cw1,cw1+cw2,cw1+cw2+cw3].forEach(cx=>doc.line(ML+cx,y,ML+cx,y+9));
     setFont('bold',8.5,PRETO);
-    // texto de cada célula (trunca se muito longo)
-    const desc=(item.descricao||item.nome||'Serviço');
-    const descShort=doc.splitTextToSize(desc,cw1-4);
+    const descShort=doc.splitTextToSize(item.descricao||item.nome||'Serviço',cw1-4);
     txt(descShort[0], ML+cw1/2,        y+5.5,{align:'center'});
     txt(String(q),    ML+cw1+cw2/2,    y+5.5,{align:'center'});
     txt(fmtBRL(v),    ML+cw1+cw2+cw3/2,y+5.5,{align:'center'});
     txt(fmtBRL(tot),  ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
     y+=9;
   });
-
-  // Linha total
-  rect(ML,y,CW,9,AZUL);
+  doc.setFillColor(...AZUL);doc.rect(ML,y,CW,9,'F');
   setFont('bold',9,BRANCO);
   txt('VALOR TOTAL SERVIÇOS', ML+cw1/2, y+5.5,{align:'center'});
   txt(fmtBRL(totalGeral), ML+cw1+cw2+cw3+cw4/2, y+5.5,{align:'center'});
   y+=13;
 
-  // 4. FORMA DE PAGAMENTO
-  setFont('bold',9,PRETO); txt('4. FORMA DE PAGAMENTO', ML, y); y+=5;
-  setFont('normal',9,PRETO);
-  const pg=orc.condicoes||'Condições de pagamento a serem definidas entre as partes.';
-  const lspg=doc.splitTextToSize(pg,CW); doc.text(lspg,ML,y); y+=lspg.length*4.8+5;
+  // 4.
+  secTitulo('4. FORMA DE PAGAMENTO');
+  paragrafoBloco(orc.condicoes||'Condições de pagamento a serem definidas entre as partes.');
 
-  // 5. VALIDADE
-  setFont('bold',9,PRETO); txt('5. VALIDADE DA PROPOSTA', ML, y); y+=5;
-  setFont('normal',9,PRETO);
+  // 5.
+  secTitulo('5. VALIDADE DA PROPOSTA');
+  checkPag(9);
   txt(`A presente proposta possui validade de ${orc.validade_dias||15} dias a contar da data de emissão.`, ML, y); y+=9;
 
-  // 6. OBSERVAÇÕES
-  setFont('bold',9,PRETO); txt('6. OBSERVAÇÕES', ML, y); y+=5;
-  setFont('normal',9,PRETO);
+  // 6.
+  secTitulo('6. OBSERVAÇÕES');
   const obs=[
     `6.1. Os serviços serão executados pela empresa ${EMPRESA_NOME.split(' ').slice(0,4).join(' ')}, com acompanhamento de responsável técnico habilitado.`,
     `6.2. Para execução dos serviços, deverá ser disponibilizada toda a documentação anterior dos tanques e linhas da unidade.`,
@@ -1949,13 +1929,14 @@ function gerarPDFOrcamento(id){
   if(orc.observacoes) obs.push(`6.4. ${orc.observacoes}`);
   obs.forEach(o=>{
     const lo=doc.splitTextToSize(o,CW);
-    doc.text(lo,ML,y); y+=lo.length*4.8+2;
+    const h=lo.length*4.8+2;
+    checkPag(h);
+    doc.text(lo,ML,y); y+=h;
   });
   y+=3;
 
-  // 7. CERTIFICAÇÕES (ainda na pág 1 se couber, senão pág 2)
-  setFont('bold',9,PRETO); txt('7. CERTIFICAÇÕES E CREDENCIAMENTOS DA EMPRESA PARA EXECUTAR O SERVIÇO', ML, y); y+=5;
-  setFont('normal',9,PRETO);
+  // 7.
+  secTitulo('7. CERTIFICAÇÕES E CREDENCIAMENTOS DA EMPRESA PARA EXECUTAR O SERVIÇO');
   const certs=[
     '• Serviços executados por engenheiro mecânico e equipe técnica especializada;',
     '• Equipamentos de medição com calibração periódica;',
@@ -1965,25 +1946,21 @@ function gerarPDFOrcamento(id){
     '• Empresa cadastrada junto ao CTF/IBAMA para emissão de documentação ambiental;',
     '• Regularidade junto ao Corpo de Bombeiros.',
   ];
-  certs.forEach(c=>{ txt(c,ML,y); y+=5; });
+  certs.forEach(c=>{ checkPag(7); txt(c,ML,y); y+=5; });
 
   rodape();
 
-  // ══════════════════════════════════════════════════════════
-  // PÁGINA 2 — continuação e assinatura
-  // ══════════════════════════════════════════════════════════
+  // ── PÁG 2 — encerramento e assinatura ──────────────────────
   doc.addPage();
-  cabecalho(2,2);
+  paginaAtual=2;
+  cabecalho(2, totalPaginas);
 
-  // Continuação das certificações (página 2 se necessário) — já na pág 2 coloca encerramento
+  checkPag(12);
   setFont('normal',9,PRETO);
   txt('Permanecemos à disposição para quaisquer esclarecimentos técnicos ou comerciais.', ML, y); y+=10;
 
-  // Local e data
-  setFont('normal',9,PRETO);
+  checkPag(55);
   txt(`${LOCAL_ASSIN}, ${DATA_EXTENSO}`, W/2, y,{align:'center'}); y+=20;
-
-  // Linha de assinatura
   const linhaX1=W/2-35, linhaX2=W/2+35;
   linha(linhaX1, y, linhaX2, y, PRETO, 0.4); y+=5;
   setFont('bold',9,PRETO);   txt(RESP_NOME,  W/2, y,{align:'center'}); y+=5;
@@ -1993,7 +1970,6 @@ function gerarPDFOrcamento(id){
 
   rodape();
 
-  // Salva o arquivo
   const nomeArq=`Proposta_${(orc.numero||'').replace('/','_')}_${(orc.cli_razao||'Cliente').slice(0,25).replace(/[^a-zA-Z0-9]/g,'_')}.pdf`;
   doc.save(nomeArq);
 }
