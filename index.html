@@ -302,6 +302,7 @@ async function carregarTudo(){
   try {
     const resPag = await sb.from('contas_pagar').select('*').order('data_vencimento',{ascending:true});
     if(!resPag.error) D.pagar = resPag.data||[];
+    else D.pagar = [];
   } catch(e) { D.pagar = []; }
 
   checkAlertas();
@@ -974,7 +975,12 @@ async function salvarLaudosOS(osId){
   }
 }
 async function salvarEditOS(id){
-  const ok=await sbUpdate('ordens_servico',{status:document.getElementById('edit-os-st').value,data_execucao:document.getElementById('edit-os-exec').value||null,data_entrega_laudo:document.getElementById('edit-os-laudo').value||null,valor_total:parseFloat(document.getElementById('edit-os-val').value)||0,observacao:document.getElementById('edit-os-obs').value},'id',id);
+  const ok=await sbUpdate('ordens_servico',{
+    status:       document.getElementById('edit-os-st').value,
+    data_execucao:document.getElementById('edit-os-exec').value||null,
+    valor_total:  parseFloat(document.getElementById('edit-os-val').value)||0,
+    observacao:   document.getElementById('edit-os-obs').value
+  },'id',id);
   if(ok){fecharModal();nav('os');}
 }
 async function deletarOS(id){if(!confirm('Excluir esta OS?'))return;await sbDelete('ordens_servico','id',id);nav('os');}
