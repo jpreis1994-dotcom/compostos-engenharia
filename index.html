@@ -1693,7 +1693,7 @@ function exibirBannerAlertas(alertas){
         ? '<b>Vence HOJE</b>'
         : `Vence em <b>${a.diasRestantes} dia(s)</b>`;
     return `
-    <div id="alerta-item-${a.key}" style="
+    <div id="alerta-item-${a.key}" data-alerta-key="${a.key}" style="
       background:${c.bg};border-left:4px solid ${c.borda};
       border-radius:8px;padding:12px 16px;margin-bottom:8px;
       display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap
@@ -1710,11 +1710,11 @@ function exibirBannerAlertas(alertas){
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-shrink:0">
-        <button onclick="alertaContatoFeito('${a.key}')" style="
+        <button class="btn-contato" style="
           background:#1A8F5A;color:white;border:none;border-radius:7px;
           padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer
         ">✅ Já entrei em contato</button>
-        <button onclick="alertaLembrarDepois('${a.key}')" style="
+        <button class="btn-lembrar" style="
           background:white;color:#7B8FA1;border:1px solid #D0D7DE;border-radius:7px;
           padding:6px 14px;font-size:12px;cursor:pointer
         ">🔔 Lembrar depois</button>
@@ -1735,6 +1735,13 @@ function exibirBannerAlertas(alertas){
     </div>
     ${itens}`;
   document.body.appendChild(banner);
+
+  // Adiciona listeners APÓS inserir no DOM — evita conflito de aspas no onclick inline
+  banner.querySelectorAll('[data-alerta-key]').forEach(item => {
+    const key = item.dataset.alertaKey;
+    item.querySelector('.btn-contato')?.addEventListener('click', () => alertaContatoFeito(key));
+    item.querySelector('.btn-lembrar')?.addEventListener('click', () => alertaLembrarDepois(key));
+  });
 }
 
 function alertaContatoFeito(key){
