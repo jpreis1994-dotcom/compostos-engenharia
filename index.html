@@ -149,12 +149,12 @@ textarea{resize:vertical;min-height:60px}
     <div class="login-title">Compostos Engenharia</div>
     <div class="login-sub">Painel de Gestão Integrado</div>
     <div class="form-group" style="margin-bottom:14px">
-      <label>Usuário</label>
-      <input type="text" id="login-user" placeholder="hugo ou joao">
+      <label>E-mail</label>
+      <input type="email" id="login-user" placeholder="seu@email.com" autocomplete="username">
     </div>
     <div class="form-group" style="margin-bottom:14px">
       <label>Senha</label>
-      <input type="password" id="login-pass" placeholder="Sua senha">
+      <input type="password" id="login-pass" placeholder="Sua senha" autocomplete="current-password">
     </div>
     <div id="login-erro" class="alert alert-danger-s hidden">Usuário ou senha incorretos.</div>
     <button class="btn btn-primary btn-login" onclick="doLogin()">Entrar</button>
@@ -242,6 +242,8 @@ function fmtBRL(v){ return 'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumF
 function fmtData(d){ if(!d) return '—'; const p=d.split('T')[0].split('-'); return `${p[2]}/${p[1]}/${p[0]}`; }
 function hoje(){ return new Date().toISOString().slice(0,10); }
 function fmtNum(v){ const f=parseFloat(v); return f===Math.floor(f)?f.toFixed(0):f.toFixed(2); }
+// Escapa texto para inserção segura em HTML (previne XSS armazenado)
+function esc(v){ return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
 
 function badge(s){
   const t = String(s||'').toUpperCase().trim();
@@ -251,7 +253,7 @@ function badge(s){
     'EM ATRASO':'vermelho','VENCIDA':'vermelho','RECUSADO':'vermelho',
     'A EXECUTAR':'amarelo','VENCE HOJE':'amarelo','PENDENTE':'amarelo','EM CONVERSA':'cinza',
   };
-  return `<span class="badge badge-${m[t]||'cinza'}">${s}</span>`;
+  return `<span class="badge badge-${m[t]||'cinza'}">${esc(s)}</span>`;
 }
 
 function abrirModal(titulo, corpo, rodape='', grande=false){
@@ -344,23 +346,33 @@ async function sbDelete(tabela, coluna, valor){
 // ══════════════════════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════════════════════
-function doLogin(){
-  const u = document.getElementById('login-user').value.trim().toLowerCase();
-  const s = document.getElementById('login-pass').value;
-  const ok = (u==='hugo'&&s==='compostos2024')||(u==='joao'&&s==='financeiro2024');
-  if(ok){
-    document.getElementById('login-screen').style.display='none';
-    document.getElementById('app-shell').style.display='flex';
-    document.getElementById('sb-nome').textContent = u==='hugo'?'HUGO VELOSO SOARES':'JOÃO PEDRO REIS';
-    document.getElementById('sb-perfil').textContent = u==='hugo'?'DONO / ENG. MECÂNICO':'FINANCEIRO';
-    document.getElementById('topbar-date').textContent = new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
-    nav('dashboard');
-  } else {
-    document.getElementById('login-erro').classList.remove('hidden');
-  }
+// ── Autenticação via Supabase Auth (sem senhas no código) ──
+async function doLogin(){
+  const email = document.getElementById('login-user').value.trim();
+  const senha = document.getElementById('login-pass').value;
+  const erro  = document.getElementById('login-erro');
+  const btn   = document.querySelector('.btn-login');
+  erro.classList.add('hidden');
+  if(!email || !senha){ erro.textContent='Informe e-mail e senha.'; erro.classList.remove('hidden'); return; }
+  const txtBtn = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: senha });
+  btn.disabled = false; btn.innerHTML = txtBtn;
+  if(error || !data || !data.user){ erro.textContent='E-mail ou senha incorretos.'; erro.classList.remove('hidden'); return; }
+  entrarApp(data.user);
+}
+function entrarApp(user){
+  const meta = (user && user.user_metadata) || {};
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('app-shell').style.display='flex';
+  document.getElementById('sb-nome').textContent   = meta.nome || meta.full_name || (user && user.email) || '—';
+  document.getElementById('sb-perfil').textContent = meta.perfil || meta.role || 'Usuário';
+  document.getElementById('topbar-date').textContent = new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+  document.getElementById('login-pass').value='';
+  nav('dashboard');
 }
 document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&document.getElementById('login-screen').style.display!=='none') doLogin(); });
-function doLogout(){
+async function doLogout(){
+  try{ await sb.auth.signOut(); }catch(e){}
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('app-shell').style.display='none';
   document.getElementById('login-user').value='';
@@ -541,18 +553,18 @@ function renderAlertaAtraso(rec){
   rec = rec || D.receber;
   const at=rec.filter(r=>r.status==='EM ATRASO');
   if(!at.length) return alertaBox('success','✅ Nenhuma parcela em atraso no período');
-  return `${alertaBox('danger',`${at.length} parcelas — Total: <b>${fmtBRL(at.reduce((a,r)=>a+Number(r.valor),0))}</b>`)}<div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Vencimento</th><th class="td-num">Valor</th></tr></thead><tbody>${at.slice(0,5).map(r=>`<tr><td>${r.cliente_nome||r.cliente||'—'}</td><td>${fmtData(r.vencimento||r.data_vencimento)}</td><td class="td-num">${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `${alertaBox('danger',`${at.length} parcelas — Total: <b>${fmtBRL(at.reduce((a,r)=>a+Number(r.valor),0))}</b>`)}<div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Vencimento</th><th class="td-num">Valor</th></tr></thead><tbody>${at.slice(0,5).map(r=>`<tr><td>${esc(r.cliente_nome||r.cliente||'—')}</td><td>${fmtData(r.vencimento||r.data_vencimento)}</td><td class="td-num">${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function renderOsExecDash(){
   const os=D.os.filter(o=>o.status==='EM EXECUÇÃO');
   if(!os.length) return alertaBox('info','Nenhuma OS em execução no momento');
-  return `<div class="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Execução</th><th class="td-num">Valor</th></tr></thead><tbody>${os.slice(0,5).map(o=>`<tr><td>#${o.numero_os}</td><td>${o.cliente_nome||'—'}</td><td>${fmtData(o.data_execucao)}</td><td class="td-num">${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Execução</th><th class="td-num">Valor</th></tr></thead><tbody>${os.slice(0,5).map(o=>`<tr><td>#${o.numero_os}</td><td>${esc(o.cliente_nome||'—')}</td><td>${fmtData(o.data_execucao)}</td><td class="td-num">${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function renderProxPagar(pagar){
   pagar = pagar || D.pagar;
   const p=pagar.filter(x=>x.status==='EM ABERTO').sort((a,b)=>(a.data_vencimento||'').localeCompare(b.data_vencimento||'')).slice(0,5);
   if(!p.length) return alertaBox('success','✅ Nenhuma conta a pagar no período');
-  return `<div class="table-wrap"><table><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Vencimento</th><th class="td-num">Valor</th></tr></thead><tbody>${p.map(x=>`<tr><td>${x.fornecedor}</td><td><span class="text-xs">${x.categoria||'—'}</span></td><td>${fmtData(x.data_vencimento)}</td><td class="td-num">${fmtBRL(x.valor)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Vencimento</th><th class="td-num">Valor</th></tr></thead><tbody>${p.map(x=>`<tr><td>${esc(x.fornecedor)}</td><td><span class="text-xs">${esc(x.categoria||'—')}</span></td><td>${fmtData(x.data_vencimento)}</td><td class="td-num">${fmtBRL(x.valor)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -575,7 +587,7 @@ function render_orcamentos(){
       <table id="tbl-orc"><thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Tipo de Serviço</th><th class="td-num">Total</th><th>Status</th><th>Ações</th></tr></thead>
       <tbody>${D.orcamentos.map(o=>`<tr data-status="${o.status}">
         <td><b>#${o.numero}</b></td><td>${fmtData(o.data_emissao)}</td>
-        <td>${o.cli_razao||'—'}</td><td><span class="text-sm">${o.tipo_servico||'—'}</span></td>
+        <td>${esc(o.cli_razao||'—')}</td><td><span class="text-sm">${esc(o.tipo_servico||'—')}</span></td>
         <td class="td-num">${fmtBRL(o.total)}</td><td>${badge(o.status)}</td>
         <td style="white-space:nowrap">
           <button class="btn btn-sm btn-outline" onclick="verOrcamento(${o.id})">👁</button>
@@ -607,12 +619,12 @@ function verOrcamento(id){
   const itens=Array.isArray(o.itens)?o.itens:(o.itens?JSON.parse(o.itens):[]);
   abrirModal(`Orçamento #${o.numero}`,`
   <div class="form-grid">
-    <div><b>Cliente:</b> ${o.cli_razao}</div><div><b>CNPJ:</b> ${o.cli_cnpj||'—'}</div>
-    <div><b>Município/UF:</b> ${o.cli_municipio||'—'}/${o.cli_uf||'—'}</div><div><b>Data:</b> ${fmtData(o.data_emissao)}</div>
-    <div class="span2"><b>Serviço:</b> ${o.tipo_servico||'—'}</div>
+    <div><b>Cliente:</b> ${esc(o.cli_razao)}</div><div><b>CNPJ:</b> ${esc(o.cli_cnpj||'—')}</div>
+    <div><b>Município/UF:</b> ${esc(o.cli_municipio||'—')}/${esc(o.cli_uf||'—')}</div><div><b>Data:</b> ${fmtData(o.data_emissao)}</div>
+    <div class="span2"><b>Serviço:</b> ${esc(o.tipo_servico||'—')}</div>
   </div><hr class="divider">
   <div class="table-wrap"><table><thead><tr><th>Descrição</th><th class="td-num">Qtd</th><th class="td-num">Unit.</th><th class="td-num">Desc%</th><th class="td-num">Total</th></tr></thead><tbody>
-  ${itens.map(i=>`<tr><td>${i.descricao||i.nome||'—'}</td><td class="td-num">${i.quantidade||i.qtd||1}</td><td class="td-num">${fmtBRL(i.valor_unit||i.valor_unitario||0)}</td><td class="td-num">${i.desconto||0}%</td><td class="td-num"><b>${fmtBRL((i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100))}</b></td></tr>`).join('')}
+  ${itens.map(i=>`<tr><td>${esc(i.descricao||i.nome||'—')}</td><td class="td-num">${i.quantidade||i.qtd||1}</td><td class="td-num">${fmtBRL(i.valor_unit||i.valor_unitario||0)}</td><td class="td-num">${i.desconto||0}%</td><td class="td-num"><b>${fmtBRL((i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100))}</b></td></tr>`).join('')}
   <tr><td colspan="4"><b>TOTAL GERAL</b></td><td class="td-num"><b>${fmtBRL(o.total)}</b></td></tr>
   </tbody></table></div>`,
   `<button class="btn btn-primary" onclick="gerarPDFOrcamento(${id})">📄 Baixar PDF</button><button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`,true);
@@ -642,7 +654,7 @@ function modalNovoOrcamento(){
     <label>Tipo de Serviço Técnico</label>
     <select id="orc-servico-id" onchange="atualizarEscopoDoServico()">
       <option value="">— Selecione o serviço —</option>
-      ${tipos.map(s=>`<option value="${s.id}" data-desc="${s.descricao_padrao||''}" data-exec="${s.prazo_execucao||'A combinar'}" data-laudo="${s.prazo_laudo||'A combinar'}" data-validade="${s.validade_proposta||'15 dias'}" data-val="${s.valor_base||0}" data-un="${s.unidade||'un'}">${s.nome}</option>`).join('')}
+      ${tipos.map(s=>`<option value="${s.id}" data-desc="${esc(s.descricao_padrao||'')}" data-exec="${esc(s.prazo_execucao||'A combinar')}" data-laudo="${esc(s.prazo_laudo||'A combinar')}" data-validade="${esc(s.validade_proposta||'15 dias')}" data-val="${s.valor_base||0}" data-un="${esc(s.unidade||'un')}">${esc(s.nome)}</option>`).join('')}
       <option value="custom">✏️ Serviço personalizado</option>
     </select>
   </div>
@@ -788,7 +800,7 @@ function render_os(){
       <div class="filter-group"><div class="filter-label">Serviço</div>
         <select id="f-os-serv" onchange="filtrarTblCol('tbl-os',2,this.value)">
           <option value="">Todos</option>
-          ${[...new Set(D.os.map(o=>o.servico).filter(Boolean))].map(s=>`<option>${s}</option>`).join('')}
+          ${[...new Set(D.os.map(o=>o.servico).filter(Boolean))].map(s=>`<option>${esc(s)}</option>`).join('')}
         </select></div>
       <div class="filter-group"><div class="filter-label">Buscar</div>
         <input type="text" placeholder="Cliente..." oninput="filtrarTbl('tbl-os',this.value)"></div>
@@ -801,10 +813,10 @@ function render_os(){
       <table id="tbl-os"><thead><tr><th>OS</th><th>Cliente</th><th>Serviço</th><th>Status</th><th>Abertura</th><th>Execução</th><th>Laudos</th><th class="td-num">Valor</th><th>Ações</th></tr></thead>
       <tbody>${filtrarPorPeriodo(D.os,'data_abertura').map(o=>{
         const laudos=o.laudos_prazos?(typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos):[];
-        const laudosBadge=laudos.length?`<span class="badge badge-azul" title="${laudos.map(l=>l.descricao).join(', ')}">📋 ${laudos.length}</span>`:'';
+        const laudosBadge=laudos.length?`<span class="badge badge-azul" title="${esc(laudos.map(l=>l.descricao).join(', '))}">📋 ${laudos.length}</span>`:'';
         return`<tr>
-        <td><b>#${o.numero_os}</b></td><td>${o.cliente_nome||'—'}</td>
-        <td><span class="text-xs">${o.servico||'—'}</span></td>
+        <td><b>#${o.numero_os}</b></td><td>${esc(o.cliente_nome||'—')}</td>
+        <td><span class="text-xs">${esc(o.servico||'—')}</span></td>
         <td>${badge(o.status||'—')}</td>
         <td>${fmtData(o.data_abertura)}</td>
         <td>${fmtData(o.data_execucao)}</td>
@@ -940,12 +952,12 @@ function editarOS(id){
       <select id="edit-os-st">${['A EXECUTAR','EM EXECUÇÃO','FINALIZADO','EM CONVERSA'].map(s=>`<option ${o.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
     <div class="form-group"><label>Data de Execução</label><input type="date" id="edit-os-exec" value="${o.data_execucao||''}"></div>
     <div class="form-group"><label>Valor Total (R$)</label><input type="number" id="edit-os-val" value="${o.valor_total}" step="0.01"></div>
-    <div class="form-group span2"><label>Observação</label><textarea id="edit-os-obs">${o.observacao||''}</textarea></div>
+    <div class="form-group span2"><label>Observação</label><textarea id="edit-os-obs">${esc(o.observacao||'')}</textarea></div>
   </div>
   <hr class="divider">
   <div style="font-size:13px;font-weight:600;color:var(--azul);margin-bottom:10px">📋 Laudos e Vencimentos</div>
   ${laudos.length ? `<div class="table-wrap" style="margin-bottom:10px"><table><thead><tr><th>Laudo</th><th>Entrega</th><th>Vencimento</th></tr></thead><tbody>
-    ${laudos.map(l=>`<tr><td>${l.descricao}</td><td>${fmtData(l.data_entrega)}</td><td>${fmtData(l.data_vencimento)||'—'}</td></tr>`).join('')}
+    ${laudos.map(l=>`<tr><td>${esc(l.descricao)}</td><td>${fmtData(l.data_entrega)}</td><td>${fmtData(l.data_vencimento)||'—'}</td></tr>`).join('')}
   </tbody></table></div>` : '<p class="text-muted text-sm">Nenhum laudo cadastrado nesta OS.</p>'}
   <button class="btn btn-sm btn-outline mt-8" onclick="abrirModalLaudosOS(${id})">✏️ Gerenciar Laudos</button>`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarEditOS(${id})">💾 Salvar</button>`);
@@ -956,7 +968,7 @@ function abrirModalLaudosOS(osId){
   const o = D.os.find(x=>x.id===osId); if(!o) return;
   const laudosAtuais = o.laudos_prazos ? (typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos) : [];
   fecharModal();
-  abrirModal(`📋 Laudos — OS #${o.numero_os} (${o.cliente_nome})`,`
+  abrirModal(`📋 Laudos — OS #${o.numero_os} (${esc(o.cliente_nome)})`,`
   <div class="alert-box alert-info" style="margin-bottom:10px;font-size:12px">
     Cadastre cada laudo com data de entrega e data de vencimento para renovação. Aparecem na Agenda.
   </div>
@@ -966,7 +978,7 @@ function abrirModalLaudosOS(osId){
   <div id="os-laudos-list">
     ${laudosAtuais.map((_,i)=>{_laudoIdx=i+1;return `
     <div class="item-row" id="laudo-row-${i}" style="grid-template-columns:2fr 1fr 1fr auto;margin-bottom:8px;align-items:end">
-      <input type="text" id="laudo-desc-${i}" value="${_.descricao||''}" style="width:100%">
+      <input type="text" id="laudo-desc-${i}" value="${esc(_.descricao||'')}" style="width:100%">
       <input type="date" id="laudo-entrega-${i}" value="${_.data_entrega||''}" style="width:100%">
       <input type="date" id="laudo-venc-${i}" value="${_.data_vencimento||''}" style="width:100%">
       <button class="btn btn-sm btn-danger btn-icon" onclick="document.getElementById('laudo-row-${i}').remove()">✕</button>
@@ -1004,7 +1016,7 @@ async function deletarOS(id){if(!confirm('Excluir esta OS?'))return;await sbDele
 function gerarCobrancaOS(osId){
   const o=D.os.find(x=>x.id===osId);if(!o)return;
   abrirModal(`Gerar Cobrança — OS #${o.numero_os}`,`
-  ${alertaBox('info',`Cliente: <b>${o.cliente_nome}</b> — ${fmtBRL(o.valor_total)}`)}
+  ${alertaBox('info',`Cliente: <b>${esc(o.cliente_nome)}</b> — ${fmtBRL(o.valor_total)}`)}
   <div class="form-grid">
     <div class="form-group"><label>Valor (R$)</label><input type="number" id="cob-val" value="${o.valor_total}" step="0.01"></div>
     <div class="form-group"><label>Vencimento</label><input type="date" id="cob-venc" value="${hoje()}"></div>
@@ -1012,9 +1024,10 @@ function gerarCobrancaOS(osId){
     <div class="form-group"><label>Status</label><select id="cob-status"><option>A VENCER</option><option>RECEBIDO</option><option>VENCE HOJE</option></select></div>
     <div class="form-group span2"><label>Observação</label><textarea id="cob-obs" rows="2"></textarea></div>
   </div>`,
-  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-success" onclick="salvarCobrancaOS(${osId},'${o.cliente_nome}',${o.numero_os})">💰 Gerar Cobrança</button>`);
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-success" onclick="salvarCobrancaOS(${osId})">💰 Gerar Cobrança</button>`);
 }
-async function salvarCobrancaOS(osId,cliente,numOS){
+async function salvarCobrancaOS(osId){
+  const _o=D.os.find(x=>x.id===osId)||{}, cliente=_o.cliente_nome||'', numOS=_o.numero_os||'';
   const val=parseFloat(document.getElementById('cob-val').value)||0;
   const venc=document.getElementById('cob-venc').value;
   if(!val||!venc){alert('Informe valor e vencimento.');return;}
@@ -1031,11 +1044,11 @@ function verFuncionariosOS(osId){
   const o=D.os.find(x=>x.id===osId);if(!o)return;
   const funcs=D.funcionarios_os.filter(f=>f.os_id===osId);
   const totalF=funcs.reduce((a,f)=>a+Number(f.valor),0);
-  abrirModal(`👷 Funcionários — OS #${o.numero_os} (${o.cliente_nome})`,`
+  abrirModal(`👷 Funcionários — OS #${o.numero_os} (${esc(o.cliente_nome)})`,`
   ${alertaBox('info',`Total de custos com equipe: <b>${fmtBRL(totalF)}</b>`)}
   <div class="table-wrap" style="margin-bottom:14px">
     <table><thead><tr><th>Nome</th><th>Tipo</th><th>Data</th><th class="td-num">Valor</th><th></th></tr></thead>
-    <tbody>${funcs.map(f=>`<tr><td>${f.nome}</td><td>${f.tipo}</td><td>${fmtData(f.data)}</td><td class="td-num">${fmtBRL(f.valor)}</td>
+    <tbody>${funcs.map(f=>`<tr><td>${esc(f.nome)}</td><td>${esc(f.tipo)}</td><td>${fmtData(f.data)}</td><td class="td-num">${fmtBRL(f.valor)}</td>
       <td><button class="btn btn-sm btn-danger btn-icon" onclick="delFuncOS(${f.id},${osId})">✕</button></td></tr>`).join('')||'<tr><td colspan="5" class="text-muted" style="text-align:center">Nenhum lançamento</td></tr>'}
     </tbody></table>
   </div><hr class="divider">
@@ -1086,11 +1099,11 @@ function render_fluxo(){
         <div class="filter-group"><div class="filter-label">Tipo</div>
           <select id="f-fc-tipo" onchange="filtrarFluxo()"><option value="">Todos</option><option>RECEITA</option><option>DESPESA</option></select></div>
         <div class="filter-group"><div class="filter-label">Categoria</div>
-          <select id="f-fc-cat" onchange="filtrarFluxo()"><option value="">Todas</option>${servicos.map(s=>`<option>${s}</option>`).join('')}</select></div>
+          <select id="f-fc-cat" onchange="filtrarFluxo()"><option value="">Todas</option>${servicos.map(s=>`<option>${esc(s)}</option>`).join('')}</select></div>
         <div class="filter-group"><div class="filter-label">OS</div>
           <select id="f-fc-os" onchange="filtrarFluxo()">
             <option value="">Todas</option>
-            ${osNums.map(n=>{const o=D.os.find(x=>x.numero_os==n);return`<option value="${n}">#${n}${o?' — '+o.cliente_nome.slice(0,15):''}</option>`;}).join('')}
+            ${osNums.map(n=>{const o=D.os.find(x=>x.numero_os==n);return`<option value="${n}">#${n}${o?' — '+esc(o.cliente_nome.slice(0,15)):''}</option>`;}).join('')}
           </select></div>
         <div class="filter-group"><div class="filter-label">Buscar</div>
           <input type="text" id="f-fc-busca" placeholder="Cliente..." oninput="filtrarFluxo()"></div>
@@ -1102,13 +1115,13 @@ function render_fluxo(){
       <tbody id="tb-fluxo">
       ${fluxoF.map(r=>{
         const osVinc = r.os_id ? D.os.find(o=>o.numero_os==r.os_id) : null;
-        const osLabel = r.os_id ? `<span class="badge badge-azul" title="${osVinc?osVinc.cliente_nome:''}">#${r.os_id}</span>` : '<span class="text-muted">—</span>';
-        return`<tr data-tipo="${r.tipo}" data-cat="${r.categoria||r.tipo_servico||''}" data-cli="${r.cliente||r.cliente_nome||''}" data-os="${r.os_id||''}">
+        const osLabel = r.os_id ? `<span class="badge badge-azul" title="${osVinc?esc(osVinc.cliente_nome):''}">#${r.os_id}</span>` : '<span class="text-muted">—</span>';
+        return`<tr data-tipo="${esc(r.tipo)}" data-cat="${esc(r.categoria||r.tipo_servico||'')}" data-cli="${esc(r.cliente||r.cliente_nome||'')}" data-os="${r.os_id||''}">
           <td>${fmtData(r.data_movimento)}</td>
           <td>${osLabel}</td>
-          <td>${r.cliente||r.cliente_nome||'—'}</td>
+          <td>${esc(r.cliente||r.cliente_nome||'—')}</td>
           <td>${badge(r.tipo)}</td>
-          <td><span class="text-xs">${r.categoria||r.tipo_servico||r.tipo_despesa||'—'}</span></td>
+          <td><span class="text-xs">${esc(r.categoria||r.tipo_servico||r.tipo_despesa||'—')}</span></td>
           <td class="td-num" style="color:${r.tipo==='RECEITA'?'#1A8F5A':'#D64045'};font-weight:700">${fmtBRL(r.valor)}</td>
           <td style="white-space:nowrap">
             <button class="btn btn-sm btn-outline btn-icon" onclick="editarLancamento(${r.id})" title="Editar">✏️</button>
@@ -1151,7 +1164,7 @@ function modalNovoLancamento(){
       <label>🔧 Vincular à OS (opcional)</label>
       <select id="fc-os-id">
         <option value="">— Sem vínculo —</option>
-        ${osAtivas.map(o=>`<option value="${o.numero_os}">#${o.numero_os} — ${o.cliente_nome} (${o.servico})</option>`).join('')}
+        ${osAtivas.map(o=>`<option value="${o.numero_os}">#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico)})</option>`).join('')}
       </select>
     </div>
     <div class="form-group span2"><label>Observação</label><textarea id="fc-obs" rows="2"></textarea></div>
@@ -1213,10 +1226,10 @@ function editarLancamento(id){
       <label>🔧 Vincular à OS (opcional)</label>
       <select id="efc-os-id">
         <option value="">— Sem vínculo —</option>
-        ${osAtivas.map(o=>`<option value="${o.numero_os}" ${r.os_id==o.numero_os?'selected':''}>#${o.numero_os} — ${o.cliente_nome} (${o.servico})</option>`).join('')}
+        ${osAtivas.map(o=>`<option value="${o.numero_os}" ${r.os_id==o.numero_os?'selected':''}>#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico)})</option>`).join('')}
       </select>
     </div>
-    <div class="form-group span2"><label>Observação</label><textarea id="efc-obs" rows="2">${r.observacao||''}</textarea></div>
+    <div class="form-group span2"><label>Observação</label><textarea id="efc-obs" rows="2">${esc(r.observacao||'')}</textarea></div>
   </div>`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
    <button class="btn btn-danger" onclick="deletarFluxo(${id})">🗑️ Excluir</button>
@@ -1289,12 +1302,12 @@ function render_receber(){
         <td class="text-xs text-muted">#${r.id}</td>
         <td>${r.os_id?`#${r.os_id}`:'—'}</td>
         <td>${fmtData(r.vencimento||r.data_vencimento)}</td>
-        <td>${r.cliente_nome||r.cliente||'—'}</td>
-        <td>${r.forma_pagamento||'—'}</td>
+        <td>${esc(r.cliente_nome||r.cliente||'—')}</td>
+        <td>${esc(r.forma_pagamento||'—')}</td>
         <td>${badge(r.status)}</td>
         <td class="td-num font-600">${fmtBRL(r.valor)}</td>
         <td style="white-space:nowrap">
-          ${r.status!=='RECEBIDO'?`<button class="btn btn-sm btn-success" onclick="marcarRecebido(${r.id},${r.valor},'${(r.cliente_nome||r.cliente||'').replace(/'/g,"\\'")}','${r.vencimento||r.data_vencimento}')">✅</button>`:''}
+          ${r.status!=='RECEBIDO'?`<button class="btn btn-sm btn-success" onclick="marcarRecebido(${r.id})">✅</button>`:''}
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarReceber(${r.id})">✕</button>
         </td></tr>`).join('')}
       </tbody></table>
@@ -1302,7 +1315,8 @@ function render_receber(){
   </div>`;
 }
 function aplicarFiltroReceber(){ lerFiltro(); render_receber(); }
-async function marcarRecebido(id,valor,cliente,data){
+async function marcarRecebido(id){
+  const _r=D.receber.find(x=>x.id===id)||{}, valor=_r.valor||0, cliente=_r.cliente_nome||_r.cliente||'', data=_r.vencimento||_r.data_vencimento||'';
   if(!confirm(`Marcar ${fmtBRL(valor)} de ${cliente} como RECEBIDO e lançar no fluxo?`))return;
   await sbUpdate('contas_receber',{status:'RECEBIDO'},'id',id);
   await sbInsert('fluxo_caixa',{data_movimento:data,cliente,tipo:'RECEITA',categoria:'RECEBIMENTO',valor,mes:parseInt((data||'').slice(5,7)),ano:parseInt((data||'').slice(0,4))});
@@ -1366,12 +1380,12 @@ function render_pagar(){
     <div class="table-wrap">
       <table id="tbl-pag"><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Vencimento</th><th class="td-num">Valor</th><th>Status</th><th>Ações</th></tr></thead>
       <tbody>${pagF.map(p=>`<tr>
-        <td>${p.fornecedor}</td><td><span class="text-xs">${p.categoria||'—'}</span></td>
+        <td>${esc(p.fornecedor)}</td><td><span class="text-xs">${esc(p.categoria||'—')}</span></td>
         <td>${fmtData(p.data_vencimento)}</td>
         <td class="td-num font-600">${fmtBRL(p.valor)}</td>
         <td>${badge(p.status)}</td>
         <td style="white-space:nowrap">
-          ${p.status!=='PAGO'?`<button class="btn btn-sm btn-success" onclick="marcarPago(${p.id},${p.valor},'${(p.fornecedor||'').replace(/'/g,"\\'")}','${p.data_vencimento}')">✅ Pago</button>`:''}
+          ${p.status!=='PAGO'?`<button class="btn btn-sm btn-success" onclick="marcarPago(${p.id})">✅ Pago</button>`:''}
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarPagar(${p.id})">✕</button>
         </td></tr>`).join('')}
       </tbody></table>
@@ -1399,7 +1413,8 @@ async function salvarPagar(){
   const ok=await sbInsert('contas_pagar',{fornecedor:forn,categoria:document.getElementById('pg-cat').value,valor:val,data_vencimento:venc,tipo_pagamento:document.getElementById('pg-forma').value,status,observacao:document.getElementById('pg-obs').value});
   if(ok){fecharModal();nav('pagar');}
 }
-async function marcarPago(id,valor,forn,data){
+async function marcarPago(id){
+  const _p=D.pagar.find(x=>x.id===id)||{}, valor=_p.valor||0, forn=_p.fornecedor||'', data=_p.data_vencimento||'';
   if(!confirm(`Marcar ${fmtBRL(valor)} para ${forn} como PAGO e lançar no fluxo?`))return;
   await sbUpdate('contas_pagar',{status:'PAGO'},'id',id);
   await sbInsert('fluxo_caixa',{data_movimento:data,cliente:forn,tipo:'DESPESA',categoria:'PAGAMENTO',valor,mes:parseInt((data||'').slice(5,7)),ano:parseInt((data||'').slice(0,4))});
@@ -1418,11 +1433,11 @@ function renderCalendario(ano, mes){
   const mesStr=`${ano}-${String(mes+1).padStart(2,'0')}`;
   const eventos={};
   D.os.forEach(o=>{
-    if(o.data_execucao?.startsWith(mesStr)){if(!eventos[o.data_execucao])eventos[o.data_execucao]=[];eventos[o.data_execucao].push(`<div class="agenda-event ev-os" title="OS #${o.numero_os} — ${o.cliente_nome}">🔧 OS#${o.numero_os} ${(o.cliente_nome||'').slice(0,10)}</div>`);}
+    if(o.data_execucao?.startsWith(mesStr)){if(!eventos[o.data_execucao])eventos[o.data_execucao]=[];eventos[o.data_execucao].push(`<div class="agenda-event ev-os" title="OS #${o.numero_os} — ${esc(o.cliente_nome)}">🔧 OS#${o.numero_os} ${esc((o.cliente_nome||'').slice(0,10))}</div>`);}
     if(o.data_entrega_laudo?.startsWith(mesStr)){if(!eventos[o.data_entrega_laudo])eventos[o.data_entrega_laudo]=[];eventos[o.data_entrega_laudo].push(`<div class="agenda-event ev-laudo" title="Laudo OS #${o.numero_os}">📋 Laudo #${o.numero_os}</div>`);}
   });
-  D.receber.filter(r=>r.status!=='RECEBIDO').forEach(r=>{const d=r.vencimento||r.data_vencimento;if(d?.startsWith(mesStr)){if(!eventos[d])eventos[d]=[];eventos[d].push(`<div class="agenda-event ev-receber" title="${r.cliente_nome||r.cliente} ${fmtBRL(r.valor)}">💰 ${(r.cliente_nome||r.cliente||'').slice(0,12)}</div>`);}});
-  D.pagar.filter(p=>p.status!=='PAGO').forEach(p=>{if(p.data_vencimento?.startsWith(mesStr)){if(!eventos[p.data_vencimento])eventos[p.data_vencimento]=[];eventos[p.data_vencimento].push(`<div class="agenda-event ev-pagar" title="${p.fornecedor} ${fmtBRL(p.valor)}">📤 ${(p.fornecedor||'').slice(0,12)}</div>`);}});
+  D.receber.filter(r=>r.status!=='RECEBIDO').forEach(r=>{const d=r.vencimento||r.data_vencimento;if(d?.startsWith(mesStr)){if(!eventos[d])eventos[d]=[];eventos[d].push(`<div class="agenda-event ev-receber" title="${esc(r.cliente_nome||r.cliente)} ${fmtBRL(r.valor)}">💰 ${esc((r.cliente_nome||r.cliente||'').slice(0,12))}</div>`);}});
+  D.pagar.filter(p=>p.status!=='PAGO').forEach(p=>{if(p.data_vencimento?.startsWith(mesStr)){if(!eventos[p.data_vencimento])eventos[p.data_vencimento]=[];eventos[p.data_vencimento].push(`<div class="agenda-event ev-pagar" title="${esc(p.fornecedor)} ${fmtBRL(p.valor)}">📤 ${esc((p.fornecedor||'').slice(0,12))}</div>`);}});
   const sem=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   let grid=`<div class="agenda-grid" style="margin-bottom:6px">${sem.map(s=>`<div style="text-align:center;font-size:11px;font-weight:600;color:var(--cinza);padding:4px">${s}</div>`).join('')}</div><div class="agenda-grid">`;
   for(let i=0;i<primeiroDia;i++) grid+='<div></div>';
@@ -1468,7 +1483,7 @@ function render_funcionarios(){
     <div class="filters">
       <select onchange="if(this.value)verFuncionariosOS(parseInt(this.value))">
         <option value="">— Selecionar OS ativa —</option>
-        ${osAtivas.map(o=>`<option value="${o.id}">#${o.numero_os} — ${o.cliente_nome}</option>`).join('')}
+        ${osAtivas.map(o=>`<option value="${o.id}">#${o.numero_os} — ${esc(o.cliente_nome)}</option>`).join('')}
       </select>
     </div>
   </div>
@@ -1476,7 +1491,7 @@ function render_funcionarios(){
     <div class="card-title">Todos os lançamentos de equipe</div>
     <div class="table-wrap">
       <table><thead><tr><th>OS</th><th>Cliente</th><th>Funcionário</th><th>Tipo</th><th>Data</th><th class="td-num">Valor</th></tr></thead>
-      <tbody>${D.funcionarios_os.map(f=>{const o=D.os.find(x=>x.id===f.os_id);return`<tr><td>#${o?.numero_os||f.os_id}</td><td>${o?.cliente_nome||'—'}</td><td>${f.nome}</td><td><span class="text-xs">${f.tipo}</span></td><td>${fmtData(f.data)}</td><td class="td-num">${fmtBRL(f.valor)}</td></tr>`;}).join('')||'<tr><td colspan="6" class="text-muted" style="text-align:center">Nenhum lançamento</td></tr>'}
+      <tbody>${D.funcionarios_os.map(f=>{const o=D.os.find(x=>x.id===f.os_id);return`<tr><td>#${o?.numero_os||f.os_id}</td><td>${esc(o?.cliente_nome||'—')}</td><td>${esc(f.nome)}</td><td><span class="text-xs">${esc(f.tipo)}</span></td><td>${fmtData(f.data)}</td><td class="td-num">${fmtBRL(f.valor)}</td></tr>`;}).join('')||'<tr><td colspan="6" class="text-muted" style="text-align:center">Nenhum lançamento</td></tr>'}
       </tbody></table>
     </div>
   </div>`;
@@ -1572,7 +1587,7 @@ function render_config(){
       <div class="card-title">📋 Tabela de Preços dos Serviços</div>
       <div class="table-wrap" style="margin-bottom:12px">
         <table><thead><tr><th>Serviço</th><th class="td-num">Valor Base</th><th>Unidade</th></tr></thead>
-        <tbody>${D.tipos_servico.map(s=>`<tr><td>${s.nome}</td><td class="td-num">${fmtBRL(s.valor_base||0)}</td><td>${s.unidade||'un'}</td></tr>`).join('')}</tbody></table>
+        <tbody>${D.tipos_servico.map(s=>`<tr><td>${esc(s.nome)}</td><td class="td-num">${fmtBRL(s.valor_base||0)}</td><td>${esc(s.unidade||'un')}</td></tr>`).join('')}</tbody></table>
       </div>
       <button class="btn btn-outline btn-sm" onclick="modalNovoServico()">＋ Novo Tipo de Serviço</button>
     </div>
@@ -1583,6 +1598,9 @@ function render_config(){
     <div class="flex gap-8 mt-8">
       <button class="btn btn-outline" onclick="exportCSV(D.fluxo,'backup_fluxo')">⬇️ Backup Fluxo</button>
       <button class="btn btn-outline" onclick="exportCSV(D.os,'backup_os')">⬇️ Backup OS</button>
+      <button class="btn btn-outline" onclick="exportCSV(D.receber,'backup_receber')">⬇️ Backup Receber</button>
+      <button class="btn btn-outline" onclick="exportCSV(D.pagar,'backup_pagar')">⬇️ Backup Pagar</button>
+      <button class="btn btn-outline" onclick="exportCSV(D.orcamentos,'backup_orcamentos')">⬇️ Backup Orçamentos</button>
     </div>
   </div>`;
 }
@@ -1708,7 +1726,7 @@ function exibirBannerAlertas(alertas){
       : a.diasRestantes === 0
         ? 'vence HOJE'
         : `vence em ${a.diasRestantes} dia(s)`;
-    const msg = `O laudo "${a.laudo.descricao}" da OS #${a.os.numero_os} (${a.os.cliente_nome}) ${diasTxt} — ${fmtData(a.laudo.data_vencimento)}. Já entrou em contato?`;
+    const msg = `O laudo "${esc(a.laudo.descricao)}" da OS #${a.os.numero_os} (${esc(a.os.cliente_nome)}) ${diasTxt} — ${fmtData(a.laudo.data_vencimento)}. Já entrou em contato?`;
     return `
     <div id="alerta-item-${a.key}" data-alerta-key="${a.key}" style="
       background:${c.bg};border-left:4px solid ${c.borda};
@@ -2003,10 +2021,15 @@ function filtrarTblStatus(tblId,val,col){filtrarTblCol(tblId,col,val);}
 // ══════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════
-window.addEventListener('load',()=>{
+window.addEventListener('load',async ()=>{
   // Injeta logo nos elementos de imagem
   document.getElementById('login-logo-img').src='data:image/png;base64,'+LOGO_B64;
   document.getElementById('sidebar-logo-img').src='data:image/png;base64,'+LOGO_B64;
+  // Restaura sessão ativa (evita logout ao recarregar a página)
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(session && session.user) entrarApp(session.user);
+  }catch(e){ console.error('getSession', e); }
 });
 </script>
 </body>
