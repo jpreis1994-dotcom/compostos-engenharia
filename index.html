@@ -1032,12 +1032,11 @@ async function salvarCobrancaOS(osId){
   const venc=document.getElementById('cob-venc').value;
   if(!val||!venc){alert('Informe valor e vencimento.');return;}
   const status=document.getElementById('cob-status').value;
-  const ok=await sbInsert('contas_receber',{os_id:osId,cliente_nome:cliente,valor:val,vencimento:venc,forma_pagamento:document.getElementById('cob-forma').value,status,observacao:document.getElementById('cob-obs').value});
-  if(ok){
-    if(status==='RECEBIDO') await sbInsert('fluxo_caixa',{data_movimento:venc,cliente:cliente,tipo:'RECEITA',categoria:`OS #${numOS}`,valor:val,mes:parseInt(venc.slice(5,7)),ano:parseInt(venc.slice(0,4))});
-    await gcalReceber({cliente_nome:cliente,valor:val,vencimento:venc});
-    fecharModal();alert('✅ Cobrança gerada!');
-  }
+  const {data:novaRec,error:errRec}=await sb.from('contas_receber').insert([{os_id:osId,cliente_nome:cliente,valor:val,vencimento:venc,forma_pagamento:document.getElementById('cob-forma').value,status,observacao:document.getElementById('cob-obs').value}]).select().single();
+  if(errRec){alert('Erro ao salvar: '+errRec.message);return;}
+  if(status==='RECEBIDO') await sbInsert('fluxo_caixa',{data_movimento:venc,cliente:cliente,tipo:'RECEITA',categoria:`OS #${numOS}`,valor:val,mes:parseInt(venc.slice(5,7)),ano:parseInt(venc.slice(0,4)),conta_receber_id:novaRec?novaRec.id:null});
+  await gcalReceber({cliente_nome:cliente,valor:val,vencimento:venc});
+  fecharModal();alert('✅ Cobrança gerada!');
 }
 
 function verFuncionariosOS(osId){
@@ -1167,11 +1166,25 @@ function modalNovoLancamento(){
         ${osAtivas.map(o=>`<option value="${o.numero_os}">#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico)})</option>`).join('')}
       </select>
     </div>
+    <div class="form-group span2" id="fc-rec-wrap">
+      <label>💰 Quitar uma Conta a Receber (opcional)</label>
+      <select id="fc-rec-id" onchange="preencherDeReceber()">
+        <option value="">— Não vincular —</option>
+        ${D.receber.filter(r=>r.status!=='RECEBIDO').map(r=>`<option value="${r.id}">#${r.id} — ${esc(r.cliente_nome||r.cliente||'')} (${fmtBRL(r.valor)})</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group span2" id="fc-pag-wrap" style="display:none">
+      <label>📤 Quitar uma Conta a Pagar (opcional)</label>
+      <select id="fc-pag-id" onchange="preencherDePagar()">
+        <option value="">— Não vincular —</option>
+        ${D.pagar.filter(p=>p.status!=='PAGO').map(p=>`<option value="${p.id}">#${p.id} — ${esc(p.fornecedor||'')} (${fmtBRL(p.valor)})</option>`).join('')}
+      </select>
+    </div>
     <div class="form-group span2"><label>Observação</label><textarea id="fc-obs" rows="2"></textarea></div>
   </div>`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarLancamento()">💾 Salvar</button>`);
 }
-function toggleCatFC(){const t=document.getElementById('fc-tipo').value;document.getElementById('fc-cat-rec').style.display=t==='RECEITA'?'':'none';document.getElementById('fc-cat-desp').style.display=t==='DESPESA'?'':'none';}
+function toggleCatFC(){const t=document.getElementById('fc-tipo').value;document.getElementById('fc-cat-rec').style.display=t==='RECEITA'?'':'none';document.getElementById('fc-cat-desp').style.display=t==='DESPESA'?'':'none';const rw=document.getElementById('fc-rec-wrap'),pw=document.getElementById('fc-pag-wrap');if(rw)rw.style.display=t==='RECEITA'?'':'none';if(pw)pw.style.display=t==='DESPESA'?'':'none';const ri=document.getElementById('fc-rec-id'),pi=document.getElementById('fc-pag-id');if(t!=='RECEITA'&&ri)ri.value='';if(t!=='DESPESA'&&pi)pi.value='';}
 async function salvarLancamento(){
   const data=document.getElementById('fc-data').value,
         tipo=document.getElementById('fc-tipo').value,
@@ -1181,6 +1194,8 @@ async function salvarLancamento(){
   if(!cli||!valor){alert('Informe cliente e valor.');return;}
   const cat=tipo==='RECEITA'?document.getElementById('fc-cat-rec').value:document.getElementById('fc-cat-desp').value;
   const osId = osIdSel ? parseInt(osIdSel) : null;
+  const recSel = tipo==='RECEITA' ? (document.getElementById('fc-rec-id')||{}).value : '';
+  const pagSel = tipo==='DESPESA' ? (document.getElementById('fc-pag-id')||{}).value : '';
   const ok=await sbInsert('fluxo_caixa',{
     data_movimento:data,
     cliente:cli,
@@ -1190,11 +1205,32 @@ async function salvarLancamento(){
     mes:parseInt(data.slice(5,7)),
     ano:parseInt(data.slice(0,4)),
     os_id:osId,
+    conta_receber_id: recSel?parseInt(recSel):null,
+    conta_pagar_id: pagSel?parseInt(pagSel):null,
     observacao:document.getElementById('fc-obs').value
   });
-  if(ok){fecharModal();nav('fluxo');}
+  if(ok){
+    if(recSel) await sbUpdate('contas_receber',{status:'RECEBIDO'},'id',parseInt(recSel));
+    if(pagSel) await sbUpdate('contas_pagar',{status:'PAGO'},'id',parseInt(pagSel));
+    fecharModal();nav('fluxo');
+  }
 }
-async function deletarFluxo(id){if(!confirm('Excluir este lançamento?'))return;await sbDelete('fluxo_caixa','id',id);nav('fluxo');}
+function preencherDeReceber(){
+  const r=D.receber.find(x=>x.id===parseInt(document.getElementById('fc-rec-id').value||0));
+  if(r){document.getElementById('fc-cli').value=r.cliente_nome||r.cliente||'';document.getElementById('fc-valor').value=r.valor||0;}
+}
+function preencherDePagar(){
+  const p=D.pagar.find(x=>x.id===parseInt(document.getElementById('fc-pag-id').value||0));
+  if(p){document.getElementById('fc-cli').value=p.fornecedor||'';document.getElementById('fc-valor').value=p.valor||0;}
+}
+async function deletarFluxo(id){
+  const f=D.fluxo.find(x=>x.id===id)||{};
+  if(!confirm('Excluir este lançamento?'))return;
+  await sbDelete('fluxo_caixa','id',id);
+  if(f.conta_receber_id && confirm('Este lançamento quitava uma Conta a Receber. Voltar essa conta para "A VENCER"?')) await sbUpdate('contas_receber',{status:'A VENCER'},'id',f.conta_receber_id);
+  if(f.conta_pagar_id && confirm('Este lançamento quitava uma Conta a Pagar. Voltar essa conta para "EM ABERTO"?')) await sbUpdate('contas_pagar',{status:'EM ABERTO'},'id',f.conta_pagar_id);
+  nav('fluxo');
+}
 
 function editarLancamento(id){
   const r = D.fluxo.find(x=>x.id===id); if(!r) return;
@@ -1304,7 +1340,7 @@ function render_receber(){
         <td>${fmtData(r.vencimento||r.data_vencimento)}</td>
         <td>${esc(r.cliente_nome||r.cliente||'—')}</td>
         <td>${esc(r.forma_pagamento||'—')}</td>
-        <td>${badge(r.status)}</td>
+        <td>${badge(r.status)}${D.fluxo.some(f=>f.conta_receber_id===r.id)?' <span title="Lançado no Fluxo de Caixa">💰</span>':''}</td>
         <td class="td-num font-600">${fmtBRL(r.valor)}</td>
         <td style="white-space:nowrap">
           ${r.status!=='RECEBIDO'?`<button class="btn btn-sm btn-success" onclick="marcarRecebido(${r.id})">✅</button>`:''}
@@ -1315,12 +1351,27 @@ function render_receber(){
   </div>`;
 }
 function aplicarFiltroReceber(){ lerFiltro(); render_receber(); }
-async function marcarRecebido(id){
-  const _r=D.receber.find(x=>x.id===id)||{}, valor=_r.valor||0, cliente=_r.cliente_nome||_r.cliente||'', data=_r.vencimento||_r.data_vencimento||'';
-  if(!confirm(`Marcar ${fmtBRL(valor)} de ${cliente} como RECEBIDO e lançar no fluxo?`))return;
+function marcarRecebido(id){
+  const r=D.receber.find(x=>x.id===id); if(!r)return;
+  const cliente=r.cliente_nome||r.cliente||'', jaNoFluxo=D.fluxo.some(f=>f.conta_receber_id===id);
+  abrirModal('Confirmar Recebimento',`
+    ${alertaBox('info',`Recebimento de <b>${esc(cliente)}</b> — <b>${fmtBRL(r.valor||0)}</b>`)}
+    <div class="form-group"><label>Data do recebimento</label><input type="date" id="rec-data" value="${r.vencimento||r.data_vencimento||hoje()}"></div>
+    <label class="flex flex-center gap-8" style="margin-top:14px;font-size:13px;font-weight:500;color:var(--texto);cursor:pointer">
+      <input type="checkbox" id="rec-fluxo" ${jaNoFluxo?'':'checked'} style="width:auto"> Lançar no Fluxo de Caixa
+    </label>
+    ${jaNoFluxo?alertaBox('warning','⚠️ Esta conta já tem um lançamento vinculado no fluxo. Deixe desmarcado para não duplicar.'):''}
+  `,
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-success" onclick="confirmarRecebido(${id})">✅ Confirmar</button>`);
+}
+async function confirmarRecebido(id){
+  const r=D.receber.find(x=>x.id===id); if(!r)return;
+  const data=document.getElementById('rec-data').value||hoje();
+  const lancar=document.getElementById('rec-fluxo').checked;
+  const cliente=r.cliente_nome||r.cliente||'';
   await sbUpdate('contas_receber',{status:'RECEBIDO'},'id',id);
-  await sbInsert('fluxo_caixa',{data_movimento:data,cliente,tipo:'RECEITA',categoria:'RECEBIMENTO',valor,mes:parseInt((data||'').slice(5,7)),ano:parseInt((data||'').slice(0,4))});
-  checkAlertas();nav('receber');
+  if(lancar) await sbInsert('fluxo_caixa',{data_movimento:data,cliente,tipo:'RECEITA',categoria:'RECEBIMENTO',valor:r.valor||0,mes:parseInt(data.slice(5,7)),ano:parseInt(data.slice(0,4)),conta_receber_id:id});
+  fecharModal();checkAlertas();nav('receber');
 }
 async function deletarReceber(id){if(!confirm('Excluir?'))return;await sbDelete('contas_receber','id',id);nav('receber');}
 function modalNovaCobranca(){
@@ -1383,7 +1434,7 @@ function render_pagar(){
         <td>${esc(p.fornecedor)}</td><td><span class="text-xs">${esc(p.categoria||'—')}</span></td>
         <td>${fmtData(p.data_vencimento)}</td>
         <td class="td-num font-600">${fmtBRL(p.valor)}</td>
-        <td>${badge(p.status)}</td>
+        <td>${badge(p.status)}${D.fluxo.some(f=>f.conta_pagar_id===p.id)?' <span title="Lançado no Fluxo de Caixa">💰</span>':''}</td>
         <td style="white-space:nowrap">
           ${p.status!=='PAGO'?`<button class="btn btn-sm btn-success" onclick="marcarPago(${p.id})">✅ Pago</button>`:''}
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarPagar(${p.id})">✕</button>
@@ -1413,12 +1464,27 @@ async function salvarPagar(){
   const ok=await sbInsert('contas_pagar',{fornecedor:forn,categoria:document.getElementById('pg-cat').value,valor:val,data_vencimento:venc,tipo_pagamento:document.getElementById('pg-forma').value,status,observacao:document.getElementById('pg-obs').value});
   if(ok){fecharModal();nav('pagar');}
 }
-async function marcarPago(id){
-  const _p=D.pagar.find(x=>x.id===id)||{}, valor=_p.valor||0, forn=_p.fornecedor||'', data=_p.data_vencimento||'';
-  if(!confirm(`Marcar ${fmtBRL(valor)} para ${forn} como PAGO e lançar no fluxo?`))return;
+function marcarPago(id){
+  const p=D.pagar.find(x=>x.id===id); if(!p)return;
+  const forn=p.fornecedor||'', jaNoFluxo=D.fluxo.some(f=>f.conta_pagar_id===id);
+  abrirModal('Confirmar Pagamento',`
+    ${alertaBox('info',`Pagamento para <b>${esc(forn)}</b> — <b>${fmtBRL(p.valor||0)}</b>`)}
+    <div class="form-group"><label>Data do pagamento</label><input type="date" id="pag-data" value="${p.data_vencimento||hoje()}"></div>
+    <label class="flex flex-center gap-8" style="margin-top:14px;font-size:13px;font-weight:500;color:var(--texto);cursor:pointer">
+      <input type="checkbox" id="pag-fluxo" ${jaNoFluxo?'':'checked'} style="width:auto"> Lançar no Fluxo de Caixa
+    </label>
+    ${jaNoFluxo?alertaBox('warning','⚠️ Esta conta já tem um lançamento vinculado no fluxo. Deixe desmarcado para não duplicar.'):''}
+  `,
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-success" onclick="confirmarPago(${id})">✅ Confirmar</button>`);
+}
+async function confirmarPago(id){
+  const p=D.pagar.find(x=>x.id===id); if(!p)return;
+  const data=document.getElementById('pag-data').value||hoje();
+  const lancar=document.getElementById('pag-fluxo').checked;
+  const forn=p.fornecedor||'';
   await sbUpdate('contas_pagar',{status:'PAGO'},'id',id);
-  await sbInsert('fluxo_caixa',{data_movimento:data,cliente:forn,tipo:'DESPESA',categoria:'PAGAMENTO',valor,mes:parseInt((data||'').slice(5,7)),ano:parseInt((data||'').slice(0,4))});
-  checkAlertas();nav('pagar');
+  if(lancar) await sbInsert('fluxo_caixa',{data_movimento:data,cliente:forn,tipo:'DESPESA',categoria:'PAGAMENTO',valor:p.valor||0,mes:parseInt(data.slice(5,7)),ano:parseInt(data.slice(0,4)),conta_pagar_id:id});
+  fecharModal();checkAlertas();nav('pagar');
 }
 async function deletarPagar(id){if(!confirm('Excluir?'))return;await sbDelete('contas_pagar','id',id);nav('pagar');}
 
@@ -1506,6 +1572,13 @@ function render_relatorios(){
   const servRows=Object.entries(byServ).sort((a,b)=>b[1].rec-a[1].rec);
   const c=document.getElementById('content');
   c.innerHTML=`
+  <div class="tabs" style="margin-bottom:4px">
+    <div class="tab active" id="reltab-financeiro" onclick="relTab('financeiro')">💰 Financeiro</div>
+    <div class="tab" id="reltab-rentab" onclick="relTab('rentab')">📊 Rentabilidade</div>
+    <div class="tab" id="reltab-clientes" onclick="relTab('clientes')">👥 Clientes</div>
+    <div class="tab" id="reltab-laudos" onclick="relTab('laudos')">🔔 Laudos</div>
+  </div>
+  <div class="rel-pane" id="relpane-financeiro">
   <div class="card">
     <div class="card-title">📊 Resumo Financeiro por Mês</div>
     <div class="table-wrap">
@@ -1525,7 +1598,7 @@ function render_relatorios(){
       <div class="card-title">📈 Receita por Tipo de Serviço</div>
       <div class="table-wrap">
         <table><thead><tr><th>Serviço</th><th class="td-num">Receita</th><th class="td-num">Qtd</th><th class="td-num">Ticket Médio</th></tr></thead>
-        <tbody>${servRows.map(([s,v])=>`<tr><td>${s}</td><td class="td-num">${fmtBRL(v.rec)}</td><td class="td-num">${v.n}</td><td class="td-num">${fmtBRL(v.rec/v.n)}</td></tr>`).join('')}</tbody></table>
+        <tbody>${servRows.map(([s,v])=>`<tr><td>${esc(s)}</td><td class="td-num">${fmtBRL(v.rec)}</td><td class="td-num">${v.n}</td><td class="td-num">${fmtBRL(v.rec/v.n)}</td></tr>`).join('')}</tbody></table>
       </div>
     </div>
     <div class="card">
@@ -1551,6 +1624,167 @@ function render_relatorios(){
       <button class="btn btn-outline" onclick="exportCSV(D.pagar,'contas_pagar')">📥 Contas a Pagar</button>
       <button class="btn btn-outline" onclick="exportCSV(D.orcamentos,'orcamentos')">📥 Orçamentos</button>
     </div>
+  </div>
+  ${relFluxoProjetado()}
+  </div>
+  <div class="rel-pane" id="relpane-rentab" style="display:none">${relRentabilidade()}</div>
+  <div class="rel-pane" id="relpane-clientes" style="display:none">${relClientes()}</div>
+  <div class="rel-pane" id="relpane-laudos" style="display:none">${relLaudos()}</div>`;
+}
+function relTab(name){
+  ['financeiro','rentab','clientes','laudos'].forEach(n=>{
+    document.getElementById('relpane-'+n).style.display = n===name?'':'none';
+    document.getElementById('reltab-'+n).classList.toggle('active', n===name);
+  });
+}
+// ── Relatório: Fluxo de Caixa Projetado ──
+function relFluxoProjetado(){
+  const hd=hoje();
+  const vd=r=>(r.vencimento||r.data_vencimento||'').slice(0,10);
+  const pd=p=>(p.data_vencimento||'').slice(0,10);
+  const recAberto=D.receber.filter(r=>r.status!=='RECEBIDO');
+  const pagAberto=D.pagar.filter(p=>p.status!=='PAGO');
+  const now=new Date(hd);const meses=[];
+  for(let i=0;i<6;i++){const dt=new Date(now.getFullYear(),now.getMonth()+i,1);meses.push(`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`);}
+  const atrasoRec=recAberto.filter(r=>vd(r)&&vd(r)<hd).reduce((a,r)=>a+Number(r.valor||0),0);
+  const atrasoPag=pagAberto.filter(p=>pd(p)&&pd(p)<hd).reduce((a,p)=>a+Number(p.valor||0),0);
+  let acum=0;const rows=[];
+  if(atrasoRec||atrasoPag){acum+=atrasoRec-atrasoPag;rows.push({label:'⚠️ Em atraso (vencido)',rec:atrasoRec,pag:atrasoPag,saldo:atrasoRec-atrasoPag,acum});}
+  meses.forEach(mk=>{
+    const rec=recAberto.filter(r=>vd(r).slice(0,7)===mk&&vd(r)>=hd).reduce((a,r)=>a+Number(r.valor||0),0);
+    const pag=pagAberto.filter(p=>pd(p).slice(0,7)===mk&&pd(p)>=hd).reduce((a,p)=>a+Number(p.valor||0),0);
+    acum+=rec-pag;
+    rows.push({label:`${MESES[parseInt(mk.slice(5,7))]}/${mk.slice(0,4)}`,rec,pag,saldo:rec-pag,acum});
+  });
+  return `<div class="card">
+    <div class="card-title">🔮 Fluxo de Caixa Projetado (contas em aberto)</div>
+    ${alertaBox('info','Mostra a <b>variação de caixa esperada</b> pelas contas ainda em aberto. Não inclui o saldo atual da conta.')}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Período</th><th class="td-num">Entradas</th><th class="td-num">Saídas</th><th class="td-num">Saldo do mês</th><th class="td-num">Acumulado</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td>${r.label}</td>
+        <td class="td-num verde">${fmtBRL(r.rec)}</td>
+        <td class="td-num vermelho">${fmtBRL(r.pag)}</td>
+        <td class="td-num ${r.saldo>=0?'verde':'vermelho'}">${fmtBRL(r.saldo)}</td>
+        <td class="td-num ${r.acum>=0?'verde':'vermelho'}"><b>${fmtBRL(r.acum)}</b></td>
+      </tr>`).join('')||'<tr><td colspan="5" class="text-muted td-center">Sem contas em aberto.</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+// ── Relatório: Margem por OS ──
+function relRentabilidade(){
+  const custoEquipe={};
+  D.funcionarios_os.forEach(f=>{custoEquipe[f.os_id]=(custoEquipe[f.os_id]||0)+Number(f.valor||0);});
+  const despFluxo={};
+  D.fluxo.filter(f=>f.tipo==='DESPESA'&&f.os_id).forEach(f=>{despFluxo[f.os_id]=(despFluxo[f.os_id]||0)+Number(f.valor||0);});
+  const rows=D.os.map(o=>{
+    const receita=Number(o.valor_total||0), eq=custoEquipe[o.id]||0, dp=despFluxo[o.numero_os]||0;
+    const custo=eq+dp, margem=receita-custo;
+    return {o,receita,eq,dp,margem,pct:receita?margem/receita*100:0};
+  }).filter(r=>r.receita>0||r.eq>0||r.dp>0).sort((a,b)=>a.pct-b.pct);
+  const tot=rows.reduce((a,r)=>({receita:a.receita+r.receita,custo:a.custo+r.eq+r.dp,margem:a.margem+r.margem}),{receita:0,custo:0,margem:0});
+  return `<div class="card">
+    <div class="card-title">📊 Margem por OS (receita − custos)</div>
+    ${alertaBox('info','Receita = valor da OS. Custo = equipe (funcionários da OS) + despesas do fluxo vinculadas à OS. Ordenado da <b>pior margem para a melhor</b>.')}
+    <div class="table-wrap"><table>
+      <thead><tr><th>OS</th><th>Cliente</th><th>Serviço</th><th class="td-num">Receita</th><th class="td-num">Equipe</th><th class="td-num">Despesas</th><th class="td-num">Margem</th><th class="td-num">%</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td>#${r.o.numero_os}</td>
+        <td>${esc(r.o.cliente_nome||'—')}</td>
+        <td class="text-xs">${esc(r.o.servico||'—')}</td>
+        <td class="td-num">${fmtBRL(r.receita)}</td>
+        <td class="td-num">${fmtBRL(r.eq)}</td>
+        <td class="td-num">${fmtBRL(r.dp)}</td>
+        <td class="td-num ${r.margem>=0?'verde':'vermelho'}"><b>${fmtBRL(r.margem)}</b></td>
+        <td class="td-num ${r.margem>=0?'verde':'vermelho'}">${r.pct.toFixed(0)}%</td>
+      </tr>`).join('')||'<tr><td colspan="8" class="text-muted td-center">Sem OS com valores lançados.</td></tr>'}</tbody>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--cinza-borda)">
+        <td colspan="3">TOTAL</td>
+        <td class="td-num">${fmtBRL(tot.receita)}</td>
+        <td class="td-num" colspan="2">${fmtBRL(tot.custo)}</td>
+        <td class="td-num ${tot.margem>=0?'verde':'vermelho'}">${fmtBRL(tot.margem)}</td>
+        <td class="td-num">${tot.receita?(tot.margem/tot.receita*100).toFixed(0):0}%</td>
+      </tr></tfoot>
+    </table></div>
+  </div>`;
+}
+// ── Relatório: Inadimplência + Ranking ABC de clientes ──
+function relClientes(){
+  const hd=hoje();
+  const inad=D.receber.filter(r=>r.status!=='RECEBIDO').map(r=>{
+    const v=(r.vencimento||r.data_vencimento||'').slice(0,10);
+    return {r,v,dias:v?Math.floor((new Date(hd)-new Date(v))/86400000):0};
+  }).filter(x=>x.dias>0).sort((a,b)=>b.dias-a.dias);
+  const totalInad=inad.reduce((a,x)=>a+Number(x.r.valor||0),0);
+  const fat={};
+  D.fluxo.filter(f=>f.tipo==='RECEITA').forEach(f=>{const k=((f.cliente||'').trim())||'—';fat[k]=(fat[k]||0)+Number(f.valor||0);});
+  const arr=Object.entries(fat).sort((a,b)=>b[1]-a[1]);
+  const totFat=arr.reduce((a,e)=>a+e[1],0);
+  let ac=0;
+  const abc=arr.map(e=>{ac+=e[1];const pctAc=totFat?ac/totFat*100:0;return {cli:e[0],v:e[1],pct:totFat?e[1]/totFat*100:0,pctAc,classe:pctAc<=80?'A':pctAc<=95?'B':'C'};});
+  const bAbc=c=>c==='A'?'badge-verde':c==='B'?'badge-azul':'badge-cinza';
+  return `<div class="card">
+    <div class="card-title">🔴 Inadimplência — vencidas e não recebidas</div>
+    ${alertaBox(totalInad?'danger':'success', totalInad?`Total em atraso: <b>${fmtBRL(totalInad)}</b> em ${inad.length} conta(s).`:'Nenhuma conta em atraso. 🎉')}
+    ${inad.length?`<div class="table-wrap"><table>
+      <thead><tr><th>Cliente</th><th>Vencimento</th><th class="td-num">Dias em atraso</th><th class="td-num">Valor</th></tr></thead>
+      <tbody>${inad.map(x=>`<tr>
+        <td>${esc(x.r.cliente_nome||x.r.cliente||'—')}</td>
+        <td>${fmtData(x.v)}</td>
+        <td class="td-num ${x.dias>30?'vermelho':''}"><b>${x.dias}</b></td>
+        <td class="td-num">${fmtBRL(x.r.valor)}</td>
+      </tr>`).join('')}</tbody></table></div>`:''}
+  </div>
+  <div class="card">
+    <div class="card-title">🏆 Ranking de Clientes (curva ABC por faturamento)</div>
+    ${alertaBox('info','Classe <b>A</b>: clientes que somam os primeiros 80% do faturamento; <b>B</b>: até 95%; <b>C</b>: o restante. Faturamento = receitas lançadas no fluxo.')}
+    <div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Cliente</th><th class="td-num">Faturamento</th><th class="td-num">% total</th><th class="td-num">% acum.</th><th class="td-center">Classe</th></tr></thead>
+      <tbody>${abc.map((x,i)=>`<tr>
+        <td class="text-muted">${i+1}</td>
+        <td>${esc(x.cli)}</td>
+        <td class="td-num">${fmtBRL(x.v)}</td>
+        <td class="td-num">${x.pct.toFixed(1)}%</td>
+        <td class="td-num">${x.pctAc.toFixed(1)}%</td>
+        <td class="td-center"><span class="badge ${bAbc(x.classe)}">${x.classe}</span></td>
+      </tr>`).join('')||'<tr><td colspan="6" class="text-muted td-center">Sem receitas lançadas no fluxo.</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+// ── Relatório: Laudos a vencer (90 dias) ──
+function relLaudos(){
+  const hd=new Date(hoje());
+  const lista=[];
+  D.os.forEach(o=>{
+    let laudos=[];
+    try{ laudos = o.laudos_prazos ? (typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos) : []; }catch(e){ laudos=[]; }
+    (laudos||[]).forEach(l=>{
+      if(!l||!l.data_vencimento)return;
+      const v=String(l.data_vencimento).slice(0,10);
+      const dias=Math.floor((new Date(v)-hd)/86400000);
+      if(dias<=90) lista.push({o,l,v,dias});
+    });
+  });
+  lista.sort((a,b)=>a.dias-b.dias);
+  const nVenc=lista.filter(x=>x.dias<0).length, n30=lista.filter(x=>x.dias>=0&&x.dias<=30).length, n90=lista.filter(x=>x.dias>30).length;
+  const cor=d=>d<0?'badge-vermelho':d<=30?'badge-amarelo':'badge-azul';
+  const txt=d=>d<0?`Vencido há ${Math.abs(d)}d`:d===0?'Vence hoje':`Em ${d} dias`;
+  return `<div class="card">
+    <div class="card-title">🔔 Laudos a vencer (próximos 90 dias) — renovações</div>
+    <div class="grid-3" style="margin-bottom:14px">
+      <div class="kpi"><div class="kpi-label">🔴 Vencidos</div><div class="kpi-val vermelho">${nVenc}</div></div>
+      <div class="kpi"><div class="kpi-label">🟡 Até 30 dias</div><div class="kpi-val amarelo">${n30}</div></div>
+      <div class="kpi"><div class="kpi-label">🔵 31 a 90 dias</div><div class="kpi-val azul">${n90}</div></div>
+    </div>
+    ${lista.length?`<div class="table-wrap"><table>
+      <thead><tr><th>Situação</th><th>Vencimento</th><th>Cliente</th><th>OS</th><th>Laudo</th></tr></thead>
+      <tbody>${lista.map(x=>`<tr>
+        <td><span class="badge ${cor(x.dias)}">${txt(x.dias)}</span></td>
+        <td>${fmtData(x.v)}</td>
+        <td>${esc(x.o.cliente_nome||'—')}</td>
+        <td>#${x.o.numero_os}</td>
+        <td>${esc(x.l.descricao||'—')}</td>
+      </tr>`).join('')}</tbody></table></div>`:alertaBox('success','Nenhum laudo vencendo nos próximos 90 dias.')}
   </div>`;
 }
 function exportCSV(dados, nome){
