@@ -121,6 +121,7 @@ textarea{resize:vertical;min-height:60px}
 .ev-os{background:#DBEAFE;color:#1E40AF}
 .ev-laudo{background:#FEF3C7;color:#92400E}
 .ev-receber{background:#D1FAE5;color:#065F46}
+.ev-venclaudo{background:#EDE9FE;color:#5B21B6}
 .ev-pagar{background:#FEE2E2;color:#991B1B}
 .item-row{display:grid;grid-template-columns:3fr 1fr 1.3fr 0.8fr auto;gap:8px;align-items:end;margin-bottom:8px}
 .item-total-bar{text-align:right;font-weight:700;font-size:15px;color:var(--azul);padding:10px 0 4px}
@@ -1501,6 +1502,11 @@ function renderCalendario(ano, mes){
   D.os.forEach(o=>{
     if(o.data_execucao?.startsWith(mesStr)){if(!eventos[o.data_execucao])eventos[o.data_execucao]=[];eventos[o.data_execucao].push(`<div class="agenda-event ev-os" title="OS #${o.numero_os} — ${esc(o.cliente_nome)}">🔧 OS#${o.numero_os} ${esc((o.cliente_nome||'').slice(0,10))}</div>`);}
     if(o.data_entrega_laudo?.startsWith(mesStr)){if(!eventos[o.data_entrega_laudo])eventos[o.data_entrega_laudo]=[];eventos[o.data_entrega_laudo].push(`<div class="agenda-event ev-laudo" title="Laudo OS #${o.numero_os}">📋 Laudo #${o.numero_os}</div>`);}
+    let _laudos=[]; try{ _laudos = o.laudos_prazos ? (typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos) : []; }catch(e){ _laudos=[]; }
+    (_laudos||[]).forEach(l=>{
+      const dv=((l&&l.data_vencimento)||'').slice(0,10);
+      if(dv.startsWith(mesStr)){ if(!eventos[dv])eventos[dv]=[]; eventos[dv].push(`<div class="agenda-event ev-venclaudo" title="Vence laudo: ${esc(l.descricao||'')} — OS #${o.numero_os}">⏰ Vence ${esc((l.descricao||'Laudo').slice(0,10))} #${o.numero_os}</div>`); }
+    });
   });
   D.receber.filter(r=>r.status!=='RECEBIDO').forEach(r=>{const d=r.vencimento||r.data_vencimento;if(d?.startsWith(mesStr)){if(!eventos[d])eventos[d]=[];eventos[d].push(`<div class="agenda-event ev-receber" title="${esc(r.cliente_nome||r.cliente)} ${fmtBRL(r.valor)}">💰 ${esc((r.cliente_nome||r.cliente||'').slice(0,12))}</div>`);}});
   D.pagar.filter(p=>p.status!=='PAGO').forEach(p=>{if(p.data_vencimento?.startsWith(mesStr)){if(!eventos[p.data_vencimento])eventos[p.data_vencimento]=[];eventos[p.data_vencimento].push(`<div class="agenda-event ev-pagar" title="${esc(p.fornecedor)} ${fmtBRL(p.valor)}">📤 ${esc((p.fornecedor||'').slice(0,12))}</div>`);}});
@@ -1520,6 +1526,7 @@ function renderCalendario(ano, mes){
     <div class="flex gap-8" style="margin-bottom:12px;flex-wrap:wrap">
       <span class="agenda-event ev-os" style="position:static">🔧 Execução OS</span>
       <span class="agenda-event ev-laudo" style="position:static">📋 Entrega Laudo</span>
+      <span class="agenda-event ev-venclaudo" style="position:static">⏰ Vence Laudo</span>
       <span class="agenda-event ev-receber" style="position:static">💰 A Receber</span>
       <span class="agenda-event ev-pagar" style="position:static">📤 A Pagar</span>
     </div>
@@ -1573,12 +1580,13 @@ function render_relatorios(){
   const c=document.getElementById('content');
   c.innerHTML=`
   <div class="tabs" style="margin-bottom:4px">
-    <div class="tab active" id="reltab-financeiro" onclick="relTab('financeiro')">💰 Financeiro</div>
+    <div class="tab active" id="reltab-reuniao" onclick="relTab('reuniao')">📋 Resumo p/ Reunião</div>
+    <div class="tab" id="reltab-financeiro" onclick="relTab('financeiro')">💰 Financeiro</div>
     <div class="tab" id="reltab-rentab" onclick="relTab('rentab')">📊 Rentabilidade</div>
     <div class="tab" id="reltab-clientes" onclick="relTab('clientes')">👥 Clientes</div>
     <div class="tab" id="reltab-laudos" onclick="relTab('laudos')">🔔 Laudos</div>
   </div>
-  <div class="rel-pane" id="relpane-financeiro">
+  <div class="rel-pane" id="relpane-financeiro" style="display:none">
   <div class="card">
     <div class="card-title">📊 Resumo Financeiro por Mês</div>
     <div class="table-wrap">
@@ -1629,13 +1637,97 @@ function render_relatorios(){
   </div>
   <div class="rel-pane" id="relpane-rentab" style="display:none">${relRentabilidade()}</div>
   <div class="rel-pane" id="relpane-clientes" style="display:none">${relClientes()}</div>
-  <div class="rel-pane" id="relpane-laudos" style="display:none">${relLaudos()}</div>`;
+  <div class="rel-pane" id="relpane-laudos" style="display:none">${relLaudos()}</div>
+  <div class="rel-pane" id="relpane-reuniao">${relReuniao()}</div>`;
 }
 function relTab(name){
-  ['financeiro','rentab','clientes','laudos'].forEach(n=>{
+  ['reuniao','financeiro','rentab','clientes','laudos'].forEach(n=>{
     document.getElementById('relpane-'+n).style.display = n===name?'':'none';
     document.getElementById('reltab-'+n).classList.toggle('active', n===name);
   });
+}
+// ── Relatório consolidado para a reunião de alinhamento (Hugo) ──
+function montarResumoSemanal(){
+  const hd=hoje();
+  const dDiff=d=>Math.floor((new Date(hd)-new Date(d))/86400000);
+  const sum=arr=>arr.reduce((a,x)=>a+Number(x.valor||0),0);
+  // 1) última atualização do fluxo
+  const datas=D.fluxo.map(f=>(f.data_movimento||'').slice(0,10)).filter(Boolean).sort();
+  const ultFluxo=datas.length?datas[datas.length-1]:null;
+  const diasFx=ultFluxo?dDiff(ultFluxo):null;
+  // 2) OS a executar / em execução
+  const osAtivas=D.os.filter(o=>['A EXECUTAR','EM EXECUÇÃO'].includes((o.status||'').toUpperCase()))
+    .sort((a,b)=>(a.status||'').localeCompare(b.status||'')||(Number(b.numero_os)||0)-(Number(a.numero_os)||0));
+  const totOS=osAtivas.reduce((a,o)=>a+Number(o.valor_total||0),0);
+  // 3) receber
+  const vd=r=>(r.vencimento||r.data_vencimento||'').slice(0,10);
+  const recAberto=D.receber.filter(r=>r.status!=='RECEBIDO');
+  const recVenc=recAberto.filter(r=>vd(r)&&vd(r)<hd).sort((a,b)=>vd(a).localeCompare(vd(b)));
+  const recAV=recAberto.filter(r=>vd(r)>=hd).sort((a,b)=>vd(a).localeCompare(vd(b)));
+  // 4) pagar
+  const pd=p=>(p.data_vencimento||'').slice(0,10);
+  const pagAberto=D.pagar.filter(p=>p.status!=='PAGO');
+  const pagVenc=pagAberto.filter(p=>pd(p)&&pd(p)<hd).sort((a,b)=>pd(a).localeCompare(pd(b)));
+  const pagAV=pagAberto.filter(p=>pd(p)>=hd).sort((a,b)=>pd(a).localeCompare(pd(b)));
+  // estilos inline (funciona também na janela de impressão, sem o CSS do app)
+  const th='style="text-align:left;border-bottom:2px solid #ccc;padding:6px 8px;color:#555;font-size:11px;text-transform:uppercase"';
+  const thR='style="text-align:right;border-bottom:2px solid #ccc;padding:6px 8px;color:#555;font-size:11px;text-transform:uppercase"';
+  const td='style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px"';
+  const tdR='style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;text-align:right"';
+  const vazio=t=>`<p style="color:#888;font-size:12px;margin:4px 0 0">${t}</p>`;
+  const totLine=(label,v,cor)=>`<div style="text-align:right;font-weight:700;font-size:13px;margin-top:4px;color:${cor||'#1A2A3A'}">${label}: ${fmtBRL(v)}</div>`;
+  const H3='style="font-size:14px;color:#1A3C5E;border-bottom:1px solid #ddd;padding-bottom:3px;margin:18px 0 4px"';
+  const statusFluxo = ultFluxo
+    ? `<b>${fmtData(ultFluxo)}</b> ${diasFx>0?`<span style="color:${diasFx>7?'#D64045':'#7B8FA1'}">(há ${diasFx} dia${diasFx>1?'s':''})</span>`:`<span style="color:#1A8F5A">(hoje)</span>`}`
+    : `<span style="color:#D64045">Nenhum lançamento registrado</span>`;
+  return `
+  <div style="background:#F5F6FA;border:1px solid #E0E6ED;border-radius:8px;padding:12px 14px;margin-bottom:8px">
+    <div style="font-size:12px;color:#555">🗓️ Última atualização do Fluxo de Caixa (último dia lançado)</div>
+    <div style="font-size:18px;margin-top:2px">${statusFluxo}</div>
+    ${diasFx>7?`<div style="color:#B71C1C;font-size:12px;margin-top:4px">⚠️ Fluxo possivelmente desatualizado — verificar lançamentos recentes.</div>`:''}
+  </div>
+
+  <h3 ${H3}>🔧 Ordens de Serviço — A Executar e Em Execução (${osAtivas.length})</h3>
+  ${osAtivas.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>OS</th><th ${th}>Cliente</th><th ${th}>Serviço</th><th ${th}>Status</th><th ${thR}>Valor</th></tr></thead><tbody>${osAtivas.map(o=>`<tr><td ${td}>#${o.numero_os}</td><td ${td}>${esc(o.cliente_nome||'—')}</td><td ${td}>${esc(o.servico||'—')}</td><td ${td}>${esc(o.status||'—')}</td><td ${tdR}>${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table>${totLine('Total em OS ativas',totOS,'#1A3C5E')}`:vazio('Nenhuma OS a executar ou em execução.')}
+
+  <h3 ${H3}>💰 Contas a Receber</h3>
+  <div style="font-weight:700;color:#B71C1C;font-size:12px;margin-top:8px">🔴 Vencidas (${recVenc.length}) — ${fmtBRL(sum(recVenc))}</div>
+  ${recVenc.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Cliente</th><th ${th}>Vencimento</th><th ${thR}>Dias atraso</th><th ${thR}>Valor</th></tr></thead><tbody>${recVenc.map(r=>`<tr><td ${td}>${esc(r.cliente_nome||r.cliente||'—')}</td><td ${td}>${fmtData(vd(r))}</td><td ${tdR}>${vd(r)?dDiff(vd(r)):'—'}</td><td ${tdR}>${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta vencida. 🎉')}
+  <div style="font-weight:700;color:#1A8F5A;font-size:12px;margin-top:12px">🔵 A Vencer (${recAV.length}) — ${fmtBRL(sum(recAV))}</div>
+  ${recAV.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Cliente</th><th ${th}>Vencimento</th><th ${thR}>Faltam (dias)</th><th ${thR}>Valor</th></tr></thead><tbody>${recAV.map(r=>`<tr><td ${td}>${esc(r.cliente_nome||r.cliente||'—')}</td><td ${td}>${fmtData(vd(r))}</td><td ${tdR}>${vd(r)?-dDiff(vd(r)):'—'}</td><td ${tdR}>${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a vencer.')}
+
+  <h3 ${H3}>📤 Contas a Pagar</h3>
+  <div style="font-weight:700;color:#B71C1C;font-size:12px;margin-top:8px">🔴 Vencidas (${pagVenc.length}) — ${fmtBRL(sum(pagVenc))}</div>
+  ${pagVenc.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Fornecedor</th><th ${th}>Categoria</th><th ${th}>Vencimento</th><th ${thR}>Valor</th></tr></thead><tbody>${pagVenc.map(p=>`<tr><td ${td}>${esc(p.fornecedor||'—')}</td><td ${td}>${esc(p.categoria||'—')}</td><td ${td}>${fmtData(pd(p))}</td><td ${tdR}>${fmtBRL(p.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a pagar vencida.')}
+  <div style="font-weight:700;color:#1A8F5A;font-size:12px;margin-top:12px">🔵 A Vencer (${pagAV.length}) — ${fmtBRL(sum(pagAV))}</div>
+  ${pagAV.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Fornecedor</th><th ${th}>Categoria</th><th ${th}>Vencimento</th><th ${thR}>Valor</th></tr></thead><tbody>${pagAV.map(p=>`<tr><td ${td}>${esc(p.fornecedor||'—')}</td><td ${td}>${esc(p.categoria||'—')}</td><td ${td}>${fmtData(pd(p))}</td><td ${tdR}>${fmtBRL(p.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a pagar cadastrada ainda.')}
+  `;
+}
+function relReuniao(){
+  return `<div class="card">
+    <div class="flex flex-between flex-center" style="margin-bottom:10px">
+      <div class="card-title" style="margin-bottom:0">📋 Resumo para Reunião de Alinhamento</div>
+      <button class="btn btn-primary btn-sm" onclick="imprimirResumo()">🖨️ Imprimir / Salvar PDF</button>
+    </div>
+    ${alertaBox('info','Resumo gerado em '+fmtData(hoje())+'. Clique em "Imprimir / Salvar PDF" para enviar ao Hugo.')}
+    <div id="resumo-semanal">${montarResumoSemanal()}</div>
+  </div>`;
+}
+function imprimirResumo(){
+  const corpo=montarResumoSemanal();
+  const w=window.open('','_blank');
+  if(!w){ alert('Permita pop-ups neste site para gerar o relatório.'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Resumo Semanal — Compostos Engenharia</title>
+  <style>body{font-family:Arial,Helvetica,sans-serif;color:#1A2A3A;max-width:780px;margin:24px auto;padding:0 16px}
+  h1{font-size:18px;color:#1A3C5E;margin:0}table{width:100%;border-collapse:collapse}
+  .topo{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1A3C5E;padding-bottom:8px;margin-bottom:8px}
+  @media print{.noprint{display:none}}</style></head><body>
+  <div class="topo"><div><h1>Compostos Engenharia</h1><div style="font-size:12px;color:#666">Relatório de Alinhamento Semanal</div></div>
+  <div style="font-size:12px;color:#666">Gerado em ${fmtData(hoje())}</div></div>
+  ${corpo}
+  <button class="noprint" onclick="window.print()" style="margin-top:24px;padding:10px 16px;font-size:14px;background:#1A3C5E;color:#fff;border:none;border-radius:6px;cursor:pointer">🖨️ Imprimir / Salvar como PDF</button>
+  </body></html>`);
+  w.document.close();
 }
 // ── Relatório: Fluxo de Caixa Projetado ──
 function relFluxoProjetado(){
