@@ -1651,6 +1651,7 @@ function montarResumoSemanal(){
   const hd=hoje();
   const dDiff=d=>Math.floor((new Date(hd)-new Date(d))/86400000);
   const sum=arr=>arr.reduce((a,x)=>a+Number(x.valor||0),0);
+  const porCliente=arr=>{const m={};arr.forEach(r=>{const k=((r.cliente_nome||r.cliente||'—').trim())||'—';if(!m[k])m[k]={parcelas:0,valor:0};m[k].parcelas++;m[k].valor+=Number(r.valor||0);});return Object.entries(m).map(e=>({cli:e[0],parcelas:e[1].parcelas,valor:e[1].valor})).sort((a,b)=>b.valor-a.valor);};
   // 1) última atualização do fluxo
   const datas=D.fluxo.map(f=>(f.data_movimento||'').slice(0,10)).filter(Boolean).sort();
   const ultFluxo=datas.length?datas[datas.length-1]:null;
@@ -1691,10 +1692,10 @@ function montarResumoSemanal(){
   ${osAtivas.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>OS</th><th ${th}>Cliente</th><th ${th}>Serviço</th><th ${th}>Status</th><th ${thR}>Valor</th></tr></thead><tbody>${osAtivas.map(o=>`<tr><td ${td}>#${o.numero_os}</td><td ${td}>${esc(o.cliente_nome||'—')}</td><td ${td}>${esc(o.servico||'—')}</td><td ${td}>${esc(o.status||'—')}</td><td ${tdR}>${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table>${totLine('Total em OS ativas',totOS,'#1A3C5E')}`:vazio('Nenhuma OS a executar ou em execução.')}
 
   <h3 ${H3}>💰 Contas a Receber</h3>
-  <div style="font-weight:700;color:#B71C1C;font-size:12px;margin-top:8px">🔴 Vencidas (${recVenc.length}) — ${fmtBRL(sum(recVenc))}</div>
-  ${recVenc.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Cliente</th><th ${th}>Vencimento</th><th ${thR}>Dias atraso</th><th ${thR}>Valor</th></tr></thead><tbody>${recVenc.map(r=>`<tr><td ${td}>${esc(r.cliente_nome||r.cliente||'—')}</td><td ${td}>${fmtData(vd(r))}</td><td ${tdR}>${vd(r)?dDiff(vd(r)):'—'}</td><td ${tdR}>${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta vencida. 🎉')}
-  <div style="font-weight:700;color:#1A8F5A;font-size:12px;margin-top:12px">🔵 A Vencer (${recAV.length}) — ${fmtBRL(sum(recAV))}</div>
-  ${recAV.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Cliente</th><th ${th}>Vencimento</th><th ${thR}>Faltam (dias)</th><th ${thR}>Valor</th></tr></thead><tbody>${recAV.map(r=>`<tr><td ${td}>${esc(r.cliente_nome||r.cliente||'—')}</td><td ${td}>${fmtData(vd(r))}</td><td ${tdR}>${vd(r)?-dDiff(vd(r)):'—'}</td><td ${tdR}>${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a vencer.')}
+  <div style="font-weight:700;color:#B71C1C;font-size:12px;margin-top:8px">🔴 Vencidas — ${recVenc.length} parcela(s) — ${fmtBRL(sum(recVenc))}</div>
+  ${recVenc.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Cliente</th><th ${thR}>Parcelas em aberto</th><th ${thR}>Valor total</th></tr></thead><tbody>${porCliente(recVenc).map(g=>`<tr><td ${td}>${esc(g.cli)}</td><td ${tdR}>${g.parcelas}</td><td ${tdR}>${fmtBRL(g.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta vencida. 🎉')}
+  <div style="font-weight:700;color:#1A8F5A;font-size:12px;margin-top:12px">🔵 A Vencer — ${recAV.length} parcela(s) — ${fmtBRL(sum(recAV))}</div>
+  ${recAV.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Cliente</th><th ${thR}>Parcelas em aberto</th><th ${thR}>Valor total</th></tr></thead><tbody>${porCliente(recAV).map(g=>`<tr><td ${td}>${esc(g.cli)}</td><td ${tdR}>${g.parcelas}</td><td ${tdR}>${fmtBRL(g.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a vencer.')}
 
   <h3 ${H3}>📤 Contas a Pagar</h3>
   <div style="font-weight:700;color:#B71C1C;font-size:12px;margin-top:8px">🔴 Vencidas (${pagVenc.length}) — ${fmtBRL(sum(pagVenc))}</div>
