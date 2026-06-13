@@ -137,6 +137,50 @@ textarea{resize:vertical;min-height:60px}
 .alert-danger-s{background:var(--vermelho-bg);color:#B71C1C}
 .spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* ===================== Repaginação visual v2 ===================== */
+:root{ --accent:#2A6DBF; --accent2:#37B6A0; }
+body{ background:linear-gradient(180deg,#eaf0f7 0,#f5f6fa 260px) fixed; }
+#sidebar{ box-shadow:3px 0 18px rgba(15,39,68,.22); }
+.sidebar-logo img{ box-shadow:0 2px 8px rgba(0,0,0,.18); }
+nav a{ position:relative; border-radius:9px; }
+nav a .ico{ transition:transform .15s; }
+nav a:hover .ico{ transform:scale(1.12); }
+nav a.active{ background:linear-gradient(90deg,rgba(55,182,160,.20),rgba(255,255,255,.05)); color:#fff; }
+nav a.active::before{ content:""; position:absolute; left:0; top:7px; bottom:7px; width:3px; border-radius:3px; background:var(--accent2); }
+.topbar{ box-shadow:0 2px 10px rgba(15,39,68,.06); }
+.card{ border-radius:14px; box-shadow:0 4px 18px rgba(26,60,94,.07); border-color:#E9EEF4; transition:box-shadow .2s,transform .2s; }
+.card-title{ font-size:14px; letter-spacing:.2px; }
+.kpi{ border-radius:14px; border-color:#E9EEF4; box-shadow:0 4px 14px rgba(26,60,94,.06); position:relative; overflow:hidden; background:linear-gradient(180deg,#fff,#fbfcfe); }
+.kpi::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--accent); opacity:.9; }
+.kpi:hover{ transform:translateY(-2px); box-shadow:0 10px 26px rgba(26,60,94,.14); }
+.kpi-val{ font-size:22px; letter-spacing:-.3px; }
+.kpi:has(.kpi-val.verde)::before{ background:var(--verde); }
+.kpi:has(.kpi-val.vermelho)::before{ background:var(--vermelho); }
+.kpi:has(.kpi-val.azul)::before{ background:var(--azul2); }
+.kpi:has(.kpi-val.amarelo)::before{ background:var(--amarelo); }
+.btn{ border-radius:9px; transition:all .15s; }
+.btn-primary{ box-shadow:0 2px 8px rgba(42,109,191,.28); }
+.btn-primary:hover{ box-shadow:0 5px 16px rgba(42,109,191,.4); transform:translateY(-1px); }
+.btn-success:hover{ transform:translateY(-1px); }
+th{ background:linear-gradient(180deg,#fafbfd,#f1f5fa); }
+tr:hover td{ background:#F3F8FF; }
+.modal{ border-radius:16px; box-shadow:0 24px 70px rgba(15,39,68,.28); }
+.badge{ box-shadow:0 1px 2px rgba(0,0,0,.05); }
+/* ===== KPIs modernos v3 ===== */
+.kpis{ gap:14px; }
+.kpi.kpi-modern{ padding:15px 17px 14px; display:flex; flex-direction:column; }
+.kpi.kpi-modern::before{ display:none; }
+.kpi-top{ display:flex; align-items:flex-start; justify-content:space-between; gap:8px; min-height:42px; }
+.kpi-ico{ width:42px; height:42px; min-width:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:20px; }
+.kpi-spark{ align-self:flex-start; margin-top:2px; }
+.kpi-modern .kpi-label{ margin:10px 0 1px; }
+.kpi-modern .kpi-val{ font-size:23px; }
+.kpi-trend{ font-size:11px; font-weight:700; margin-top:4px; display:inline-flex; align-items:center; gap:4px; }
+.kpi-trend.up{ color:var(--verde); }
+.kpi-trend.down{ color:var(--vermelho); }
+.kpi-trend-sub{ color:var(--cinza); font-weight:500; }
+#content{ padding:26px 28px; }
+.topbar-title{ font-weight:800; }
 </style>
 </head>
 <body>
@@ -174,20 +218,21 @@ textarea{resize:vertical;min-height:60px}
       <div class="perfil" id="sb-perfil">—</div>
     </div>
     <nav>
-      <div class="nav-sep">Principal</div>
+      <div class="nav-sep">Visão Geral</div>
       <a onclick="nav('dashboard')" id="nav-dashboard" class="active"><span class="ico">📊</span> Dashboard</a>
       <a onclick="nav('agenda')" id="nav-agenda"><span class="ico">📅</span> Agenda</a>
-      <div class="nav-sep">Comercial</div>
+      <div class="nav-sep">Comercial & Execução</div>
       <a onclick="nav('orcamentos')" id="nav-orcamentos"><span class="ico">📝</span> Orçamentos</a>
       <a onclick="nav('os')" id="nav-os"><span class="ico">🔧</span> Ordens de Serviço</a>
-      <div class="nav-sep">Financeiro</div>
-      <a onclick="nav('fluxo')" id="nav-fluxo"><span class="ico">💰</span> Fluxo de Caixa</a>
-      <a onclick="nav('receber')" id="nav-receber"><span class="ico">📋</span> Contas a Receber</a>
-      <a onclick="nav('pagar')" id="nav-pagar"><span class="ico">📤</span> Contas a Pagar</a>
-      <div class="nav-sep">Equipe</div>
       <a onclick="nav('funcionarios')" id="nav-funcionarios"><span class="ico">👷</span> Funcionários / OS</a>
-      <div class="nav-sep">Sistema</div>
+      <a onclick="nav('receber')" id="nav-receber"><span class="ico">📋</span> Contas a Receber</a>
+      <div class="nav-sep">Saídas</div>
+      <a onclick="nav('pagar')" id="nav-pagar"><span class="ico">📤</span> Contas a Pagar</a>
+      <div class="nav-sep">Consolidação</div>
+      <a onclick="nav('fluxo')" id="nav-fluxo"><span class="ico">💰</span> Fluxo de Caixa</a>
+      <div class="nav-sep">Análise</div>
       <a onclick="nav('relatorios')" id="nav-relatorios"><span class="ico">📄</span> Relatórios</a>
+      <div class="nav-sep">Sistema</div>
       <a onclick="nav('config')" id="nav-config"><span class="ico">⚙️</span> Configurações</a>
     </nav>
     <div class="sidebar-footer">
@@ -475,6 +520,12 @@ function labelPeriodo(){
 // ══════════════════════════════════════════════════════════════
 function atualizarFiltro(){ lerFiltro(); render_dashboard(); }
 
+// ── Helpers dos KPIs modernos (Dashboard) ──
+function _fluxoMes(ano,mes,tipo){const k=`${ano}-${mes}`;return D.fluxo.filter(r=>r.tipo===tipo&&(r.data_movimento||'').slice(0,7)===k).reduce((a,b)=>a+Number(b.valor||0),0);}
+function _mesAnterior(ano,mes){let m=parseInt(mes)-1,y=parseInt(ano);if(m<1){m=12;y--;}return {ano:String(y),mes:String(m).padStart(2,'0')};}
+function _ultimosMeses(ano,mes,n){const arr=[];let y=parseInt(ano),m=parseInt(mes);for(let i=0;i<n;i++){arr.unshift({ano:String(y),mes:String(m).padStart(2,'0')});m--;if(m<1){m=12;y--;}}return arr;}
+function _spark(vals,cor){const w=116,h=32,p=3;const max=Math.max(...vals,0),min=Math.min(...vals,0);if(max===min)return '';const rng=(max-min)||1;const pts=vals.map((v,i)=>{const x=p+i*(w-2*p)/((vals.length-1)||1);const y=h-p-((v-min)/rng)*(h-2*p);return x.toFixed(1)+','+y.toFixed(1);});const poly=pts.join(' ');const id='sg'+Math.random().toString(36).slice(2,7);return `<svg class="kpi-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${cor}" stop-opacity=".22"/><stop offset="1" stop-color="${cor}" stop-opacity="0"/></linearGradient></defs><polygon points="${p},${h-p} ${poly} ${w-p},${h-p}" fill="url(#${id})"/><polyline points="${poly}" fill="none" stroke="${cor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;}
+function _kpiCard(o){const cor=o.cor||'#2A6DBF';const valTxt=(typeof o.valor==='number')?(o.fmt||fmtBRL)(o.valor):o.valor;let foot='';if(o.prev!=null){const atual=Number(o.valor)||0,prev=Number(o.prev)||0;if(!(prev===0&&atual===0)){const pct=prev!==0?(atual-prev)/Math.abs(prev)*100:100;const up=atual>=prev;const good=(o.goodWhenUp!==false)?up:!up;foot=`<div class="kpi-trend ${good?'up':'down'}">${up?'▲':'▼'} ${Math.abs(pct).toFixed(1)}% <span class="kpi-trend-sub">vs mês ant.</span></div>`;}}else if(o.sub){foot=`<div class="kpi-delta">${o.sub}</div>`;}return `<div class="kpi kpi-modern"><div class="kpi-top"><div class="kpi-ico" style="background:${cor}22;color:${cor}">${o.icon}</div>${o.spark||''}</div><div class="kpi-label">${o.label}</div><div class="kpi-val ${o.valClass||''}">${valTxt}</div>${foot}</div>`;}
 function render_dashboard(){
   const fluxoF  = filtrarPorPeriodo(D.fluxo,   'data_movimento');
   const receberF = filtrarPorPeriodo(D.receber, 'vencimento');
@@ -490,6 +541,18 @@ function render_dashboard(){
   const prev30   = D.receber.filter(r=>r.status==='A VENCER'&&(r.vencimento||'')<=lim30str).reduce((a,b)=>a+Number(b.valor),0);
   const osExec   = D.os.filter(o=>o.status==='EM EXECUÇÃO');
 
+  // KPIs modernos: variação vs mês anterior + mini-gráfico dos últimos 6 meses
+  const refAno = FILTRO.ano || String(new Date().getFullYear());
+  const refMes = FILTRO.mes || String(new Date().getMonth()+1).padStart(2,'0');
+  const showVar = !!FILTRO.mes;
+  const _pa = _mesAnterior(refAno, refMes);
+  const recPrev = _fluxoMes(_pa.ano,_pa.mes,'RECEITA');
+  const despPrev = _fluxoMes(_pa.ano,_pa.mes,'DESPESA');
+  const _m6 = _ultimosMeses(refAno, refMes, 6);
+  const spRec = _m6.map(x=>_fluxoMes(x.ano,x.mes,'RECEITA'));
+  const spDesp = _m6.map(x=>_fluxoMes(x.ano,x.mes,'DESPESA'));
+  const spRes = _m6.map((x,i)=>spRec[i]-spDesp[i]);
+
   const c = document.getElementById('content');
   c.innerHTML = `
   <div class="filters" style="margin-bottom:16px">
@@ -500,19 +563,16 @@ function render_dashboard(){
     <button class="btn btn-sm btn-outline" onclick="FILTRO={mes:'',ano:''};render_dashboard()" style="margin-left:auto">✕ Limpar filtro</button>
   </div>
   <div class="kpis">
-    <div class="kpi"><div class="kpi-label">💰 Receita</div><div class="kpi-val verde">${fmtBRL(recTotal)}</div></div>
-    <div class="kpi"><div class="kpi-label">📤 Despesas</div><div class="kpi-val vermelho">${fmtBRL(despTotal)}</div></div>
-    <div class="kpi"><div class="kpi-label">📈 Resultado</div><div class="kpi-val ${recTotal-despTotal>=0?'verde':'vermelho'}">${fmtBRL(recTotal-despTotal)}</div>
-      <div class="kpi-delta">${recTotal?((recTotal-despTotal)/recTotal*100).toFixed(1)+'% margem':''}</div></div>
-    <div class="kpi"><div class="kpi-label">🔵 A Receber (período)</div><div class="kpi-val azul">${fmtBRL(aRec)}</div>
-      <div class="kpi-delta">Próx. 30d: ${fmtBRL(prev30)}</div></div>
-    <div class="kpi"><div class="kpi-label">🔴 Em Atraso (período)</div><div class="kpi-val vermelho">${fmtBRL(atraso)}</div></div>
+    ${_kpiCard({icon:'💰',cor:'#1A8F5A',label:'Receita',valor:recTotal,valClass:'verde',prev:showVar?recPrev:null,spark:_spark(spRec,'#1A8F5A')})}
+    ${_kpiCard({icon:'📤',cor:'#D64045',label:'Despesas',valor:despTotal,valClass:'vermelho',prev:showVar?despPrev:null,goodWhenUp:false,spark:_spark(spDesp,'#D64045')})}
+    ${_kpiCard({icon:'📈',cor:'#2A6DBF',label:'Resultado',valor:recTotal-despTotal,valClass:(recTotal-despTotal>=0?'verde':'vermelho'),prev:showVar?(recPrev-despPrev):null,spark:_spark(spRes,'#2A6DBF')})}
+    ${_kpiCard({icon:'📥',cor:'#2A6DBF',label:'A Receber (período)',valor:aRec,valClass:'azul',sub:'Próx. 30 dias: '+fmtBRL(prev30)})}
+    ${_kpiCard({icon:'🔴',cor:'#D64045',label:'Em Atraso (período)',valor:atraso,valClass:'vermelho',sub:atraso?'Atenção às cobranças':'Tudo em dia ✅'})}
   </div>
   <div class="grid-3" style="margin-bottom:16px">
-    <div class="kpi"><div class="kpi-label">🔧 OS em Execução</div><div class="kpi-val azul">${osExec.length}</div>
-      <div class="kpi-delta">Carteira: ${fmtBRL(osExec.reduce((a,o)=>a+Number(o.valor_total),0))}</div></div>
-    <div class="kpi"><div class="kpi-label">📤 A Pagar (período)</div><div class="kpi-val amarelo">${fmtBRL(aPagar)}</div></div>
-    <div class="kpi"><div class="kpi-label">📝 Orçamentos Pendentes</div><div class="kpi-val">${D.orcamentos.filter(o=>o.status==='PENDENTE').length}</div></div>
+    ${_kpiCard({icon:'🔧',cor:'#1A3C5E',label:'OS em Execução',valor:osExec.length,fmt:v=>String(v),valClass:'azul',sub:'Carteira: '+fmtBRL(osExec.reduce((a,o)=>a+Number(o.valor_total||0),0))})}
+    ${_kpiCard({icon:'📤',cor:'#E8A020',label:'A Pagar (período)',valor:aPagar,valClass:'amarelo'})}
+    ${_kpiCard({icon:'📝',cor:'#7B8FA1',label:'Orçamentos Pendentes',valor:D.orcamentos.filter(o=>o.status==='PENDENTE').length,fmt:v=>String(v)})}
   </div>
   <div class="grid-2">
     <div class="card"><div class="card-title">📊 Receita vs Despesa por Mês</div><canvas id="c-chart-mes" height="170"></canvas></div>
@@ -826,6 +886,7 @@ function render_os(){
         <td style="white-space:nowrap">
           <button class="btn btn-sm btn-outline" onclick="editarOS(${o.id})">✏️</button>
           <button class="btn btn-sm btn-primary" onclick="gerarCobrancaOS(${o.id})">💰</button>
+          <button class="btn btn-sm btn-outline" onclick="verResultadoOS(${o.id})" title="Resultado da OS">📊</button>
           <button class="btn btn-sm btn-outline" onclick="verFuncionariosOS(${o.id})">👷</button>
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarOS(${o.id})">✕</button>
         </td></tr>`;}).join('')}
@@ -1068,6 +1129,46 @@ async function addFuncOS(osId){
   if(ok){fecharModal();await carregarTudo();verFuncionariosOS(osId);}
 }
 async function delFuncOS(id,osId){if(!confirm('Remover?'))return;await sbDelete('funcionarios_os','id',id);await carregarTudo();verFuncionariosOS(osId);}
+// ── Resultado financeiro de uma OS (recebido, a receber, despesas) ──
+function verResultadoOS(osId){
+  const o=D.os.find(x=>x.id===osId); if(!o)return;
+  const vd=r=>(r.vencimento||r.data_vencimento||'').slice(0,10);
+  const recs=D.receber.filter(r=>r.os_id===o.id).sort((a,b)=>vd(a).localeCompare(vd(b)));
+  const totRecebido=recs.filter(r=>r.status==='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
+  const totAReceber=recs.filter(r=>r.status!=='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
+  const equipe=D.funcionarios_os.filter(f=>f.os_id===o.id);
+  const totEquipe=equipe.reduce((a,f)=>a+Number(f.valor||0),0);
+  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&f.os_id===o.numero_os);
+  const totDespFx=despFx.reduce((a,f)=>a+Number(f.valor||0),0);
+  const totDesp=totEquipe+totDespFx;
+  const resCaixa=totRecebido-totDesp;
+  const resPrev=(totRecebido+totAReceber)-totDesp;
+  abrirModal(`📊 Resultado — OS #${o.numero_os}`,`
+    ${alertaBox('info',`<b>${esc(o.cliente_nome||'')}</b> — ${esc(o.servico||'')} &nbsp;•&nbsp; Valor da OS: <b>${fmtBRL(o.valor_total)}</b>`)}
+    <div class="grid-4" style="margin-bottom:14px">
+      <div class="kpi"><div class="kpi-label">✅ Recebido</div><div class="kpi-val verde">${fmtBRL(totRecebido)}</div></div>
+      <div class="kpi"><div class="kpi-label">🔵 A Receber</div><div class="kpi-val azul">${fmtBRL(totAReceber)}</div></div>
+      <div class="kpi"><div class="kpi-label">📤 Despesas</div><div class="kpi-val vermelho">${fmtBRL(totDesp)}</div></div>
+      <div class="kpi"><div class="kpi-label">💵 Resultado (caixa)</div><div class="kpi-val ${resCaixa>=0?'verde':'vermelho'}">${fmtBRL(resCaixa)}</div></div>
+    </div>
+    <p class="text-sm text-muted" style="margin:-6px 0 14px">Resultado previsto (recebendo tudo): <b class="${resPrev>=0?'verde':'vermelho'}">${fmtBRL(resPrev)}</b></p>
+
+    <div class="card-title">💰 Contas a Receber desta OS</div>
+    ${recs.length?`<div class="table-wrap"><table>
+      <thead><tr><th>Vencimento</th><th>Status</th><th>Forma</th><th class="td-num">Valor</th></tr></thead>
+      <tbody>${recs.map(r=>`<tr><td>${fmtData(vd(r))}</td><td>${badge(r.status)}</td><td>${esc(r.forma_pagamento||'—')}</td><td class="td-num">${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--cinza-borda)"><td colspan="3">Recebido / A Receber</td><td class="td-num"><span class="verde">${fmtBRL(totRecebido)}</span> / <span class="azul">${fmtBRL(totAReceber)}</span></td></tr></tfoot>
+    </table></div>`:'<p class="text-sm text-muted">Nenhuma cobrança lançada para esta OS.</p>'}
+
+    <div class="card-title mt-16">📤 Despesas desta OS</div>
+    ${equipe.length?`<div class="text-sm font-600" style="margin:6px 0 2px">👷 Equipe — ${fmtBRL(totEquipe)}</div>
+    <div class="table-wrap"><table><tbody>${equipe.map(f=>`<tr><td>${esc(f.nome||'—')}${f.tipo?` <span class="text-xs text-muted">(${esc(f.tipo)})</span>`:''}</td><td class="td-num">${fmtBRL(f.valor)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${despFx.length?`<div class="text-sm font-600" style="margin:10px 0 2px">🧾 Outras despesas (fluxo) — ${fmtBRL(totDespFx)}</div>
+    <div class="table-wrap"><table><tbody>${despFx.map(f=>`<tr><td>${esc(f.categoria||'—')}${f.observacao?` <span class="text-xs text-muted">${esc(f.observacao)}</span>`:''}</td><td class="td-num">${fmtBRL(f.valor)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${(equipe.length||despFx.length)?`<div style="text-align:right;font-weight:700;margin-top:8px">Total de despesas: <span class="vermelho">${fmtBRL(totDesp)}</span></div>`:'<p class="text-sm text-muted">Nenhuma despesa vinculada a esta OS.</p>'}
+  `,
+  `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`, true);
+}
 
 // ══════════════════════════════════════════════════════════════
 // FLUXO DE CAIXA
@@ -1158,7 +1259,7 @@ function modalNovoLancamento(){
     <div class="form-group" id="fc-cat-wrap">
       <label>Categoria</label>
       <select id="fc-cat-rec"><option>OBRA</option><option>ESTANQUEIDADE</option><option>INTEGRIDADE</option><option>NR 11</option><option>NR 12</option><option>NR 13</option><option>LIMPEZA DE TANQUE</option><option>TANQUE AEREO</option><option>RESPONSABILIDADE TECNICA</option><option>RECEBIMENTO</option><option>COMISSÃO</option><option>VENDA DE PEÇAS</option><option>OUTRO</option></select>
-      <select id="fc-cat-desp" style="display:none"><option>FUNCIONÁRIO</option><option>SALARIO</option><option>IMPOSTO</option><option>ART</option><option>CONTADOR</option><option>ROYALTES</option><option>FINANCIAMENTO CARRO</option><option>SEGURO</option><option>PEÇAS CUSTO</option><option>COMPRA DE EQUIPAMENTOS</option><option>ALUGUEL DE EQUIPAMENTOS</option><option>ALIMENTAÇÃO E DESLOCAMENTO</option><option>DESLOCAMENTO</option><option>DEMAIS GASTOS</option><option>SERVENTE DE PEDREIRO</option><option>MULTA</option><option>FERRAMENTAS</option><option>VALE</option></select>
+      <select id="fc-cat-desp" style="display:none"><option>FUNCIONÁRIO</option><option>SALARIO</option><option>IMPOSTO</option><option>ART</option><option>CONTADOR</option><option>ROYALTES</option><option>FINANCIAMENTO CARRO</option><option>SEGURO</option><option>PEÇAS CUSTO</option><option>COMPRA DE EQUIPAMENTOS</option><option>ALUGUEL DE EQUIPAMENTOS</option><option>ALIMENTAÇÃO E DESLOCAMENTO</option><option>DESLOCAMENTO</option><option>COMPRA DE MATERIAL (INSUMOS)</option><option>TERCEIRIZAÇÃO DE MÃO DE OBRA</option><option>TARIFAS BANCÁRIAS</option><option>RETIRADAS (PROPRIETÁRIO)</option><option>DEMAIS GASTOS</option><option>SERVENTE DE PEDREIRO</option><option>MULTA</option><option>FERRAMENTAS</option><option>VALE</option></select>
     </div>
     <div class="form-group span2">
       <label>🔧 Vincular à OS (opcional)</label>
@@ -1197,7 +1298,7 @@ async function salvarLancamento(){
   const osId = osIdSel ? parseInt(osIdSel) : null;
   const recSel = tipo==='RECEITA' ? (document.getElementById('fc-rec-id')||{}).value : '';
   const pagSel = tipo==='DESPESA' ? (document.getElementById('fc-pag-id')||{}).value : '';
-  const ok=await sbInsert('fluxo_caixa',{
+  const dadosFC={
     data_movimento:data,
     cliente:cli,
     tipo,
@@ -1206,10 +1307,12 @@ async function salvarLancamento(){
     mes:parseInt(data.slice(5,7)),
     ano:parseInt(data.slice(0,4)),
     os_id:osId,
-    conta_receber_id: recSel?parseInt(recSel):null,
-    conta_pagar_id: pagSel?parseInt(pagSel):null,
     observacao:document.getElementById('fc-obs').value
-  });
+  };
+  // só envia as colunas de vínculo quando realmente vincular (evita erro se a coluna não existir)
+  if(recSel) dadosFC.conta_receber_id=parseInt(recSel);
+  if(pagSel) dadosFC.conta_pagar_id=parseInt(pagSel);
+  const ok=await sbInsert('fluxo_caixa',dadosFC);
   if(ok){
     if(recSel) await sbUpdate('contas_receber',{status:'RECEBIDO'},'id',parseInt(recSel));
     if(pagSel) await sbUpdate('contas_pagar',{status:'PAGO'},'id',parseInt(pagSel));
@@ -1449,7 +1552,7 @@ function modalNovaPagar(){
   abrirModal('Nova Conta a Pagar',`
   <div class="form-grid">
     <div class="form-group span2"><label>Fornecedor</label><input type="text" id="pg-forn"></div>
-    <div class="form-group"><label>Categoria</label><select id="pg-cat"><option>FUNCIONÁRIO</option><option>SALARIO</option><option>IMPOSTO</option><option>ART</option><option>CONTADOR</option><option>ROYALTES</option><option>FINANCIAMENTO CARRO</option><option>SEGURO</option><option>PEÇAS CUSTO</option><option>COMPRA DE EQUIPAMENTOS</option><option>ALUGUEL DE EQUIPAMENTOS</option><option>ALIMENTAÇÃO E DESLOCAMENTO</option><option>DEMAIS GASTOS</option></select></div>
+    <div class="form-group"><label>Categoria</label><select id="pg-cat"><option>FUNCIONÁRIO</option><option>SALARIO</option><option>IMPOSTO</option><option>ART</option><option>CONTADOR</option><option>ROYALTES</option><option>FINANCIAMENTO CARRO</option><option>SEGURO</option><option>PEÇAS CUSTO</option><option>COMPRA DE EQUIPAMENTOS</option><option>ALUGUEL DE EQUIPAMENTOS</option><option>ALIMENTAÇÃO E DESLOCAMENTO</option><option>COMPRA DE MATERIAL (INSUMOS)</option><option>TERCEIRIZAÇÃO DE MÃO DE OBRA</option><option>TARIFAS BANCÁRIAS</option><option>RETIRADAS (PROPRIETÁRIO)</option><option>DEMAIS GASTOS</option></select></div>
     <div class="form-group"><label>Valor (R$)</label><input type="number" id="pg-val" value="0" step="0.01"></div>
     <div class="form-group"><label>Vencimento</label><input type="date" id="pg-venc" value="${hoje()}"></div>
     <div class="form-group"><label>Forma</label><select id="pg-forma"><option>Pix</option><option>Boleto</option><option>Débito automático</option><option>Cheque</option></select></div>
@@ -1782,7 +1885,7 @@ function relRentabilidade(){
     <div class="table-wrap"><table>
       <thead><tr><th>OS</th><th>Cliente</th><th>Serviço</th><th class="td-num">Receita</th><th class="td-num">Equipe</th><th class="td-num">Despesas</th><th class="td-num">Margem</th><th class="td-num">%</th></tr></thead>
       <tbody>${rows.map(r=>`<tr>
-        <td>#${r.o.numero_os}</td>
+        <td><button class="btn btn-sm btn-outline" onclick="verResultadoOS(${r.o.id})" title="Ver recebido, a receber e despesas">#${r.o.numero_os} 🔍</button></td>
         <td>${esc(r.o.cliente_nome||'—')}</td>
         <td class="text-xs">${esc(r.o.servico||'—')}</td>
         <td class="td-num">${fmtBRL(r.receita)}</td>
