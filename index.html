@@ -105,11 +105,11 @@ textarea{resize:vertical;min-height:60px}
 .modal-backdrop.open{display:flex}
 .modal{background:white;border-radius:14px;padding:28px;width:700px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
 .modal-lg{width:880px}
-.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin:0 -28px 16px;padding:0 28px 12px;position:sticky;top:0;background:white;z-index:5;border-bottom:1px solid var(--cinza-borda)}
 .modal-title{font-size:16px;font-weight:700;color:var(--azul)}
-.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--cinza);padding:4px 8px;border-radius:6px}
-.modal-close:hover{background:var(--cinza-bg)}
-.modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--cinza-borda)}
+.modal-close{background:var(--cinza-bg);border:none;font-size:20px;cursor:pointer;color:var(--cinza);padding:6px 12px;border-radius:8px;min-width:40px;min-height:40px}
+.modal-close:hover{background:var(--cinza-borda)}
+.modal-footer{display:flex;justify-content:flex-end;gap:10px;margin:20px -28px 0;padding:16px 28px 0;border-top:1px solid var(--cinza-borda);position:sticky;bottom:0;background:white;z-index:5;flex-wrap:wrap}
 .alert-box{padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start}
 .alert-danger{background:var(--vermelho-bg);color:#B71C1C;border-left:3px solid var(--vermelho)}
 .alert-warning{background:var(--amarelo-bg);color:#7B5500;border-left:3px solid var(--amarelo)}
@@ -213,6 +213,8 @@ tr:hover td{ background:#F3F8FF; }
   .kpi.kpi-modern .kpi-val{ font-size:20px; }
   .modal-backdrop{ align-items:flex-end; }
   .modal,.modal-lg{ width:100%; max-width:100%; padding:18px 16px; border-radius:16px 16px 0 0; max-height:92vh; }
+  .modal .modal-header{ margin:0 -16px 14px; padding:0 16px 10px; }
+  .modal .modal-footer{ margin:18px -16px 0; padding:14px 16px 0; }
   .item-row{ grid-template-columns:1fr; gap:6px; margin-bottom:14px; border-bottom:1px solid var(--cinza-borda); padding-bottom:10px; }
   .filters{ gap:8px; }
   .tabs{ overflow-x:auto; flex-wrap:nowrap; }
@@ -229,6 +231,49 @@ tr:hover td{ background:#F3F8FF; }
 #btn-instalar-pwa{ position:fixed; bottom:16px; right:16px; z-index:2900; background:var(--azul2); color:#fff; border:none; border-radius:30px; padding:11px 18px; font-size:13px; font-weight:600; cursor:pointer; box-shadow:0 4px 16px rgba(42,109,191,.4); display:none; align-items:center; gap:7px; }
 #btn-instalar-pwa.show{ display:inline-flex; }
 @media (max-width:820px){ #btn-instalar-pwa{ bottom:70px; } }
+
+/* ═══════════════════════════════════════════════════════════════
+   iOS SAFE AREAS — respeita notch / ilha dinâmica / barra de gestos
+   (ativo quando instalado como PWA ou no Safari com viewport-fit=cover)
+   ═══════════════════════════════════════════════════════════════ */
+/* A barra superior desce abaixo do relógio/notch */
+.topbar{
+  padding-top: env(safe-area-inset-top);
+  height: calc(56px + env(safe-area-inset-top));
+}
+/* O menu lateral também respeita o topo e o fundo */
+#sidebar{
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+/* O conteúdo não encosta nas laterais curvas nem na barra de gestos de baixo */
+#content{
+  padding-bottom: calc(26px + env(safe-area-inset-bottom));
+}
+/* Modais: cabeçalho abaixo do notch e rodapé acima da barra de gestos */
+.modal{
+  padding-top: calc(28px + env(safe-area-inset-top));
+  padding-bottom: calc(28px + env(safe-area-inset-bottom));
+  max-height: calc(92vh - env(safe-area-inset-top));
+}
+/* Banners e botão flutuante acima da barra de gestos */
+#offline-banner{ padding-bottom: calc(9px + env(safe-area-inset-bottom)); }
+#btn-instalar-pwa{ bottom: calc(16px + env(safe-area-inset-bottom)); }
+
+@media (max-width:820px){
+  /* O hambúrguer e o título ficam abaixo da status bar do iPhone */
+  .topbar{
+    padding-top: env(safe-area-inset-top);
+    height: calc(54px + env(safe-area-inset-top));
+  }
+  /* Modais no mobile abrem de baixo: topo seguro + fundo seguro */
+  .modal, .modal-lg{
+    padding-top: calc(18px + env(safe-area-inset-top));
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    max-height: calc(92vh - env(safe-area-inset-top));
+  }
+  #btn-instalar-pwa{ bottom: calc(70px + env(safe-area-inset-bottom)); }
+}
 </style>
 </head>
 <body>
