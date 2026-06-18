@@ -7,7 +7,7 @@
 // IMPORTANTE: ao publicar uma nova versão do sistema, troque o número
 // abaixo (v1 -> v2 -> v3...). Isso força o app a baixar o código novo
 // e descartar o antigo — evita duplicidade/código velho em cache.
-const CACHE_VERSION = 'erp-compostos-v2';
+const CACHE_VERSION = 'erp-compostos-v3';
 
 // Arquivos do "casco" do app (interface). NÃO inclui dados do Supabase.
 const ASSETS = [

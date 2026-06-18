@@ -133,6 +133,28 @@ textarea{resize:vertical;min-height:60px}
 .ev-receber{background:#D1FAE5;color:#065F46}
 .ev-venclaudo{background:#EDE9FE;color:#5B21B6}
 .ev-pagar{background:#FEE2E2;color:#991B1B}
+/* ===== Agenda: alternância grid (PC) x lista (mobile) ===== */
+.agenda-lista-wrap{ display:none; }
+.agenda-grid-wrap{ display:block; }
+.agenda-lista-dia{ display:flex; gap:12px; padding:12px 0; border-bottom:1px solid var(--cinza-borda); }
+.agenda-lista-dia:last-child{ border-bottom:none; }
+.agenda-lista-dia.hoje .agenda-lista-num{ background:var(--azul2); color:#fff; }
+.agenda-lista-data{ display:flex; flex-direction:column; align-items:center; min-width:54px; }
+.agenda-lista-num{ font-size:20px; font-weight:700; color:var(--azul); width:42px; height:42px; display:flex; align-items:center; justify-content:center; border-radius:12px; background:var(--cinza-bg); }
+.agenda-lista-sem{ font-size:10px; color:var(--cinza); margin-top:4px; text-transform:uppercase; font-weight:600; text-align:center; letter-spacing:.3px; }
+.agenda-lista-eventos{ flex:1; display:flex; flex-direction:column; gap:7px; }
+.agenda-lista-ev{ display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:10px; cursor:pointer; border-left:4px solid transparent; transition:transform .1s; }
+.agenda-lista-ev:active{ transform:scale(.98); }
+.agenda-lista-ev.ev-os{ background:#DBEAFE; border-left-color:#1E40AF; }
+.agenda-lista-ev.ev-laudo{ background:#FEF3C7; border-left-color:#92400E; }
+.agenda-lista-ev.ev-receber{ background:#D1FAE5; border-left-color:#065F46; }
+.agenda-lista-ev.ev-venclaudo{ background:#EDE9FE; border-left-color:#5B21B6; }
+.agenda-lista-ev.ev-pagar{ background:#FEE2E2; border-left-color:#991B1B; }
+.agenda-lista-ico{ font-size:20px; flex-shrink:0; }
+.agenda-lista-txt{ flex:1; min-width:0; }
+.agenda-lista-tit{ font-size:13px; font-weight:600; color:var(--texto); }
+.agenda-lista-sub{ font-size:12px; color:var(--cinza); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.agenda-lista-seta{ font-size:22px; color:var(--cinza); flex-shrink:0; }
 .item-row{display:grid;grid-template-columns:3fr 1fr 1.3fr 0.8fr auto;gap:8px;align-items:end;margin-bottom:8px}
 .item-total-bar{text-align:right;font-weight:700;font-size:15px;color:var(--azul);padding:10px 0 4px}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#C5D3DF;border-radius:3px}
@@ -221,6 +243,9 @@ tr:hover td{ background:#F3F8FF; }
   .tab{ white-space:nowrap; }
   table{ font-size:12px; }
   .agenda-day{ min-height:60px; }
+  .agenda-grid-wrap{ display:none; }
+  .agenda-lista-wrap{ display:block; }
+  .agenda-legenda{ display:none; }
 }
 @media (max-width:430px){
   .kpis{ grid-template-columns:1fr; }
@@ -2098,23 +2123,85 @@ function renderCalendario(ano, mes){
   const diasMes=new Date(ano,mes+1,0).getDate();
   const hojeStr=new Date().toISOString().slice(0,10);
   const mesStr=`${ano}-${String(mes+1).padStart(2,'0')}`;
-  const eventos={};
+  const eventos={};      // para o grid (HTML pronto por dia)
+  const eventosData={};  // para a lista mobile (objetos por dia)
+  function addEv(dia, html, obj){
+    if(!eventos[dia]) eventos[dia]=[];
+    eventos[dia].push(html);
+    if(!eventosData[dia]) eventosData[dia]=[];
+    eventosData[dia].push(obj);
+  }
   D.os.forEach(o=>{
-    if(o.data_execucao?.startsWith(mesStr)){if(!eventos[o.data_execucao])eventos[o.data_execucao]=[];eventos[o.data_execucao].push(`<div class="agenda-event ev-os" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="OS #${o.numero_os} — ${esc(o.cliente_nome)} (clique para abrir)">🔧 OS#${o.numero_os} ${esc((o.cliente_nome||'').slice(0,10))}</div>`);}
-    if(o.data_entrega_laudo?.startsWith(mesStr)){if(!eventos[o.data_entrega_laudo])eventos[o.data_entrega_laudo]=[];eventos[o.data_entrega_laudo].push(`<div class="agenda-event ev-laudo" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="Laudo OS #${o.numero_os} (clique para abrir)">📋 Laudo #${o.numero_os}</div>`);}
+    if(o.data_execucao?.startsWith(mesStr)){
+      addEv(o.data_execucao,
+        `<div class="agenda-event ev-os" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="OS #${o.numero_os} — ${esc(o.cliente_nome)} (clique para abrir)">🔧 OS#${o.numero_os} ${esc((o.cliente_nome||'').slice(0,10))}</div>`,
+        {cls:'ev-os', icon:'🔧', titulo:`Execução OS #${o.numero_os}`, sub:o.cliente_nome||'', onclick:`abrirEventoOS(${o.id})`});
+    }
+    if(o.data_entrega_laudo?.startsWith(mesStr)){
+      addEv(o.data_entrega_laudo,
+        `<div class="agenda-event ev-laudo" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="Laudo OS #${o.numero_os} (clique para abrir)">📋 Laudo #${o.numero_os}</div>`,
+        {cls:'ev-laudo', icon:'📋', titulo:`Entrega de Laudo — OS #${o.numero_os}`, sub:o.cliente_nome||'', onclick:`abrirEventoOS(${o.id})`});
+    }
     let _laudos=[]; try{ _laudos = o.laudos_prazos ? (typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos) : []; }catch(e){ _laudos=[]; }
     (_laudos||[]).forEach(l=>{
       const dv=((l&&l.data_vencimento)||'').slice(0,10);
-      if(dv.startsWith(mesStr)){ if(!eventos[dv])eventos[dv]=[]; eventos[dv].push(`<div class="agenda-event ev-venclaudo" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="Vence laudo: ${esc(l.descricao||'')} — OS #${o.numero_os} (clique para abrir)">⏰ Vence ${esc((l.descricao||'Laudo').slice(0,10))} #${o.numero_os}</div>`); }
+      if(dv.startsWith(mesStr)){
+        addEv(dv,
+          `<div class="agenda-event ev-venclaudo" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="Vence laudo: ${esc(l.descricao||'')} — OS #${o.numero_os} (clique para abrir)">⏰ Vence ${esc((l.descricao||'Laudo').slice(0,10))} #${o.numero_os}</div>`,
+          {cls:'ev-venclaudo', icon:'⏰', titulo:`Vence Laudo — OS #${o.numero_os}`, sub:l.descricao||o.cliente_nome||'', onclick:`abrirEventoOS(${o.id})`});
+      }
     });
   });
-  D.receber.filter(r=>r.status!=='RECEBIDO').forEach(r=>{const d=r.vencimento||r.data_vencimento;if(d?.startsWith(mesStr)){if(!eventos[d])eventos[d]=[];eventos[d].push(`<div class="agenda-event ev-receber" style="cursor:pointer" onclick="abrirEventoReceber(${r.id})" title="${esc(r.cliente_nome||r.cliente)} ${fmtBRL(r.valor)} (clique para abrir)">💰 ${esc((r.cliente_nome||r.cliente||'').slice(0,12))}</div>`);}});
-  D.pagar.filter(p=>p.status!=='PAGO').forEach(p=>{if(p.data_vencimento?.startsWith(mesStr)){if(!eventos[p.data_vencimento])eventos[p.data_vencimento]=[];eventos[p.data_vencimento].push(`<div class="agenda-event ev-pagar" style="cursor:pointer" onclick="abrirEventoPagar(${p.id})" title="${esc(p.fornecedor)} ${fmtBRL(p.valor)} (clique para abrir)">📤 ${esc((p.fornecedor||'').slice(0,12))}</div>`);}});
+  D.receber.filter(r=>r.status!=='RECEBIDO').forEach(r=>{const d=r.vencimento||r.data_vencimento;if(d?.startsWith(mesStr)){
+    addEv(d,
+      `<div class="agenda-event ev-receber" style="cursor:pointer" onclick="abrirEventoReceber(${r.id})" title="${esc(r.cliente_nome||r.cliente)} ${fmtBRL(r.valor)} (clique para abrir)">💰 ${esc((r.cliente_nome||r.cliente||'').slice(0,12))}</div>`,
+      {cls:'ev-receber', icon:'💰', titulo:`A Receber — ${fmtBRL(r.valor)}`, sub:r.cliente_nome||r.cliente||'', onclick:`abrirEventoReceber(${r.id})`});
+  }});
+  D.pagar.filter(p=>p.status!=='PAGO').forEach(p=>{if(p.data_vencimento?.startsWith(mesStr)){
+    addEv(p.data_vencimento,
+      `<div class="agenda-event ev-pagar" style="cursor:pointer" onclick="abrirEventoPagar(${p.id})" title="${esc(p.fornecedor)} ${fmtBRL(p.valor)} (clique para abrir)">📤 ${esc((p.fornecedor||'').slice(0,12))}</div>`,
+      {cls:'ev-pagar', icon:'📤', titulo:`A Pagar — ${fmtBRL(p.valor)}`, sub:p.fornecedor||'', onclick:`abrirEventoPagar(${p.id})`});
+  }});
+
+  // ── GRID (desktop) ──
   const sem=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   let grid=`<div class="agenda-grid" style="margin-bottom:6px">${sem.map(s=>`<div style="text-align:center;font-size:11px;font-weight:600;color:var(--cinza);padding:4px">${s}</div>`).join('')}</div><div class="agenda-grid">`;
   for(let i=0;i<primeiroDia;i++) grid+='<div></div>';
   for(let d=1;d<=diasMes;d++){const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;const isH=ds===hojeStr;grid+=`<div class="agenda-day${isH?' today':''}"><div class="agenda-day-num">${d}</div>${(eventos[ds]||[]).join('')}</div>`;}
   grid+='</div>';
+
+  // ── LISTA (mobile) ──
+  const diasSemana=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+  const diasComEvento=Object.keys(eventosData).sort();
+  let lista='';
+  if(!diasComEvento.length){
+    lista=`<div class="text-muted" style="text-align:center;padding:30px 10px">Nenhum evento em ${MESES[mes+1]} de ${ano}.</div>`;
+  } else {
+    diasComEvento.forEach(ds=>{
+      const dt=new Date(ds+'T12:00:00');
+      const diaNum=dt.getDate();
+      const diaSem=diasSemana[dt.getDay()];
+      const isHoje=ds===hojeStr;
+      lista+=`<div class="agenda-lista-dia${isHoje?' hoje':''}">
+        <div class="agenda-lista-data">
+          <span class="agenda-lista-num">${diaNum}</span>
+          <span class="agenda-lista-sem">${diaSem}${isHoje?' • HOJE':''}</span>
+        </div>
+        <div class="agenda-lista-eventos">
+          ${eventosData[ds].map(ev=>`
+            <div class="agenda-lista-ev ${ev.cls}" onclick="${ev.onclick}">
+              <span class="agenda-lista-ico">${ev.icon}</span>
+              <div class="agenda-lista-txt">
+                <div class="agenda-lista-tit">${esc(ev.titulo)}</div>
+                ${ev.sub?`<div class="agenda-lista-sub">${esc(ev.sub)}</div>`:''}
+              </div>
+              <span class="agenda-lista-seta">›</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    });
+  }
+
   const c=document.getElementById('content');
   c.innerHTML=`
   <div class="card">
@@ -2123,14 +2210,15 @@ function renderCalendario(ano, mes){
       <div style="font-size:16px;font-weight:700;color:var(--azul)">${MESES[mes+1]} ${ano}</div>
       <button class="btn btn-outline btn-sm" onclick="renderCalendario(${mes===11?ano+1:ano},${mes===11?0:mes+1})">Próximo ›</button>
     </div>
-    <div class="flex gap-8" style="margin-bottom:12px;flex-wrap:wrap">
+    <div class="agenda-legenda flex gap-8" style="margin-bottom:12px;flex-wrap:wrap">
       <span class="agenda-event ev-os" style="position:static">🔧 Execução OS</span>
       <span class="agenda-event ev-laudo" style="position:static">📋 Entrega Laudo</span>
       <span class="agenda-event ev-venclaudo" style="position:static">⏰ Vence Laudo</span>
       <span class="agenda-event ev-receber" style="position:static">💰 A Receber</span>
       <span class="agenda-event ev-pagar" style="position:static">📤 A Pagar</span>
     </div>
-    ${grid}
+    <div class="agenda-grid-wrap">${grid}</div>
+    <div class="agenda-lista-wrap">${lista}</div>
   </div>
   <div class="card">
     <div class="card-title">🔗 Google Agenda</div>
