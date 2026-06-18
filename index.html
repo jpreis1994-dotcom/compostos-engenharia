@@ -694,10 +694,12 @@ function renderProxPagar(pagar){
 // ══════════════════════════════════════════════════════════════
 // ORÇAMENTOS
 // ══════════════════════════════════════════════════════════════
+let _orcStatusFiltro='todos';
 function render_orcamentos(){
+  _orcStatusFiltro='todos';
   const c=document.getElementById('content');
   c.innerHTML=`
-  <div class="flex flex-between flex-center" style="margin-bottom:16px">
+  <div class="flex flex-between flex-center" style="margin-bottom:14px">
     <div class="tabs" style="margin-bottom:0">
       <div class="tab active" onclick="filtrarOrc(this,'todos')">Todos (${D.orcamentos.length})</div>
       <div class="tab" onclick="filtrarOrc(this,'PENDENTE')">Pendentes</div>
@@ -706,10 +708,24 @@ function render_orcamentos(){
     </div>
     <button class="btn btn-primary" onclick="modalNovoOrcamento()">＋ Novo Orçamento</button>
   </div>
+  <div class="filters" style="margin-bottom:14px">
+    <div class="filter-group" style="flex:1">
+      <div class="filter-label">Buscar</div>
+      <input type="text" id="orc-busca" placeholder="Cliente, nº do orçamento ou serviço..." oninput="aplicarBuscaOrc()" style="width:100%">
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Serviço</div>
+      <select id="orc-fserv" onchange="aplicarBuscaOrc()">
+        <option value="">Todos</option>
+        ${[...new Set(D.orcamentos.map(o=>o.tipo_servico).filter(Boolean))].sort().map(s=>`<option>${esc(s)}</option>`).join('')}
+      </select>
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="document.getElementById('orc-busca').value='';document.getElementById('orc-fserv').value='';aplicarBuscaOrc()" style="align-self:flex-end">✕ Limpar</button>
+  </div>
   <div class="card">
     <div class="table-wrap">
       <table id="tbl-orc"><thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Tipo de Serviço</th><th class="td-num">Total</th><th>Status</th><th>Ações</th></tr></thead>
-      <tbody>${D.orcamentos.map(o=>`<tr data-status="${o.status}">
+      <tbody>${D.orcamentos.map(o=>`<tr data-status="${o.status}" data-busca="${esc(((o.numero||'')+' '+(o.cli_razao||'')+' '+(o.cli_cnpj||'')+' '+(o.tipo_servico||'')).toLowerCase())}" data-serv="${esc(o.tipo_servico||'')}">
         <td><b>#${o.numero}</b></td><td>${fmtData(o.data_emissao)}</td>
         <td>${esc(o.cli_razao||'—')}</td><td><span class="text-sm">${esc(o.tipo_servico||'—')}</span></td>
         <td class="td-num">${fmtBRL(o.total)}</td><td>${badge(o.status)}</td>
@@ -721,12 +737,29 @@ function render_orcamentos(){
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarOrc(${o.id})">✕</button>
         </td></tr>`).join('')}
       </tbody></table>
+      <div id="orc-vazio" class="text-muted" style="text-align:center;padding:20px;display:none">Nenhum orçamento encontrado com esses filtros.</div>
     </div>
   </div>`;
 }
 function filtrarOrc(el,status){
   document.querySelectorAll('.tabs .tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');
-  document.querySelectorAll('#tbl-orc tbody tr').forEach(tr=>{tr.style.display=(status==='todos'||tr.dataset.status===status)?'':'none';});
+  _orcStatusFiltro=status;
+  aplicarBuscaOrc();
+}
+function aplicarBuscaOrc(){
+  const termo=(document.getElementById('orc-busca')?.value||'').toLowerCase().trim();
+  const serv=document.getElementById('orc-fserv')?.value||'';
+  let visiveis=0;
+  document.querySelectorAll('#tbl-orc tbody tr').forEach(tr=>{
+    const okStatus = _orcStatusFiltro==='todos' || tr.dataset.status===_orcStatusFiltro;
+    const okBusca  = !termo || (tr.dataset.busca||'').includes(termo);
+    const okServ   = !serv  || tr.dataset.serv===serv;
+    const mostra = okStatus && okBusca && okServ;
+    tr.style.display = mostra?'':'none';
+    if(mostra) visiveis++;
+  });
+  const vazio=document.getElementById('orc-vazio');
+  if(vazio) vazio.style.display = visiveis===0?'':'none';
 }
 async function aprovarOrc(id){if(!confirm('Aprovar este orçamento?'))return;await sbUpdate('orcamentos',{status:'APROVADO'},'id',id);nav('orcamentos');}
 async function deletarOrc(id){if(!confirm('Excluir?'))return;await sbDelete('orcamentos','id',id);nav('orcamentos');}
@@ -1360,7 +1393,8 @@ function render_fluxo(){
             ${osNums.map(n=>{const o=D.os.find(x=>x.numero_os==n);return`<option value="${n}">#${n}${o?' — '+esc(o.cliente_nome.slice(0,15)):''}</option>`;}).join('')}
           </select></div>
         <div class="filter-group"><div class="filter-label">Buscar</div>
-          <input type="text" id="f-fc-busca" placeholder="Cliente..." oninput="filtrarFluxo()"></div>
+          <input type="text" id="f-fc-busca" placeholder="Cliente ou categoria..." oninput="filtrarFluxo()"></div>
+        <button class="btn btn-sm btn-outline" onclick="document.getElementById('f-fc-tipo').value='';document.getElementById('f-fc-cat').value='';document.getElementById('f-fc-os').value='';document.getElementById('f-fc-busca').value='';filtrarFluxo()" style="align-self:flex-end">✕ Limpar</button>
       </div>
       <button class="btn btn-primary" onclick="modalNovoLancamento()">＋ Lançamento</button>
     </div>
@@ -1397,7 +1431,7 @@ function filtrarFluxo(){
     const ok=(!tipo||tr.dataset.tipo===tipo)
            &&(!cat||tr.dataset.cat===cat)
            &&(!os||tr.dataset.os===os)
-           &&(!busca||tr.dataset.cli.toLowerCase().includes(busca));
+           &&(!busca||(tr.dataset.cli.toLowerCase().includes(busca)||(tr.dataset.cat||'').toLowerCase().includes(busca)));
     tr.style.display=ok?'':'none';
   });
 }
@@ -1755,19 +1789,23 @@ function render_receber(){
   </div>
   <div class="card">
     <div class="flex flex-between flex-center" style="margin-bottom:12px">
-      <div class="filters" style="margin-bottom:0">
-        <div class="filter-group"><div class="filter-label">Status</div>
-          <select onchange="filtrarTblCol('tbl-rec',5,this.value)"><option value="">Todos</option><option>A VENCER</option><option>EM ATRASO</option><option>RECEBIDO</option><option>VENCE HOJE</option></select></div>
-        <div class="filter-group"><div class="filter-label">Forma</div>
-          <select onchange="filtrarTblCol('tbl-rec',4,this.value)"><option value="">Todas</option><option>Pix</option><option>Boleto</option><option>Cheque</option><option>Transferência</option></select></div>
-        <div class="filter-group"><div class="filter-label">Buscar</div>
-          <input type="text" placeholder="Cliente..." oninput="filtrarTbl('tbl-rec',this.value)"></div>
-      </div>
+      <div style="font-size:13px;font-weight:600;color:var(--azul)">📋 Cobranças — ${labelPeriodo()}</div>
       <button class="btn btn-primary" onclick="modalNovaCobranca()">＋ Nova Cobrança</button>
+    </div>
+    <div class="filters" style="margin-bottom:14px">
+      <div class="filter-group" style="flex:1">
+        <div class="filter-label">Buscar</div>
+        <input type="text" id="rec-busca" placeholder="Cliente, nº ou OS..." oninput="aplicarBuscaReceber()" style="width:100%">
+      </div>
+      <div class="filter-group"><div class="filter-label">Status</div>
+        <select id="rec-fstatus" onchange="aplicarBuscaReceber()"><option value="">Todos</option><option>A VENCER</option><option>EM ATRASO</option><option>RECEBIDO</option><option>VENCE HOJE</option></select></div>
+      <div class="filter-group"><div class="filter-label">Forma</div>
+        <select id="rec-fforma" onchange="aplicarBuscaReceber()"><option value="">Todas</option><option>Pix</option><option>Boleto</option><option>Cheque</option><option>Transferência</option><option>À Vista</option></select></div>
+      <button class="btn btn-sm btn-outline" onclick="document.getElementById('rec-busca').value='';document.getElementById('rec-fstatus').value='';document.getElementById('rec-fforma').value='';aplicarBuscaReceber()" style="align-self:flex-end">✕ Limpar</button>
     </div>
     <div class="table-wrap">
       <table id="tbl-rec"><thead><tr><th>ID</th><th>OS</th><th>Vencimento</th><th>Cliente</th><th>Forma</th><th>Status</th><th class="td-num">Valor</th><th>Ações</th></tr></thead>
-      <tbody>${recF.map(r=>`<tr>
+      <tbody>${recF.map(r=>`<tr data-busca="${esc((('#'+r.id)+' '+(r.os_id?('#'+r.os_id):'')+' '+(r.cliente_nome||r.cliente||'')).toLowerCase())}" data-status="${esc(r.status||'')}" data-forma="${esc(r.forma_pagamento||'')}">
         <td class="text-xs text-muted">#${r.id}</td>
         <td>${r.os_id?`#${r.os_id}`:'—'}</td>
         <td>${fmtData(r.vencimento||r.data_vencimento)}</td>
@@ -1777,11 +1815,29 @@ function render_receber(){
         <td class="td-num font-600">${fmtBRL(r.valor)}</td>
         <td style="white-space:nowrap">
           ${r.status!=='RECEBIDO'?`<button class="btn btn-sm btn-success" onclick="marcarRecebido(${r.id})">✅</button>`:''}
+          <button class="btn btn-sm btn-outline btn-icon" onclick="editarReceber(${r.id})" title="Editar">✏️</button>
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarReceber(${r.id})">✕</button>
         </td></tr>`).join('')}
       </tbody></table>
+      <div id="rec-vazio" class="text-muted" style="text-align:center;padding:20px;display:none">Nenhuma cobrança encontrada com esses filtros.</div>
     </div>
   </div>`;
+}
+function aplicarBuscaReceber(){
+  const termo=(document.getElementById('rec-busca')?.value||'').toLowerCase().trim();
+  const status=document.getElementById('rec-fstatus')?.value||'';
+  const forma=document.getElementById('rec-fforma')?.value||'';
+  let visiveis=0;
+  document.querySelectorAll('#tbl-rec tbody tr').forEach(tr=>{
+    const okBusca=!termo||(tr.dataset.busca||'').includes(termo);
+    const okStatus=!status||tr.dataset.status===status;
+    const okForma=!forma||tr.dataset.forma===forma;
+    const mostra=okBusca&&okStatus&&okForma;
+    tr.style.display=mostra?'':'none';
+    if(mostra) visiveis++;
+  });
+  const vazio=document.getElementById('rec-vazio');
+  if(vazio) vazio.style.display=visiveis===0?'':'none';
 }
 function aplicarFiltroReceber(){ lerFiltro(); render_receber(); }
 function marcarRecebido(id){
@@ -1807,6 +1863,47 @@ async function confirmarRecebido(id){
   fecharModal();checkAlertas();nav('receber');
 }
 async function deletarReceber(id){if(!confirm('Excluir?'))return;await sbDelete('contas_receber','id',id);nav('receber');}
+
+function editarReceber(id){
+  const r=D.receber.find(x=>x.id===id); if(!r)return;
+  const formas=['Pix','Boleto','Cheque','Transferência','À Vista'];
+  const statuses=['A VENCER','VENCE HOJE','EM ATRASO','RECEBIDO'];
+  const formaAtual=r.forma_pagamento||'Pix';
+  const statusAtual=r.status||'A VENCER';
+  const jaNoFluxo=D.fluxo.some(f=>f.conta_receber_id===id);
+  abrirModal(`Editar Cobrança #${id}`,`
+  ${jaNoFluxo?alertaBox('warning','⚠️ Esta conta já tem um lançamento vinculado no Fluxo de Caixa. Alterar o valor aqui não altera o lançamento já feito no fluxo.'):''}
+  <div class="form-grid">
+    <div class="form-group span2"><label>Cliente</label><input type="text" id="ecr-cli" value="${esc(r.cliente_nome||r.cliente||'')}"></div>
+    <div class="form-group"><label>Valor (R$)</label><input type="number" id="ecr-val" value="${r.valor||0}" step="0.01"></div>
+    <div class="form-group"><label>Vencimento</label><input type="date" id="ecr-venc" value="${(r.vencimento||r.data_vencimento||'').slice(0,10)}"></div>
+    <div class="form-group"><label>Forma</label><select id="ecr-forma">${formas.map(f=>`<option ${formaAtual===f?'selected':''}>${f}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Status</label><select id="ecr-status">${statuses.map(s=>`<option ${statusAtual===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    <div class="form-group span2"><label>Observação</label><textarea id="ecr-obs" rows="2">${esc(r.observacao||'')}</textarea></div>
+  </div>`,
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
+   <button class="btn btn-danger" onclick="deletarReceber(${id})">🗑️ Excluir</button>
+   <button class="btn btn-primary" onclick="salvarEditReceber(${id})">💾 Salvar</button>`);
+}
+async function salvarEditReceber(id){
+  const cli=document.getElementById('ecr-cli').value.trim();
+  const val=parseFloat(document.getElementById('ecr-val').value)||0;
+  const venc=document.getElementById('ecr-venc').value;
+  if(!cli||!val){alert('Informe cliente e valor.');return;}
+  // Descobre qual coluna de vencimento a conta usa (vencimento ou data_vencimento)
+  const r=D.receber.find(x=>x.id===id)||{};
+  const dados={
+    cliente_nome:cli,
+    valor:val,
+    forma_pagamento:document.getElementById('ecr-forma').value,
+    status:document.getElementById('ecr-status').value,
+    observacao:document.getElementById('ecr-obs').value
+  };
+  if('data_vencimento' in r && !('vencimento' in r)) dados.data_vencimento=venc;
+  else dados.vencimento=venc;
+  const ok=await sbUpdate('contas_receber',dados,'id',id);
+  if(ok){fecharModal();checkAlertas();nav('receber');}
+}
 function modalNovaCobranca(){
   abrirModal('Nova Cobrança',`
   <div class="form-grid">
@@ -1932,16 +2029,16 @@ function renderCalendario(ano, mes){
   const mesStr=`${ano}-${String(mes+1).padStart(2,'0')}`;
   const eventos={};
   D.os.forEach(o=>{
-    if(o.data_execucao?.startsWith(mesStr)){if(!eventos[o.data_execucao])eventos[o.data_execucao]=[];eventos[o.data_execucao].push(`<div class="agenda-event ev-os" title="OS #${o.numero_os} — ${esc(o.cliente_nome)}">🔧 OS#${o.numero_os} ${esc((o.cliente_nome||'').slice(0,10))}</div>`);}
-    if(o.data_entrega_laudo?.startsWith(mesStr)){if(!eventos[o.data_entrega_laudo])eventos[o.data_entrega_laudo]=[];eventos[o.data_entrega_laudo].push(`<div class="agenda-event ev-laudo" title="Laudo OS #${o.numero_os}">📋 Laudo #${o.numero_os}</div>`);}
+    if(o.data_execucao?.startsWith(mesStr)){if(!eventos[o.data_execucao])eventos[o.data_execucao]=[];eventos[o.data_execucao].push(`<div class="agenda-event ev-os" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="OS #${o.numero_os} — ${esc(o.cliente_nome)} (clique para abrir)">🔧 OS#${o.numero_os} ${esc((o.cliente_nome||'').slice(0,10))}</div>`);}
+    if(o.data_entrega_laudo?.startsWith(mesStr)){if(!eventos[o.data_entrega_laudo])eventos[o.data_entrega_laudo]=[];eventos[o.data_entrega_laudo].push(`<div class="agenda-event ev-laudo" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="Laudo OS #${o.numero_os} (clique para abrir)">📋 Laudo #${o.numero_os}</div>`);}
     let _laudos=[]; try{ _laudos = o.laudos_prazos ? (typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos) : []; }catch(e){ _laudos=[]; }
     (_laudos||[]).forEach(l=>{
       const dv=((l&&l.data_vencimento)||'').slice(0,10);
-      if(dv.startsWith(mesStr)){ if(!eventos[dv])eventos[dv]=[]; eventos[dv].push(`<div class="agenda-event ev-venclaudo" title="Vence laudo: ${esc(l.descricao||'')} — OS #${o.numero_os}">⏰ Vence ${esc((l.descricao||'Laudo').slice(0,10))} #${o.numero_os}</div>`); }
+      if(dv.startsWith(mesStr)){ if(!eventos[dv])eventos[dv]=[]; eventos[dv].push(`<div class="agenda-event ev-venclaudo" style="cursor:pointer" onclick="abrirEventoOS(${o.id})" title="Vence laudo: ${esc(l.descricao||'')} — OS #${o.numero_os} (clique para abrir)">⏰ Vence ${esc((l.descricao||'Laudo').slice(0,10))} #${o.numero_os}</div>`); }
     });
   });
-  D.receber.filter(r=>r.status!=='RECEBIDO').forEach(r=>{const d=r.vencimento||r.data_vencimento;if(d?.startsWith(mesStr)){if(!eventos[d])eventos[d]=[];eventos[d].push(`<div class="agenda-event ev-receber" title="${esc(r.cliente_nome||r.cliente)} ${fmtBRL(r.valor)}">💰 ${esc((r.cliente_nome||r.cliente||'').slice(0,12))}</div>`);}});
-  D.pagar.filter(p=>p.status!=='PAGO').forEach(p=>{if(p.data_vencimento?.startsWith(mesStr)){if(!eventos[p.data_vencimento])eventos[p.data_vencimento]=[];eventos[p.data_vencimento].push(`<div class="agenda-event ev-pagar" title="${esc(p.fornecedor)} ${fmtBRL(p.valor)}">📤 ${esc((p.fornecedor||'').slice(0,12))}</div>`);}});
+  D.receber.filter(r=>r.status!=='RECEBIDO').forEach(r=>{const d=r.vencimento||r.data_vencimento;if(d?.startsWith(mesStr)){if(!eventos[d])eventos[d]=[];eventos[d].push(`<div class="agenda-event ev-receber" style="cursor:pointer" onclick="abrirEventoReceber(${r.id})" title="${esc(r.cliente_nome||r.cliente)} ${fmtBRL(r.valor)} (clique para abrir)">💰 ${esc((r.cliente_nome||r.cliente||'').slice(0,12))}</div>`);}});
+  D.pagar.filter(p=>p.status!=='PAGO').forEach(p=>{if(p.data_vencimento?.startsWith(mesStr)){if(!eventos[p.data_vencimento])eventos[p.data_vencimento]=[];eventos[p.data_vencimento].push(`<div class="agenda-event ev-pagar" style="cursor:pointer" onclick="abrirEventoPagar(${p.id})" title="${esc(p.fornecedor)} ${fmtBRL(p.valor)} (clique para abrir)">📤 ${esc((p.fornecedor||'').slice(0,12))}</div>`);}});
   const sem=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   let grid=`<div class="agenda-grid" style="margin-bottom:6px">${sem.map(s=>`<div style="text-align:center;font-size:11px;font-weight:600;color:var(--cinza);padding:4px">${s}</div>`).join('')}</div><div class="agenda-grid">`;
   for(let i=0;i<primeiroDia;i++) grid+='<div></div>';
@@ -1966,9 +2063,53 @@ function renderCalendario(ano, mes){
   </div>
   <div class="card">
     <div class="card-title">🔗 Google Agenda</div>
-    ${alertaBox('info','A agenda mostra suas OS, laudos e vencimentos. Configure as datas nas Ordens de Serviço para aparecerem aqui.')}
+    ${alertaBox('info','A agenda mostra suas OS, laudos e vencimentos. Clique em qualquer evento para abrir o item relacionado. Configure as datas nas Ordens de Serviço para aparecerem aqui.')}
     <button class="btn btn-outline btn-sm mt-8" onclick="verificarAlertasLaudos()">🔔 Ver alertas de vencimento</button>
   </div>`;
+}
+
+// Clique em evento de OS / laudo → abre o resultado da OS
+function abrirEventoOS(osId){
+  const o=D.os.find(x=>x.id===osId);
+  if(!o){ alert('OS não encontrada.'); return; }
+  verResultadoOS(osId);
+}
+
+// Clique em evento "A Receber" → vai para Contas a Receber e destaca a conta
+async function abrirEventoReceber(recId){
+  FILTRO={mes:'',ano:''}; // limpa filtro de período para garantir que a conta apareça
+  await nav('receber');
+  destacarLinha('tbl-rec', recId);
+}
+
+// Clique em evento "A Pagar" → vai para Contas a Pagar e destaca a conta
+async function abrirEventoPagar(pagId){
+  FILTRO={mes:'',ano:''};
+  await nav('pagar');
+  destacarLinha('tbl-pag', pagId);
+}
+
+// Destaca visualmente uma linha de tabela localizando pelo id do registro
+function destacarLinha(tblId, regId){
+  setTimeout(()=>{
+    const tbl=document.getElementById(tblId);
+    if(!tbl) return;
+    let alvo=null;
+    tbl.querySelectorAll('tbody tr').forEach(tr=>{
+      if(alvo) return;
+      if(tr.innerHTML.includes(`(${regId})`)) alvo=tr;
+    });
+    if(!alvo){ return; }
+    alvo.scrollIntoView({behavior:'smooth', block:'center'});
+    const corOrig=alvo.style.background;
+    alvo.style.transition='background .3s';
+    let piscadas=0;
+    const blink=setInterval(()=>{
+      alvo.style.background = (piscadas%2===0)?'#FFE69C':'#FFF8E1';
+      piscadas++;
+      if(piscadas>=6){ clearInterval(blink); alvo.style.background=corOrig; }
+    }, 350);
+  }, 400);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2784,61 +2925,313 @@ function gerarPDFOrcamento(id){
 }
 
 // ══════════════════════════════════════════════════════════════
-// CLIENTES
+// CLIENTES (consolidado a partir de OS, Orçamentos, Receber e Fluxo)
 // ══════════════════════════════════════════════════════════════
+
+// Normaliza CNPJ (só dígitos)
+function _cnpjLimpo(v){ return String(v||'').replace(/\D/g,''); }
+// Normaliza nome para comparação (minúsculo, sem espaços extras)
+function _nomeNorm(v){ return String(v||'').toLowerCase().trim().replace(/\s+/g,' '); }
+
+// Monta a lista consolidada de clientes a partir de todas as fontes
+function consolidarClientes(){
+  // chave = cnpj (se houver) senão nome normalizado
+  const mapa = {};
+  // índice auxiliar: nome normalizado -> chave (para reconciliar registros sem CNPJ)
+  const nomeParaChave = {};
+
+  function chaveDe(nome, cnpj){
+    const cl = _cnpjLimpo(cnpj);
+    if(cl) return 'cnpj:'+cl;
+    // Sem CNPJ: tenta reaproveitar uma chave já existente para o mesmo nome
+    const n = _nomeNorm(nome);
+    if(!n) return null;
+    if(nomeParaChave[n]) return nomeParaChave[n];
+    return 'nome:'+n;
+  }
+  function obter(nome, cnpj){
+    const k = chaveDe(nome, cnpj);
+    if(!k) return null;
+    if(!mapa[k]){
+      mapa[k] = {
+        chave:k,
+        nome: nome||'(sem nome)',
+        cnpj: _cnpjLimpo(cnpj)||'',
+        cidade:'', uf:'', email:'', telefone:'',
+        cadastro:null,
+        os:[], orcamentos:[], receber:[], fluxo:[],
+      };
+    }
+    const reg = mapa[k];
+    if((nome||'').length > (reg.nome||'').length) reg.nome = nome;
+    if(!reg.cnpj && _cnpjLimpo(cnpj)) reg.cnpj = _cnpjLimpo(cnpj);
+    // Registra o nome desta entrada apontando para a chave (ajuda futuras reconciliações)
+    const nn = _nomeNorm(nome);
+    if(nn && !nomeParaChave[nn]) nomeParaChave[nn] = k;
+    return reg;
+  }
+
+  // ORDEM IMPORTA: primeiro as fontes que têm CNPJ (OS e Orçamentos),
+  // para que o índice nome->chave já aponte para o cliente com CNPJ
+  // antes de processar Receber e Fluxo (que não têm CNPJ).
+
+  // 1) OS (tem cnpj)
+  (D.os||[]).forEach(o=>{
+    const r = obter(o.cliente_nome, o.cnpj);
+    if(r) r.os.push(o);
+  });
+  // 2) Orçamentos (tem cnpj)
+  (D.orcamentos||[]).forEach(o=>{
+    const r = obter(o.cli_razao, o.cli_cnpj);
+    if(r){
+      r.orcamentos.push(o);
+      if(!r.cidade && o.cli_municipio) r.cidade = o.cli_municipio;
+      if(!r.uf && o.cli_uf) r.uf = o.cli_uf;
+      if(!r.email && o.cli_email) r.email = o.cli_email;
+      if(!r.telefone && o.cli_telefone) r.telefone = o.cli_telefone;
+    }
+  });
+  // 3) Contas a receber (sem cnpj — reconcilia por nome)
+  (D.receber||[]).forEach(rec=>{
+    const r = obter(rec.cliente_nome||rec.cliente, null);
+    if(r) r.receber.push(rec);
+  });
+  // 4) Fluxo de caixa (sem cnpj — reconcilia por nome)
+  (D.fluxo||[]).forEach(f=>{
+    if(!f.cliente) return;
+    const r = obter(f.cliente, null);
+    if(r) r.fluxo.push(f);
+  });
+
+  // 5) Enriquecer com dados da tabela clientes (cadastro manual)
+  (D.clientes||[]).forEach(cad=>{
+    const k = chaveDe(cad.razao_social, cad.cnpj);
+    if(!k) return;
+    if(!mapa[k]){
+      mapa[k] = {
+        chave:k, nome:cad.razao_social||'(sem nome)', cnpj:_cnpjLimpo(cad.cnpj)||'',
+        cidade:'', uf:'', email:'', telefone:'',
+        cadastro:null, os:[], orcamentos:[], receber:[], fluxo:[],
+      };
+      const nn=_nomeNorm(cad.razao_social); if(nn&&!nomeParaChave[nn]) nomeParaChave[nn]=k;
+    }
+    const reg = mapa[k];
+    reg.cadastro = cad;
+    if(!reg.cnpj && _cnpjLimpo(cad.cnpj)) reg.cnpj = _cnpjLimpo(cad.cnpj);
+    if(cad.nome_fantasia) reg.nome_fantasia = cad.nome_fantasia;
+    if(cad.cidade) reg.cidade = cad.cidade;
+    if(cad.uf) reg.uf = cad.uf;
+    if(cad.email) reg.email = cad.email;
+    if(cad.telefone) reg.telefone = cad.telefone;
+    if(cad.endereco) reg.endereco = cad.endereco;
+    if(cad.observacoes) reg.observacoes = cad.observacoes;
+  });
+
+  // Calcula totais por cliente
+  const lista = Object.values(mapa).map(r=>{
+    const faturado = r.fluxo.filter(f=>f.tipo==='RECEITA').reduce((a,f)=>a+Number(f.valor||0),0);
+    const emAberto = r.receber.filter(x=>x.status!=='RECEBIDO').reduce((a,x)=>a+Number(x.valor||0),0);
+    const recebido = r.receber.filter(x=>x.status==='RECEBIDO').reduce((a,x)=>a+Number(x.valor||0),0);
+    const carteiraOS = r.os.reduce((a,o)=>a+Number(o.valor_total||0),0);
+    return { ...r, faturado, emAberto, recebido, carteiraOS };
+  });
+
+  lista.sort((a,b)=> b.faturado-a.faturado || (a.nome||'').localeCompare(b.nome||''));
+  return lista;
+}
+
 function render_clientes(){
+  const lista = consolidarClientes();
+  D._clientesConsolidados = lista; // guarda para a ficha
+  const totFaturado = lista.reduce((a,c)=>a+c.faturado,0);
+  const totAberto   = lista.reduce((a,c)=>a+c.emAberto,0);
+
   const c = document.getElementById('content');
   c.innerHTML = `
   <div class="flex flex-between flex-center" style="margin-bottom:14px">
     <div class="filters" style="margin-bottom:0;flex:1;margin-right:12px">
       <div class="filter-group">
         <div class="filter-label">Buscar</div>
-        <input type="text" placeholder="Nome, CNPJ ou cidade..." oninput="filtrarTbl('tbl-cli',this.value)" style="width:240px">
+        <input type="text" placeholder="Nome ou CNPJ..." oninput="filtrarTbl('tbl-cli',this.value)" style="width:280px">
       </div>
       <div class="filter-group">
         <div class="filter-label">UF</div>
-        <select onchange="filtrarTblCol('tbl-cli',4,this.value)">
+        <select onchange="filtrarTblCol('tbl-cli',2,this.value)">
           <option value="">Todas</option>
-          ${[...new Set(D.clientes.map(x=>x.uf).filter(Boolean))].sort().map(u=>`<option>${esc(u)}</option>`).join('')}
+          ${[...new Set(lista.map(x=>x.uf).filter(Boolean))].sort().map(u=>`<option>${esc(u)}</option>`).join('')}
         </select>
       </div>
     </div>
-    <button class="btn btn-primary" onclick="modalNovoCliente()">＋ Novo Cliente</button>
+    <button class="btn btn-primary" onclick="modalNovoCliente()">＋ Cadastrar Cliente</button>
   </div>
-  <div class="grid-3" style="margin-bottom:14px">
-    <div class="kpi"><div class="kpi-label">Total de Clientes</div><div class="kpi-val azul">${D.clientes.length}</div></div>
-    <div class="kpi"><div class="kpi-label">Com OS lançada</div><div class="kpi-val">${D.clientes.filter(cl=>D.os.some(o=>(o.cliente_nome||'').toLowerCase().trim()===(cl.razao_social||'').toLowerCase().trim())).length}</div></div>
-    <div class="kpi"><div class="kpi-label">Estados atendidos</div><div class="kpi-val">${new Set(D.clientes.map(x=>x.uf).filter(Boolean)).size}</div></div>
+  <div class="grid-4" style="margin-bottom:14px">
+    <div class="kpi"><div class="kpi-label">Clientes (consolidados)</div><div class="kpi-val azul">${lista.length}</div></div>
+    <div class="kpi"><div class="kpi-label">Faturamento total</div><div class="kpi-val verde">${fmtBRL(totFaturado)}</div></div>
+    <div class="kpi"><div class="kpi-label">Em aberto</div><div class="kpi-val ${totAberto>0?'vermelho':''}">${fmtBRL(totAberto)}</div></div>
+    <div class="kpi"><div class="kpi-label">Com cadastro completo</div><div class="kpi-val">${lista.filter(c=>c.cadastro).length}</div></div>
   </div>
   <div class="card">
+    <div class="alert-box alert-info" style="margin-bottom:12px;font-size:12px">
+      💡 A lista é montada automaticamente a partir das OS, Orçamentos, Contas a Receber e Fluxo de Caixa. Clientes com o mesmo CNPJ são agrupados. Clique em 👁 para ver a ficha completa.
+    </div>
     <div class="table-wrap">
       <table id="tbl-cli">
         <thead>
-          <tr><th>Razão Social</th><th>Nome Fantasia</th><th>CNPJ</th><th>Cidade</th><th>UF</th><th>Telefone</th><th>Ações</th></tr>
+          <tr>
+            <th>Cliente</th>
+            <th>CNPJ</th>
+            <th>UF</th>
+            <th class="td-center">OS</th>
+            <th class="td-center">Orç.</th>
+            <th class="td-num">Faturado</th>
+            <th class="td-num">Em aberto</th>
+            <th>Ações</th>
+          </tr>
         </thead>
         <tbody>
-          ${D.clientes.length ? D.clientes.map(cl=>`
+          ${lista.length ? lista.map((cl,i)=>`
           <tr>
-            <td><b>${esc(cl.razao_social||'—')}</b></td>
-            <td>${esc(cl.nome_fantasia||'—')}</td>
-            <td><span class="text-xs">${esc(cl.cnpj||'—')}</span></td>
-            <td>${esc(cl.cidade||'—')}</td>
+            <td><b>${esc(cl.nome)}</b>${cl.cadastro?' <span title="Cadastro completo" style="color:var(--verde)">✓</span>':''}${cl.nome_fantasia?`<br><span class="text-xs text-muted">${esc(cl.nome_fantasia)}</span>`:''}</td>
+            <td><span class="text-xs">${cl.cnpj?esc(fmtCNPJStr(cl.cnpj)):'—'}</span></td>
             <td>${esc(cl.uf||'—')}</td>
-            <td>${esc(cl.telefone||'—')}</td>
+            <td class="td-center">${cl.os.length||'—'}</td>
+            <td class="td-center">${cl.orcamentos.length||'—'}</td>
+            <td class="td-num">${fmtBRL(cl.faturado)}</td>
+            <td class="td-num ${cl.emAberto>0?'vermelho':''}">${cl.emAberto>0?fmtBRL(cl.emAberto):'—'}</td>
             <td style="white-space:nowrap">
-              <button class="btn btn-sm btn-outline" onclick="editarCliente(${cl.id})">✏️</button>
-              <button class="btn btn-sm btn-primary btn-icon" onclick="verOSCliente(${cl.id})" title="Ver OS deste cliente">🔧</button>
-              <button class="btn btn-sm btn-danger btn-icon" onclick="deletarCliente(${cl.id})">✕</button>
+              <button class="btn btn-sm btn-primary" onclick="verFichaCliente(${i})">👁 Ficha</button>
+              <button class="btn btn-sm btn-outline btn-icon" onclick="editarOuCadastrarCliente(${i})" title="${cl.cadastro?'Editar cadastro':'Completar cadastro'}">✏️</button>
             </td>
-          </tr>`).join('') : '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:24px">Nenhum cliente cadastrado ainda.</td></tr>'}
+          </tr>`).join('') : '<tr><td colspan="8" class="text-muted" style="text-align:center;padding:24px">Nenhum cliente ainda. Eles aparecem aqui assim que você cadastra uma OS, orçamento ou recebimento.</td></tr>'}
         </tbody>
       </table>
     </div>
   </div>`;
 }
 
+// Formata CNPJ a partir de string de dígitos
+function fmtCNPJStr(v){
+  const s=_cnpjLimpo(v);
+  if(s.length!==14) return v;
+  return s.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5');
+}
+
+// Ficha completa do cliente consolidado
+function verFichaCliente(idx){
+  const cl = (D._clientesConsolidados||[])[idx];
+  if(!cl) return;
+  const vd=r=>(r.vencimento||r.data_vencimento||'').slice(0,10);
+
+  // Aba OS
+  const tabOS = cl.os.length ? `
+    <div class="table-wrap"><table>
+      <thead><tr><th>OS</th><th>Serviço</th><th>Status</th><th>Abertura</th><th class="td-num">Valor</th><th></th></tr></thead>
+      <tbody>${cl.os.map(o=>`<tr>
+        <td><b>#${o.numero_os}</b></td>
+        <td><span class="text-xs">${esc(o.servico||'—')}</span></td>
+        <td>${badge(o.status)}</td>
+        <td>${fmtData(o.data_abertura)}</td>
+        <td class="td-num">${fmtBRL(o.valor_total)}</td>
+        <td><button class="btn btn-sm btn-outline btn-icon" onclick="fecharModal();verResultadoOS(${o.id})" title="Resultado">📊</button></td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--cinza-borda)"><td colspan="4">Carteira total</td><td class="td-num">${fmtBRL(cl.carteiraOS)}</td><td></td></tr></tfoot>
+    </table></div>` : '<p class="text-muted text-sm" style="padding:12px">Nenhuma OS.</p>';
+
+  // Aba Orçamentos
+  const tabOrc = cl.orcamentos.length ? `
+    <div class="table-wrap"><table>
+      <thead><tr><th>Nº</th><th>Data</th><th>Serviço</th><th>Status</th><th class="td-num">Total</th><th></th></tr></thead>
+      <tbody>${cl.orcamentos.map(o=>`<tr>
+        <td><b>#${esc(o.numero||o.id)}</b></td>
+        <td>${fmtData(o.data_emissao)}</td>
+        <td><span class="text-xs">${esc(o.tipo_servico||'—')}</span></td>
+        <td>${badge(o.status)}</td>
+        <td class="td-num">${fmtBRL(o.total)}</td>
+        <td><button class="btn btn-sm btn-outline btn-icon" onclick="fecharModal();verOrcamento(${o.id})" title="Ver">👁</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : '<p class="text-muted text-sm" style="padding:12px">Nenhum orçamento.</p>';
+
+  // Aba Financeiro (receber + fluxo)
+  const recSorted = [...cl.receber].sort((a,b)=>vd(a).localeCompare(vd(b)));
+  const tabFin = `
+    <div class="text-sm font-600" style="margin:4px 0 6px">💰 Contas a Receber</div>
+    ${cl.receber.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Vencimento</th><th>Status</th><th>Forma</th><th class="td-num">Valor</th></tr></thead>
+      <tbody>${recSorted.map(r=>`<tr>
+        <td>${fmtData(vd(r))}</td><td>${badge(r.status)}</td><td>${esc(r.forma_pagamento||'—')}</td><td class="td-num">${fmtBRL(r.valor)}</td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--cinza-borda)"><td colspan="3">Recebido / Em aberto</td><td class="td-num"><span class="verde">${fmtBRL(cl.recebido)}</span> / <span class="vermelho">${fmtBRL(cl.emAberto)}</span></td></tr></tfoot>
+    </table></div>` : '<p class="text-muted text-sm" style="padding:12px">Nenhuma conta a receber.</p>'}
+    <div class="text-sm font-600" style="margin:14px 0 6px">💵 Movimentos no Fluxo de Caixa</div>
+    ${cl.fluxo.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th class="td-num">Valor</th></tr></thead>
+      <tbody>${[...cl.fluxo].sort((a,b)=>(b.data_movimento||'').localeCompare(a.data_movimento||'')).map(f=>`<tr>
+        <td>${fmtData(f.data_movimento)}</td><td>${badge(f.tipo)}</td><td><span class="text-xs">${esc(f.categoria||'—')}</span></td><td class="td-num" style="color:${f.tipo==='RECEITA'?'#1A8F5A':'#D64045'};font-weight:600">${fmtBRL(f.valor)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : '<p class="text-muted text-sm" style="padding:12px">Nenhum movimento.</p>'}`;
+
+  const dados = `
+    <div class="form-grid" style="margin-bottom:6px">
+      <div><span class="text-xs text-muted">CNPJ</span><br><b>${cl.cnpj?esc(fmtCNPJStr(cl.cnpj)):'—'}</b></div>
+      <div><span class="text-xs text-muted">Cidade / UF</span><br><b>${esc(cl.cidade||'—')}${cl.uf?' / '+esc(cl.uf):''}</b></div>
+      <div><span class="text-xs text-muted">Telefone</span><br><b>${esc(cl.telefone||'—')}</b></div>
+      <div><span class="text-xs text-muted">E-mail</span><br><b>${esc(cl.email||'—')}</b></div>
+    </div>`;
+
+  abrirModal(`👤 ${esc(cl.nome)}`, `
+    ${dados}
+    <div class="grid-4" style="margin:12px 0">
+      <div class="kpi"><div class="kpi-label">Faturado</div><div class="kpi-val verde">${fmtBRL(cl.faturado)}</div></div>
+      <div class="kpi"><div class="kpi-label">Recebido</div><div class="kpi-val">${fmtBRL(cl.recebido)}</div></div>
+      <div class="kpi"><div class="kpi-label">Em aberto</div><div class="kpi-val ${cl.emAberto>0?'vermelho':''}">${fmtBRL(cl.emAberto)}</div></div>
+      <div class="kpi"><div class="kpi-label">Carteira OS</div><div class="kpi-val azul">${fmtBRL(cl.carteiraOS)}</div></div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="fichaTab(this,'fc-os')">🔧 OS (${cl.os.length})</div>
+      <div class="tab" onclick="fichaTab(this,'fc-orc')">📝 Orçamentos (${cl.orcamentos.length})</div>
+      <div class="tab" onclick="fichaTab(this,'fc-fin')">💰 Financeiro</div>
+    </div>
+    <div id="fc-os" class="ficha-pane">${tabOS}</div>
+    <div id="fc-orc" class="ficha-pane" style="display:none">${tabOrc}</div>
+    <div id="fc-fin" class="ficha-pane" style="display:none">${tabFin}</div>
+  `,
+  `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>
+   <button class="btn btn-primary" onclick="editarOuCadastrarCliente(${idx})">✏️ ${cl.cadastro?'Editar dados':'Completar cadastro'}</button>`, true);
+}
+
+function fichaTab(el, paneId){
+  el.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.ficha-pane').forEach(p=>p.style.display='none');
+  document.getElementById(paneId).style.display='';
+}
+
+// Abre o cadastro já preenchido com os dados consolidados do cliente
+function editarOuCadastrarCliente(idx){
+  const cl = (D._clientesConsolidados||[])[idx];
+  if(!cl) return;
+  fecharModal();
+  if(cl.cadastro){
+    editarCliente(cl.cadastro.id);
+  } else {
+    // Pré-preenche o modal de novo cliente com o que já sabemos
+    modalNovoCliente();
+    setTimeout(()=>{
+      const set=(id,v)=>{ const e=document.getElementById(id); if(e&&v) e.value=v; };
+      set('cli-razao', cl.nome);
+      set('cli-cnpj', cl.cnpj?fmtCNPJStr(cl.cnpj):'');
+      set('cli-fantasia', cl.nome_fantasia||'');
+      set('cli-cidade', cl.cidade||'');
+      set('cli-uf', cl.uf||'');
+      set('cli-tel', cl.telefone||'');
+      set('cli-email', cl.email||'');
+    }, 100);
+  }
+}
+
 function modalNovoCliente(){
-  abrirModal('Novo Cliente', `
+  abrirModal('Cadastrar Cliente', `
+  <div class="alert-box alert-info" style="font-size:12px">O cadastro guarda dados extras (telefone, e-mail, endereço). O histórico de OS, orçamentos e pagamentos é sempre montado automaticamente.</div>
   <div style="font-size:13px;font-weight:600;color:var(--azul);margin-bottom:8px">🔍 Buscar por CNPJ</div>
   <div class="flex gap-8 flex-center" style="margin-bottom:14px">
     <input type="text" id="cli-cnpj" placeholder="00.000.000/0001-00" style="flex:1" oninput="fmtCNPJ(this)">
@@ -2908,7 +3301,7 @@ function editarCliente(id){
     <div class="form-group span2"><label>Observações</label><textarea id="ecli-obs" rows="2">${esc(cl.observacoes||'')}</textarea></div>
   </div>`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
-   <button class="btn btn-danger" onclick="deletarCliente(${id})">🗑️ Excluir</button>
+   <button class="btn btn-danger" onclick="deletarCliente(${id})">🗑️ Excluir cadastro</button>
    <button class="btn btn-primary" onclick="salvarEditCliente(${id})">💾 Salvar</button>`);
 }
 
@@ -2930,45 +3323,18 @@ async function salvarEditCliente(id){
 }
 
 async function deletarCliente(id){
-  if(!confirm('Excluir este cliente?')) return;
+  if(!confirm('Excluir o cadastro deste cliente? (O histórico de OS, orçamentos e pagamentos NÃO é apagado — só os dados extras de contato.)')) return;
   await sbDelete('clientes','id',id);
   fecharModal();
   nav('clientes');
 }
 
-function verOSCliente(id){
-  const cl = D.clientes.find(x=>x.id===id); if(!cl) return;
-  const osDoCliente = D.os.filter(o=>
-    (o.cliente_nome||'').toLowerCase().trim() === (cl.razao_social||'').toLowerCase().trim() ||
-    ((o.cnpj||'').replace(/\D/g,'') && (o.cnpj||'').replace(/\D/g,'') === (cl.cnpj||'').replace(/\D/g,''))
-  );
-  const totVal = osDoCliente.reduce((a,o)=>a+Number(o.valor_total||0),0);
-  abrirModal(`🔧 OS de ${esc(cl.razao_social)}`, `
-  ${alertaBox('info', `${osDoCliente.length} OS encontrada(s) — Total: <b>${fmtBRL(totVal)}</b>`)}
-  ${osDoCliente.length ? `
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>OS</th><th>Serviço</th><th>Status</th><th>Data</th><th class="td-num">Valor</th></tr></thead>
-      <tbody>
-        ${osDoCliente.map(o=>`
-        <tr>
-          <td><b>#${o.numero_os}</b></td>
-          <td><span class="text-xs">${esc(o.servico||'—')}</span></td>
-          <td>${badge(o.status)}</td>
-          <td>${fmtData(o.data_abertura)}</td>
-          <td class="td-num">${fmtBRL(o.valor_total)}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-  </div>` : '<p class="text-muted text-sm" style="text-align:center;padding:16px">Nenhuma OS encontrada para este cliente.</p>'}`,
-  `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>
-   <button class="btn btn-primary" onclick="fecharModal();nav('os')">Ver todas as OS</button>`);
-}
-
-// Autocomplete de cliente em campos de texto
+// Autocomplete de cliente em campos de texto (usa lista consolidada)
 function setupAutoCompleteCliente(inputId, onSelect){
   const input = document.getElementById(inputId);
-  if(!input || !D.clientes.length) return;
+  if(!input) return;
+  const fonte = consolidarClientes();
+  if(!fonte.length) return;
   let dropdown = null;
   function fechar(){ if(dropdown){ dropdown.remove(); dropdown=null; } }
 
@@ -2976,10 +3342,10 @@ function setupAutoCompleteCliente(inputId, onSelect){
     const val = this.value.toLowerCase().trim();
     fechar();
     if(!val || val.length < 2) return;
-    const matches = D.clientes.filter(cl=>
-      (cl.razao_social||'').toLowerCase().includes(val) ||
+    const matches = fonte.filter(cl=>
+      (cl.nome||'').toLowerCase().includes(val) ||
       (cl.nome_fantasia||'').toLowerCase().includes(val) ||
-      (cl.cnpj||'').includes(val)
+      (cl.cnpj||'').includes(val.replace(/\D/g,''))
     ).slice(0,6);
     if(!matches.length) return;
 
@@ -2988,13 +3354,16 @@ function setupAutoCompleteCliente(inputId, onSelect){
     matches.forEach(cl=>{
       const item = document.createElement('div');
       item.style.cssText = 'padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--cinza-borda)';
-      item.innerHTML = `<b>${esc(cl.razao_social)}</b><br><span style="font-size:11px;color:var(--cinza)">${esc(cl.cnpj||'')} — ${esc(cl.cidade||'')}/${esc(cl.uf||'')}</span>`;
+      item.innerHTML = `<b>${esc(cl.nome)}</b><br><span style="font-size:11px;color:var(--cinza)">${cl.cnpj?esc(fmtCNPJStr(cl.cnpj)):''} ${cl.cidade?'— '+esc(cl.cidade):''}${cl.uf?'/'+esc(cl.uf):''}</span>`;
       item.addEventListener('mouseenter',()=>item.style.background='var(--azul3)');
       item.addEventListener('mouseleave',()=>item.style.background='white');
       item.addEventListener('mousedown',(e)=>{
         e.preventDefault();
-        input.value = cl.razao_social;
-        if(onSelect) onSelect(cl);
+        input.value = cl.nome;
+        if(onSelect) onSelect({
+          razao_social:cl.nome, cnpj:cl.cnpj?fmtCNPJStr(cl.cnpj):'',
+          cidade:cl.cidade, uf:cl.uf, email:cl.email, telefone:cl.telefone
+        });
         fechar();
       });
       dropdown.appendChild(item);
@@ -3320,12 +3689,107 @@ function filtrarTblCol(tblId,col,val){document.querySelectorAll(`#${tblId} tbody
 function filtrarTblStatus(tblId,val,col){filtrarTblCol(tblId,col,val);}
 
 // ══════════════════════════════════════════════════════════════
+// ORDENAÇÃO GENÉRICA DE TABELAS (clique no cabeçalho)
+// ══════════════════════════════════════════════════════════════
+// Converte o texto de uma célula em valor comparável (número, data ou texto)
+function _valorOrdenacao(texto){
+  const t=(texto||'').trim();
+  if(!t || t==='—') return {tipo:'vazio', v:''};
+  // Data dd/mm/aaaa
+  const md=t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if(md) return {tipo:'num', v:parseInt(md[3]+md[2]+md[1])};
+  // Moeda R$ 1.234,56  ou número com vírgula decimal
+  const limpoMoeda=t.replace(/r\$|\s/gi,'');
+  if(/^-?[\d.]+,\d+$/.test(limpoMoeda) || /^-?\d[\d.]*$/.test(limpoMoeda.replace(/\./g,''))){
+    const n=parseFloat(limpoMoeda.replace(/\./g,'').replace(',','.'));
+    if(!isNaN(n)) return {tipo:'num', v:n};
+  }
+  // Número puro (ex: #123, contagens)
+  const soNum=t.replace(/[^\d.-]/g,'');
+  if(soNum && /^-?\d+(\.\d+)?$/.test(soNum) && t.replace(/[#\s]/g,'').match(/^\d/)){
+    return {tipo:'num', v:parseFloat(soNum)};
+  }
+  return {tipo:'txt', v:t.toLowerCase()};
+}
+
+// Ativa ordenação por clique nos <th> de uma tabela
+function ativarOrdenacao(tblId){
+  const tbl=document.getElementById(tblId);
+  if(!tbl) return;
+  const ths=tbl.querySelectorAll('thead th');
+  ths.forEach((th,idx)=>{
+    // Não ordena a coluna de ações (geralmente a última, sem título útil)
+    const titulo=th.textContent.trim();
+    if(titulo==='' || /ações|ação/i.test(titulo)) return;
+    th.style.cursor='pointer';
+    th.style.userSelect='none';
+    if(!th.dataset.ordSetup){
+      th.dataset.ordSetup='1';
+      th.title='Clique para ordenar';
+      th.addEventListener('click',()=>ordenarTabela(tblId, idx, th));
+    }
+  });
+}
+
+function ordenarTabela(tblId, col, th){
+  const tbl=document.getElementById(tblId);
+  if(!tbl) return;
+  const tbody=tbl.querySelector('tbody');
+  const linhas=[...tbody.querySelectorAll('tr')].filter(tr=>!tr.querySelector('td[colspan]'));
+  // Direção: alterna asc/desc
+  const asc = th.dataset.ordDir!=='asc';
+  // Limpa indicadores dos outros th
+  tbl.querySelectorAll('thead th').forEach(h=>{
+    if(h!==th){ h.dataset.ordDir=''; h.textContent=h.textContent.replace(/ [▲▼]$/,''); }
+  });
+  th.dataset.ordDir = asc?'asc':'desc';
+  // Atualiza seta no título
+  const tituloBase=th.textContent.replace(/ [▲▼]$/,'');
+  th.textContent = tituloBase+(asc?' ▲':' ▼');
+
+  linhas.sort((a,b)=>{
+    const ca=a.querySelectorAll('td')[col], cb=b.querySelectorAll('td')[col];
+    const va=_valorOrdenacao(ca?ca.textContent:''), vb=_valorOrdenacao(cb?cb.textContent:'');
+    // Vazios sempre por último
+    if(va.tipo==='vazio' && vb.tipo!=='vazio') return 1;
+    if(vb.tipo==='vazio' && va.tipo!=='vazio') return -1;
+    if(va.tipo==='num' && vb.tipo==='num') return asc ? va.v-vb.v : vb.v-va.v;
+    const sa=String(va.v), sb=String(vb.v);
+    return asc ? sa.localeCompare(sb,'pt-BR') : sb.localeCompare(sa,'pt-BR');
+  });
+  linhas.forEach(tr=>tbody.appendChild(tr));
+}
+
+// Ativa ordenação em todas as tabelas com id que comecem por "tbl-" ou conhecidas
+function ativarOrdenacaoTodas(){
+  setTimeout(()=>{
+    document.querySelectorAll('#content table[id]').forEach(t=>ativarOrdenacao(t.id));
+    // Tabelas sem id mas dentro de cards de listagem
+    document.querySelectorAll('#content .table-wrap > table:not([id])').forEach((t,i)=>{
+      if(!t.id) t.id='_tblauto_'+i;
+      ativarOrdenacao(t.id);
+    });
+  }, 50);
+}
+
+// ══════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════
 window.addEventListener('load',async ()=>{
   // Injeta logo nos elementos de imagem
   document.getElementById('login-logo-img').src='data:image/png;base64,'+LOGO_B64;
   document.getElementById('sidebar-logo-img').src='data:image/png;base64,'+LOGO_B64;
+
+  // Observa mudanças no conteúdo e reativa ordenação das tabelas automaticamente
+  const _content = document.getElementById('content');
+  if(_content && window.MutationObserver){
+    let _ordTimer=null;
+    new MutationObserver(()=>{
+      clearTimeout(_ordTimer);
+      _ordTimer=setTimeout(()=>ativarOrdenacaoTodas(), 60);
+    }).observe(_content, {childList:true, subtree:true});
+  }
+
   // Restaura sessão ativa (evita logout ao recarregar a página)
   try{
     const { data:{ session } } = await sb.auth.getSession();
