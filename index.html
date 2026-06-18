@@ -2,8 +2,18 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Compostos Engenharia</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>ERP Compostos Engenharia</title>
+<!-- ===== PWA ===== -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1A3C5E">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ERP Compostos">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<!-- ===== /PWA ===== -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -213,9 +223,17 @@ tr:hover td{ background:#F3F8FF; }
 @media (max-width:430px){
   .kpis{ grid-template-columns:1fr; }
 }
+/* ===== PWA: banner offline e botão instalar ===== */
+#offline-banner{ position:fixed; bottom:0; left:0; right:0; z-index:3000; background:#7B5500; color:#fff; font-size:13px; font-weight:600; text-align:center; padding:9px 14px; transform:translateY(100%); transition:transform .25s; box-shadow:0 -2px 10px rgba(0,0,0,.2); }
+#offline-banner.show{ transform:translateY(0); }
+#btn-instalar-pwa{ position:fixed; bottom:16px; right:16px; z-index:2900; background:var(--azul2); color:#fff; border:none; border-radius:30px; padding:11px 18px; font-size:13px; font-weight:600; cursor:pointer; box-shadow:0 4px 16px rgba(42,109,191,.4); display:none; align-items:center; gap:7px; }
+#btn-instalar-pwa.show{ display:inline-flex; }
+@media (max-width:820px){ #btn-instalar-pwa{ bottom:70px; } }
 </style>
 </head>
 <body>
+<div id="offline-banner">📡 Sem conexão — você pode consultar os dados, mas só consegue salvar quando voltar online.</div>
+<button id="btn-instalar-pwa" onclick="instalarPWA()">📲 Instalar app</button>
 
 <!-- LOGIN -->
 <div id="login-screen">
@@ -429,16 +447,19 @@ async function carregarTudo(){
 }
 
 async function sbInsert(tabela, dados){
+  if(typeof exigeOnline==='function' && !exigeOnline()) return false;
   const {error} = await sb.from(tabela).insert([dados]);
   if(error){ console.error(tabela, error); alert('Erro ao salvar: '+error.message); return false; }
   return true;
 }
 async function sbUpdate(tabela, dados, coluna, valor){
+  if(typeof exigeOnline==='function' && !exigeOnline()) return false;
   const {error} = await sb.from(tabela).update(dados).eq(coluna, valor);
   if(error){ console.error(tabela, error); alert('Erro ao atualizar: '+error.message); return false; }
   return true;
 }
 async function sbDelete(tabela, coluna, valor){
+  if(typeof exigeOnline==='function' && !exigeOnline()) return false;
   const {error} = await sb.from(tabela).delete().eq(coluna, valor);
   if(error){ console.error(tabela, error); return false; }
   return true;
@@ -469,6 +490,8 @@ function entrarApp(user){
   document.getElementById('sb-perfil').textContent = meta.perfil || meta.role || 'Usuário';
   document.getElementById('topbar-date').textContent = new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
   document.getElementById('login-pass').value='';
+  // Mostra o botão de instalar o app, se disponível
+  if(_deferredPrompt) document.getElementById('btn-instalar-pwa')?.classList.add('show');
   nav('dashboard');
 }
 document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&document.getElementById('login-screen').style.display!=='none') doLogin(); });
@@ -478,6 +501,7 @@ async function doLogout(){
   document.getElementById('app-shell').style.display='none';
   document.getElementById('login-user').value='';
   document.getElementById('login-pass').value='';
+  document.getElementById('btn-instalar-pwa')?.classList.remove('show');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1216,6 +1240,7 @@ function gerarCobrancaOS(osId){
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-success" onclick="salvarCobrancaOS(${osId})">💰 Gerar Cobrança</button>`);
 }
 async function salvarCobrancaOS(osId){
+  if(typeof exigeOnline==='function' && !exigeOnline()) return;
   const _o=D.os.find(x=>x.id===osId)||{}, cliente=_o.cliente_nome||'', numOS=_o.numero_os||'';
   const val=parseFloat(document.getElementById('cob-val').value)||0;
   const venc=document.getElementById('cob-venc').value;
@@ -1569,6 +1594,7 @@ function calcMatTotal(){
 }
 function toggleCatFC(){const t=document.getElementById('fc-tipo').value;document.getElementById('fc-cat-rec').style.display=t==='RECEITA'?'':'none';document.getElementById('fc-cat-desp').style.display=t==='DESPESA'?'':'none';const rw=document.getElementById('fc-rec-wrap'),pw=document.getElementById('fc-pag-wrap');if(rw)rw.style.display=t==='RECEITA'?'':'none';if(pw)pw.style.display=t==='DESPESA'?'':'none';const ri=document.getElementById('fc-rec-id'),pi=document.getElementById('fc-pag-id');if(t!=='RECEITA'&&ri)ri.value='';if(t!=='DESPESA'&&pi)pi.value='';toggleEstoqueWrap();}
 async function salvarLancamento(){
+  if(typeof exigeOnline==='function' && !exigeOnline()) return;
   const data=document.getElementById('fc-data').value,
         tipo=document.getElementById('fc-tipo').value,
         cli=document.getElementById('fc-cli').value.trim(),
@@ -3469,6 +3495,7 @@ function modalNovoItemEstoque(){
 }
 
 async function salvarNovoItemEstoque(){
+  if(typeof exigeOnline==='function' && !exigeOnline()) return;
   const nome=document.getElementById('est-nome').value.trim();
   const un=document.getElementById('est-un').value.trim();
   if(!nome||!un){ alert('Informe nome e unidade.'); return; }
@@ -3535,6 +3562,7 @@ function modalEntradaEstoque(itemId){
 }
 
 async function salvarEntradaEstoque(){
+  if(typeof exigeOnline==='function' && !exigeOnline()) return;
   const itemId=parseInt(document.getElementById('ent-item').value||0);
   const qtd=parseFloat(document.getElementById('ent-qtd').value)||0;
   const custo=parseFloat(document.getElementById('ent-custo').value)||0;
@@ -3652,6 +3680,7 @@ function calcBaixaTotal(){
 }
 
 async function salvarBaixaMateriais(osId){
+  if(typeof exigeOnline==='function' && !exigeOnline()) return;
   const o=D.os.find(x=>x.id===osId); if(!o) return;
   const baixas=[];
   let erro='';
@@ -3775,10 +3804,108 @@ function ativarOrdenacaoTodas(){
 // ══════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+// PWA — Service Worker, status online/offline, instalação
+// ══════════════════════════════════════════════════════════════
+
+// Registra o Service Worker
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js')
+      .then(reg=>{
+        // Verifica atualizações periodicamente (a cada 60s enquanto aberto)
+        setInterval(()=>reg.update(), 60000);
+        reg.addEventListener('updatefound', ()=>{
+          const novo = reg.installing;
+          if(!novo) return;
+          novo.addEventListener('statechange', ()=>{
+            // Há uma versão nova esperando e já existe um SW controlando → avisa
+            if(novo.state==='installed' && navigator.serviceWorker.controller){
+              mostrarAvisoAtualizacao();
+            }
+          });
+        });
+      })
+      .catch(e=>console.warn('SW falhou:', e));
+    // Recarrega a página quando o novo SW assume o controle
+    let _recarregou=false;
+    navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+      if(_recarregou) return; _recarregou=true;
+      window.location.reload();
+    });
+  });
+}
+
+function mostrarAvisoAtualizacao(){
+  if(document.getElementById('upd-banner')) return;
+  const b=document.createElement('div');
+  b.id='upd-banner';
+  b.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:3100;background:#1A8F5A;color:#fff;font-size:13px;font-weight:600;text-align:center;padding:11px;box-shadow:0 -2px 10px rgba(0,0,0,.2);cursor:pointer';
+  b.innerHTML='🔄 Nova versão disponível — toque para atualizar';
+  b.onclick=()=>{
+    navigator.serviceWorker.getRegistration().then(reg=>{
+      if(reg && reg.waiting) reg.waiting.postMessage('SKIP_WAITING');
+    });
+  };
+  document.body.appendChild(b);
+}
+
+// ── Status online / offline ──
+let APP_ONLINE = navigator.onLine;
+function atualizarStatusConexao(){
+  APP_ONLINE = navigator.onLine;
+  const banner=document.getElementById('offline-banner');
+  if(banner) banner.classList.toggle('show', !APP_ONLINE);
+}
+window.addEventListener('online', ()=>{
+  atualizarStatusConexao();
+  // Ao voltar online, recarrega os dados frescos da tela atual
+  const ativo=document.querySelector('nav a.active');
+  if(ativo && typeof nav==='function'){
+    const id=ativo.id||'';
+    const page=id.replace('nav-','');
+    if(page) nav(page);
+  }
+});
+window.addEventListener('offline', atualizarStatusConexao);
+
+// Bloqueia gravações quando offline (evita duplicidade/erro de sincronização)
+// Retorna true se PODE prosseguir (online); false se offline (e avisa).
+function exigeOnline(){
+  if(navigator.onLine) return true;
+  alert('📡 Sem conexão com a internet.\n\nVocê pode consultar os dados, mas para salvar, editar ou excluir é preciso estar online.\n\nReconecte-se e tente novamente.');
+  return false;
+}
+
+// ── Botão de instalação do app ──
+let _deferredPrompt=null;
+window.addEventListener('beforeinstallprompt', (e)=>{
+  e.preventDefault();
+  _deferredPrompt=e;
+  const btn=document.getElementById('btn-instalar-pwa');
+  // Só mostra o botão se já estiver logado (app-shell visível)
+  if(btn && document.getElementById('app-shell')?.style.display!=='none'){
+    btn.classList.add('show');
+  }
+});
+function instalarPWA(){
+  if(!_deferredPrompt) return;
+  _deferredPrompt.prompt();
+  _deferredPrompt.userChoice.finally(()=>{
+    _deferredPrompt=null;
+    document.getElementById('btn-instalar-pwa')?.classList.remove('show');
+  });
+}
+window.addEventListener('appinstalled', ()=>{
+  document.getElementById('btn-instalar-pwa')?.classList.remove('show');
+});
+
 window.addEventListener('load',async ()=>{
   // Injeta logo nos elementos de imagem
   document.getElementById('login-logo-img').src='data:image/png;base64,'+LOGO_B64;
   document.getElementById('sidebar-logo-img').src='data:image/png;base64,'+LOGO_B64;
+
+  atualizarStatusConexao();
 
   // Observa mudanças no conteúdo e reativa ordenação das tabelas automaticamente
   const _content = document.getElementById('content');
