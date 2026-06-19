@@ -867,11 +867,21 @@ function render_dashboard(){
     document.getElementById('c-chart-rec').parentElement.innerHTML+='<p class="text-muted text-sm" style="text-align:center">Sem dados no período</p>';
   }
 
-  // Gráfico clientes — usa fluxo filtrado
+  // Gráfico clientes — ranking por faturamento (usa fluxo do período; se vazio, usa consolidação geral)
   const cr={};fluxoF.filter(r=>r.tipo==='RECEITA').forEach(r=>{const k=r.cliente||r.cliente_nome||'—';cr[k]=(cr[k]||0)+Number(r.valor);});
-  const topCli=Object.entries(cr).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  let topCli=Object.entries(cr).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  let tituloFonte='no período';
+  // Se não há receitas no fluxo do período, cai para o faturamento consolidado de todos os tempos
+  if(!topCli.length && typeof consolidarClientes==='function'){
+    const cons=consolidarClientes().filter(c=>c.faturado>0).slice(0,6);
+    topCli=cons.map(c=>[c.nome, c.faturado]);
+    tituloFonte='total';
+  }
   if(topCli.length){
-    new Chart(document.getElementById('c-chart-cli'),{type:'bar',data:{labels:topCli.map(e=>e[0].length>18?e[0].slice(0,18)+'…':e[0]),datasets:[{data:topCli.map(e=>e[1]),backgroundColor:'#1A3C5E',borderRadius:3}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
+    new Chart(document.getElementById('c-chart-cli'),{type:'bar',data:{labels:topCli.map(e=>e[0].length>18?e[0].slice(0,18)+'…':e[0]),datasets:[{data:topCli.map(e=>e[1]),backgroundColor:'#1A3C5E',borderRadius:3}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'R$ '+Number(c.raw).toLocaleString('pt-BR',{minimumFractionDigits:2})}}},scales:{x:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
+  } else {
+    const el=document.getElementById('c-chart-cli');
+    if(el) el.parentElement.innerHTML='<div class="card-title">📈 Top Clientes por Receita</div><p class="text-muted text-sm" style="text-align:center;padding:30px 10px">Ainda não há receitas registradas para montar o ranking.</p>';
   }
 }
 
@@ -1973,6 +1983,15 @@ async function salvarEditLancamento(id){
 // ══════════════════════════════════════════════════════════════
 // CONTAS A RECEBER
 // ══════════════════════════════════════════════════════════════
+// Extrai "Parcela X/Y" da observação e retorna um badge visual
+function _badgeParcela(obs){
+  const m=String(obs||'').match(/Parcela\s+(\d+)\/(\d+)/i);
+  if(!m) return '';
+  const [_,num,total]=m;
+  const completa = num===total;
+  return ` <span style="display:inline-block;background:${completa?'#D1FAE5':'#E3F2FD'};color:${completa?'#065F46':'#1565C0'};font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;vertical-align:middle" title="Parcela ${num} de ${total}">${num}/${total}</span>`;
+}
+
 function render_receber(){
   const recF = filtrarPorPeriodo(D.receber,'vencimento');
   const byS={};recF.forEach(r=>{byS[r.status]=(byS[r.status]||0)+Number(r.valor);});
@@ -2013,7 +2032,7 @@ function render_receber(){
         <td class="text-xs text-muted">#${r.id}</td>
         <td>${r.os_id?`#${r.os_id}`:'—'}</td>
         <td>${fmtData(r.vencimento||r.data_vencimento)}</td>
-        <td>${esc(r.cliente_nome||r.cliente||'—')}</td>
+        <td>${esc(r.cliente_nome||r.cliente||'—')}${_badgeParcela(r.observacao)}</td>
         <td>${esc(r.forma_pagamento||'—')}</td>
         <td>${badge(r.status)}${D.fluxo.some(f=>f.conta_receber_id===r.id)?' <span title="Lançado no Fluxo de Caixa">💰</span>':''}</td>
         <td class="td-num font-600">${fmtBRL(r.valor)}</td>
@@ -2112,20 +2131,88 @@ function modalNovaCobranca(){
   abrirModal('Nova Cobrança',`
   <div class="form-grid">
     <div class="form-group span2"><label>Cliente</label><input type="text" id="cr-cli"></div>
-    <div class="form-group"><label>Valor (R$)</label><input type="number" id="cr-val" value="0" step="0.01"></div>
-    <div class="form-group"><label>Vencimento</label><input type="date" id="cr-venc" value="${hoje()}"></div>
+    <div class="form-group"><label>Valor total (R$)</label><input type="number" id="cr-val" value="0" step="0.01" oninput="previewParcelas()"></div>
+    <div class="form-group"><label>1º Vencimento</label><input type="date" id="cr-venc" value="${hoje()}" oninput="previewParcelas()"></div>
     <div class="form-group"><label>Forma</label><select id="cr-forma"><option>Pix</option><option>Boleto</option><option>Cheque</option><option>Transferência</option><option>À Vista</option></select></div>
-    <div class="form-group"><label>Status</label><select id="cr-status"><option>A VENCER</option><option>RECEBIDO</option><option>EM ATRASO</option><option>VENCE HOJE</option></select></div>
+    <div class="form-group"><label>Parcelamento</label>
+      <select id="cr-parcelas" onchange="previewParcelas()">
+        ${[1,2,3,4,5,6,7,8,9,10,11,12].map(n=>`<option value="${n}">${n===1?'À vista (1x)':n+'x'}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group span2" id="cr-prev-wrap" style="display:none">
+      <label>Prévia das parcelas <span class="text-xs text-muted">(intervalo de 30 dias entre elas)</span></label>
+      <div id="cr-preview" style="background:var(--cinza-bg);border-radius:8px;padding:10px;font-size:12px;max-height:160px;overflow-y:auto"></div>
+    </div>
     <div class="form-group span2"><label>Observação</label><textarea id="cr-obs" rows="2"></textarea></div>
   </div>`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarCobranca()">${icon('check',16)} Salvar</button>`);
 }
+
+// Calcula as parcelas a partir do valor, 1º vencimento e nº de parcelas
+function _calcularParcelas(valTotal, primeiroVenc, nParcelas){
+  const parcelas=[];
+  // Divisão igual com ajuste de centavos na última parcela
+  const base=Math.floor((valTotal/nParcelas)*100)/100;
+  let acumulado=0;
+  for(let i=0;i<nParcelas;i++){
+    let v = (i===nParcelas-1) ? Math.round((valTotal-acumulado)*100)/100 : base;
+    acumulado += v;
+    // Data: soma i meses (aprox 30 dias) ao primeiro vencimento
+    const d=new Date(primeiroVenc+'T12:00:00');
+    d.setMonth(d.getMonth()+i);
+    const venc=d.toISOString().slice(0,10);
+    parcelas.push({num:i+1, total:nParcelas, valor:v, vencimento:venc});
+  }
+  return parcelas;
+}
+
+function previewParcelas(){
+  const n=parseInt(document.getElementById('cr-parcelas')?.value||'1');
+  const val=parseFloat(document.getElementById('cr-val')?.value)||0;
+  const venc=document.getElementById('cr-venc')?.value||hoje();
+  const wrap=document.getElementById('cr-prev-wrap');
+  const prev=document.getElementById('cr-preview');
+  if(!wrap||!prev) return;
+  if(n<=1||val<=0){ wrap.style.display='none'; return; }
+  wrap.style.display='';
+  const parcelas=_calcularParcelas(val, venc, n);
+  prev.innerHTML=parcelas.map(p=>
+    `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--cinza-borda)">
+      <span><b>${p.num}/${p.total}</b> — vence ${fmtData(p.vencimento)}</span>
+      <span style="font-weight:600">${fmtBRL(p.valor)}</span>
+    </div>`).join('');
+}
+
 async function salvarCobranca(){
-  const cli=document.getElementById('cr-cli').value.trim(),val=parseFloat(document.getElementById('cr-val').value)||0,venc=document.getElementById('cr-venc').value;
+  const cli=document.getElementById('cr-cli').value.trim();
+  const val=parseFloat(document.getElementById('cr-val').value)||0;
+  const venc=document.getElementById('cr-venc').value;
+  const nParcelas=parseInt(document.getElementById('cr-parcelas').value||'1');
   if(!cli||!val){alert('Informe cliente e valor.');return;}
-  const status=document.getElementById('cr-status').value;
-  const ok=await sbInsert('contas_receber',{cliente_nome:cli,valor:val,vencimento:venc,forma_pagamento:document.getElementById('cr-forma').value,status,observacao:document.getElementById('cr-obs').value});
-  if(ok){fecharModal();nav('receber');}
+  const forma=document.getElementById('cr-forma').value;
+  const obsBase=document.getElementById('cr-obs').value;
+
+  if(nParcelas<=1){
+    // Cobrança simples (sem parcelamento)
+    const ok=await sbInsert('contas_receber',{cliente_nome:cli,valor:val,vencimento:venc,forma_pagamento:forma,status:'A VENCER',observacao:obsBase});
+    if(ok){fecharModal();nav('receber');}
+    return;
+  }
+
+  // Parcelado: gera uma linha por parcela
+  const parcelas=_calcularParcelas(val, venc, nParcelas);
+  let erros=0;
+  for(const p of parcelas){
+    const obsParcela=`Parcela ${p.num}/${p.total}`+(obsBase?` — ${obsBase}`:'');
+    const ok=await sbInsert('contas_receber',{
+      cliente_nome:cli, valor:p.valor, vencimento:p.vencimento,
+      forma_pagamento:forma, status:'A VENCER', observacao:obsParcela
+    });
+    if(!ok) erros++;
+  }
+  fecharModal();
+  if(erros) alert(`Atenção: ${erros} parcela(s) não foram salvas. Verifique a conexão.`);
+  nav('receber');
 }
 
 // ══════════════════════════════════════════════════════════════
