@@ -129,6 +129,7 @@ tr:hover td{background:#FAFBFC}
 .btn{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
 .btn-primary{background:var(--azul);color:white}.btn-primary:hover{background:var(--azul2)}
 .btn-success{background:var(--verde);color:white}.btn-success:hover{opacity:.85}
+.btn-warning{background:#E8A020;color:white}.btn-warning:hover{opacity:.85}
 .btn-danger{background:var(--vermelho);color:white}
 .btn-outline{background:white;color:var(--azul);border:1px solid var(--azul)}.btn-outline:hover{background:var(--azul3)}
 .btn-sm{padding:5px 12px;font-size:12px}
@@ -401,6 +402,7 @@ tr:hover td{ background:#F3F8FF; }
       <a onclick="nav('fluxo')" id="nav-fluxo"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg> Fluxo de Caixa</a>
       <div class="nav-sep">Análise</div>
       <a onclick="nav('relatorios')" id="nav-relatorios"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13l2 2 4-4"/></svg> Relatórios</a>
+      <a onclick="nav('auditoria')" id="nav-auditoria"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg> Auditoria</a>
       <div class="nav-sep">Sistema</div>
       <a onclick="nav('config')" id="nav-config"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Configurações</a>
     </nav>
@@ -750,7 +752,7 @@ async function doLogout(){
 // ══════════════════════════════════════════════════════════════
 // NAVEGAÇÃO
 // ══════════════════════════════════════════════════════════════
-const PAGE_TITLES={dashboard:'Dashboard',agenda:'Agenda',clientes:'Clientes',orcamentos:'Orçamentos',os:'Ordens de Serviço',fluxo:'Fluxo de Caixa',receber:'Contas a Receber',pagar:'Contas a Pagar',funcionarios:'Funcionários por OS',estoque:'Estoque',relatorios:'Relatórios',config:'Configurações'};
+const PAGE_TITLES={dashboard:'Dashboard',agenda:'Agenda',clientes:'Clientes',orcamentos:'Orçamentos',os:'Ordens de Serviço',fluxo:'Fluxo de Caixa',receber:'Contas a Receber',pagar:'Contas a Pagar',funcionarios:'Funcionários por OS',estoque:'Estoque',relatorios:'Relatórios',auditoria:'Auditoria',config:'Configurações'};
 function toggleSidebar(force){
   const sb=document.getElementById('sidebar'), bd=document.getElementById('sidebar-backdrop');
   if(!sb)return;
@@ -1538,14 +1540,30 @@ async function delFuncOS(id,osId){if(!confirm('Remover?'))return;await sbDelete(
 function verResultadoOS(osId){
   const o=D.os.find(x=>x.id===osId); if(!o)return;
   const vd=r=>(r.vencimento||r.data_vencimento||'').slice(0,10);
-  const recs=D.receber.filter(r=>r.os_id===o.id).sort((a,b)=>vd(a).localeCompare(vd(b)));
-  const totRecebido=recs.filter(r=>r.status==='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
+  // Cada tabela tem seu padrão histórico de vínculo:
+  //   contas_receber e funcionarios_os → id interno (o.id)
+  //   fluxo_caixa e estoque_mov        → número da OS (o.numero_os)
+  // Para robustez, aceitamos ambos quando fizer sentido.
+  const porId  =(v)=> v!=null && String(v)===String(o.id);
+  const porNum =(v)=> v!=null && String(v)===String(o.numero_os);
+  const porIdOuNum=(v)=> porId(v)||porNum(v);
+
+  const recs=D.receber.filter(r=>porIdOuNum(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
+  const totRecCR=recs.filter(r=>r.status==='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
   const totAReceber=recs.filter(r=>r.status!=='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
-  const equipe=D.funcionarios_os.filter(f=>f.os_id===o.id);
+
+  // Receitas lançadas DIRETO no fluxo de caixa, vinculadas à OS,
+  // que NÃO vieram de uma conta a receber (senão contaria duas vezes)
+  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA' && porIdOuNum(f.os_id) && !f.conta_receber_id);
+  const totRecFluxo=recFluxo.reduce((a,f)=>a+Number(f.valor||0),0);
+
+  const totRecebido=totRecCR+totRecFluxo;
+
+  const equipe=D.funcionarios_os.filter(f=>porIdOuNum(f.os_id));
   const totEquipe=equipe.reduce((a,f)=>a+Number(f.valor||0),0);
-  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&f.os_id===o.numero_os);
+  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&porIdOuNum(f.os_id));
   const totDespFx=despFx.reduce((a,f)=>a+Number(f.valor||0),0);
-  const materiais=D.estoque_mov.filter(m=>m.tipo==='SAIDA'&&m.os_id===o.numero_os);
+  const materiais=D.estoque_mov.filter(m=>m.tipo==='SAIDA'&&porIdOuNum(m.os_id));
   const totMateriais=materiais.reduce((a,m)=>a+Number(m.custo_total||0),0);
   const totDesp=totEquipe+totDespFx+totMateriais;
   const resCaixa=totRecebido-totDesp;
@@ -1729,11 +1747,12 @@ function modalNovoLancamento(){
     <div class="form-group span2">
       <label>🔧 Vincular à OS (opcional)</label>
       <input type="text" id="fc-os-busca" placeholder="🔍 Filtrar por nome do cliente ou CNPJ..." oninput="filtrarOpcoesOS()" style="margin-bottom:6px">
-      <select id="fc-os-id">
+      <select id="fc-os-id" onchange="fluxoAoSelecionarOS()">
         <option value="">— Sem vínculo —</option>
         ${osAtivas.map(o=>`<option value="${o.numero_os}" data-busca="${esc((o.cliente_nome||'')+' '+(o.cnpj||'')).toLowerCase()}">#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico)})</option>`).join('')}
       </select>
     </div>
+    <div id="fc-os-cr-aviso" style="display:none;grid-column:1/-1"></div>
     <div class="form-group span2" id="fc-rec-wrap">
       <label>💰 Quitar uma Conta a Receber (opcional)</label>
       <select id="fc-rec-id" onchange="preencherDeReceber()">
@@ -1881,7 +1900,17 @@ async function salvarLancamento(){
   const {data:novoFC, error:errFC} = await sb.from('fluxo_caixa').insert([dadosFC]).select().single();
   if(errFC){ alert('Erro ao salvar: '+errFC.message); return; }
 
-  if(recSel) await sbUpdate('contas_receber',{status:'RECEBIDO'},'id',parseInt(recSel));
+  if(recSel){
+    const idRec=parseInt(recSel);
+    const dadosBaixa={status:'RECEBIDO'};
+    // Se o lançamento tem OS e a conta a receber ainda não tinha, vincula também
+    const contaR=D.receber.find(x=>x.id===idRec);
+    if(osId && contaR && !contaR.os_id){
+      const oVinc=D.os.find(x=>String(x.numero_os)===String(osId));
+      if(oVinc) dadosBaixa.os_id=oVinc.id; // contas_receber usa id interno
+    }
+    await sbUpdate('contas_receber',dadosBaixa,'id',idRec);
+  }
   if(pagSel) await sbUpdate('contas_pagar',{status:'PAGO'},'id',parseInt(pagSel));
 
   // Processa cada material: cria item novo se preciso e dá entrada (atualiza custo médio)
@@ -1964,6 +1993,39 @@ async function darEntradaEstoque(m, data, fluxoId, obs){
 function preencherDeReceber(){
   const r=D.receber.find(x=>x.id===parseInt(document.getElementById('fc-rec-id').value||0));
   if(r){document.getElementById('fc-cli').value=r.cliente_nome||r.cliente||'';document.getElementById('fc-valor').value=r.valor||0;}
+}
+
+// Quando vincula uma OS no lançamento de RECEITA, mostra as contas a receber
+// em aberto dessa OS e sugere quitá-las (evita duplicação receita x conta a receber)
+function fluxoAoSelecionarOS(){
+  const numOS=document.getElementById('fc-os-id')?.value;
+  const tipo=document.getElementById('fc-tipo')?.value;
+  const aviso=document.getElementById('fc-os-cr-aviso');
+  const recSel=document.getElementById('fc-rec-id');
+  if(!aviso) return;
+  if(!numOS || tipo!=='RECEITA'){ aviso.style.display='none'; aviso.innerHTML=''; return; }
+
+  const o=D.os.find(x=>String(x.numero_os)===String(numOS));
+  if(!o){ aviso.style.display='none'; return; }
+  // Contas a receber EM ABERTO dessa OS (aceita vínculo por id ou número)
+  const abertas=D.receber.filter(r=>r.status!=='RECEBIDO' &&
+    (String(r.os_id)===String(o.id)||String(r.os_id)===String(o.numero_os)));
+
+  if(!abertas.length){
+    aviso.style.display='';
+    aviso.innerHTML=`<div class="alert-box alert-info" style="font-size:12px;margin-top:4px">Esta OS não tem contas a receber em aberto. A receita será lançada normalmente e contará no resultado da OS.</div>`;
+    return;
+  }
+  aviso.style.display='';
+  aviso.innerHTML=`<div class="alert-box alert-warning" style="font-size:12px;margin-top:4px">
+    💡 Esta OS tem <b>${abertas.length}</b> conta(s) a receber em aberto. Para não duplicar, selecione abaixo qual está sendo recebida (ela será <b>baixada automaticamente</b>):
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
+      ${abertas.map(r=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:white;padding:7px 10px;border-radius:6px">
+        <input type="radio" name="fc-cr-quick" value="${r.id}" onchange="document.getElementById('fc-rec-id').value=this.value;preencherDeReceber();" style="cursor:pointer">
+        <span><b>#${r.id}</b> — vence ${fmtData(r.vencimento||r.data_vencimento)} — <b>${fmtBRL(r.valor)}</b> ${_badgeParcela(r.observacao)}</span>
+      </label>`).join('')}
+    </div>
+  </div>`;
 }
 function preencherDePagar(){
   const p=D.pagar.find(x=>x.id===parseInt(document.getElementById('fc-pag-id').value||0));
@@ -2060,6 +2122,8 @@ function _badgeParcela(obs){
 function render_receber(){
   const recF = filtrarPorPeriodo(D.receber,'vencimento');
   const byS={};recF.forEach(r=>{byS[r.status]=(byS[r.status]||0)+Number(r.valor);});
+  // Cobranças sem OS vinculada (considera todas, não só do período)
+  const orfas = D.receber.filter(r=>!r.os_id);
   const c=document.getElementById('content');
   c.innerHTML=`
   <div class="filters" style="margin-bottom:16px">
@@ -2075,6 +2139,10 @@ function render_receber(){
     <div class="kpi"><div class="kpi-label"><span class="dot dot-vermelho"></span>Em Atraso</div><div class="kpi-val vermelho">${fmtBRL(byS['EM ATRASO']||0)}</div></div>
     <div class="kpi"><div class="kpi-label"><span class="dot dot-amarelo"></span>Vence Hoje</div><div class="kpi-val amarelo">${fmtBRL(byS['VENCE HOJE']||0)}</div></div>
   </div>
+  ${orfas.length ? `<div class="alert-box alert-warning" style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <span>${icon('alert',16)} <b>${orfas.length}</b> cobrança(s) sem OS vinculada — não aparecem nos relatórios por OS. Clique para revisar e vincular.</span>
+    <button class="btn btn-sm btn-warning" onclick="filtrarReceberSemOS()">Ver sem vínculo</button>
+  </div>`:''}
   <div class="card">
     <div class="flex flex-between flex-center" style="margin-bottom:12px">
       <div style="font-size:13px;font-weight:600;color:var(--azul)">📋 Cobranças — ${labelPeriodo()}</div>
@@ -2089,13 +2157,15 @@ function render_receber(){
         <select id="rec-fstatus" onchange="aplicarBuscaReceber()"><option value="">Todos</option><option>A VENCER</option><option>EM ATRASO</option><option>RECEBIDO</option><option>VENCE HOJE</option></select></div>
       <div class="filter-group"><div class="filter-label">Forma</div>
         <select id="rec-fforma" onchange="aplicarBuscaReceber()"><option value="">Todas</option><option>Pix</option><option>Boleto</option><option>Cheque</option><option>Transferência</option><option>À Vista</option></select></div>
-      <button class="btn btn-sm btn-outline" onclick="document.getElementById('rec-busca').value='';document.getElementById('rec-fstatus').value='';document.getElementById('rec-fforma').value='';aplicarBuscaReceber()" style="align-self:flex-end">✕ Limpar</button>
+      <div class="filter-group"><div class="filter-label">Vínculo OS</div>
+        <select id="rec-fos" onchange="aplicarBuscaReceber()"><option value="">Todas</option><option value="sem">Sem OS</option><option value="com">Com OS</option></select></div>
+      <button class="btn btn-sm btn-outline" onclick="limparFiltrosReceber()" style="align-self:flex-end">✕ Limpar</button>
     </div>
     <div class="table-wrap">
       <table id="tbl-rec"><thead><tr><th>ID</th><th>OS</th><th>Vencimento</th><th>Cliente</th><th>Forma</th><th>Status</th><th class="td-num">Valor</th><th>Ações</th></tr></thead>
-      <tbody>${recF.map(r=>`<tr data-busca="${esc((('#'+r.id)+' '+(r.os_id?('#'+r.os_id):'')+' '+(r.cliente_nome||r.cliente||'')).toLowerCase())}" data-status="${esc(r.status||'')}" data-forma="${esc(r.forma_pagamento||'')}">
+      <tbody>${recF.map(r=>`<tr data-busca="${esc((('#'+r.id)+' '+(r.os_id?('#'+r.os_id):'')+' '+(r.cliente_nome||r.cliente||'')).toLowerCase())}" data-status="${esc(r.status||'')}" data-forma="${esc(r.forma_pagamento||'')}" data-temos="${r.os_id?'com':'sem'}">
         <td class="text-xs text-muted">#${r.id}</td>
-        <td>${r.os_id?`#${r.os_id}`:'—'}</td>
+        <td>${r.os_id?(()=>{const _o=D.os.find(x=>x.id==r.os_id);return `<span class="badge badge-azul" title="${_o?esc(_o.cliente_nome):''}">#${_o?_o.numero_os:r.os_id}</span>`;})():`<button class="btn btn-sm btn-warning" style="padding:2px 8px;font-size:11px" onclick="editarReceber(${r.id})" title="Vincular a uma OS">+ OS</button>`}</td>
         <td>${fmtData(r.vencimento||r.data_vencimento)}</td>
         <td>${esc(r.cliente_nome||r.cliente||'—')}${_badgeParcela(r.observacao)}</td>
         <td>${esc(r.forma_pagamento||'—')}</td>
@@ -2115,17 +2185,27 @@ function aplicarBuscaReceber(){
   const termo=(document.getElementById('rec-busca')?.value||'').toLowerCase().trim();
   const status=document.getElementById('rec-fstatus')?.value||'';
   const forma=document.getElementById('rec-fforma')?.value||'';
+  const fos=document.getElementById('rec-fos')?.value||'';
   let visiveis=0;
   document.querySelectorAll('#tbl-rec tbody tr').forEach(tr=>{
     const okBusca=!termo||(tr.dataset.busca||'').includes(termo);
     const okStatus=!status||tr.dataset.status===status;
     const okForma=!forma||tr.dataset.forma===forma;
-    const mostra=okBusca&&okStatus&&okForma;
+    const okOS=!fos||tr.dataset.temos===fos;
+    const mostra=okBusca&&okStatus&&okForma&&okOS;
     tr.style.display=mostra?'':'none';
     if(mostra) visiveis++;
   });
   const vazio=document.getElementById('rec-vazio');
   if(vazio) vazio.style.display=visiveis===0?'':'none';
+}
+function filtrarReceberSemOS(){
+  const sel=document.getElementById('rec-fos');
+  if(sel){ sel.value='sem'; aplicarBuscaReceber(); sel.scrollIntoView({behavior:'smooth',block:'center'}); }
+}
+function limparFiltrosReceber(){
+  ['rec-busca','rec-fstatus','rec-fforma','rec-fos'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  aplicarBuscaReceber();
 }
 function aplicarFiltroReceber(){ lerFiltro(); render_receber(); }
 function marcarRecebido(id){
@@ -2159,10 +2239,17 @@ function editarReceber(id){
   const formaAtual=r.forma_pagamento||'Pix';
   const statusAtual=r.status||'A VENCER';
   const jaNoFluxo=D.fluxo.some(f=>f.conta_receber_id===id);
+  const osList=[...D.os].sort((a,b)=>b.numero_os-a.numero_os);
   abrirModal(`Editar Cobrança #${id}`,`
   ${jaNoFluxo?alertaBox('warning','⚠️ Esta conta já tem um lançamento vinculado no Fluxo de Caixa. Alterar o valor aqui não altera o lançamento já feito no fluxo.'):''}
   <div class="form-grid">
     <div class="form-group span2"><label>Cliente</label><input type="text" id="ecr-cli" value="${esc(r.cliente_nome||r.cliente||'')}"></div>
+    <div class="form-group span2"><label>Vincular à OS <span class="text-xs text-muted">(p/ aparecer no relatório da OS)</span></label>
+      <select id="ecr-os">
+        <option value="">— Sem vínculo —</option>
+        ${osList.map(o=>`<option value="${o.id}" ${r.os_id==o.id?'selected':''}>#${o.numero_os} — ${esc(o.cliente_nome||'')} ${o.servico?'('+esc(o.servico)+')':''}</option>`).join('')}
+      </select>
+    </div>
     <div class="form-group"><label>Valor (R$)</label><input type="number" id="ecr-val" value="${r.valor||0}" step="0.01"></div>
     <div class="form-group"><label>Vencimento</label><input type="date" id="ecr-venc" value="${(r.vencimento||r.data_vencimento||'').slice(0,10)}"></div>
     <div class="form-group"><label>Forma</label><select id="ecr-forma">${formas.map(f=>`<option ${formaAtual===f?'selected':''}>${f}</option>`).join('')}</select></div>
@@ -2177,6 +2264,7 @@ async function salvarEditReceber(id){
   const cli=document.getElementById('ecr-cli').value.trim();
   const val=parseFloat(document.getElementById('ecr-val').value)||0;
   const venc=document.getElementById('ecr-venc').value;
+  const osId=document.getElementById('ecr-os')?.value || null;
   if(!cli||!val){alert('Informe cliente e valor.');return;}
   // Descobre qual coluna de vencimento a conta usa (vencimento ou data_vencimento)
   const r=D.receber.find(x=>x.id===id)||{};
@@ -2185,17 +2273,25 @@ async function salvarEditReceber(id){
     valor:val,
     forma_pagamento:document.getElementById('ecr-forma').value,
     status:document.getElementById('ecr-status').value,
-    observacao:document.getElementById('ecr-obs').value
+    observacao:document.getElementById('ecr-obs').value,
+    os_id:osId?parseInt(osId):null
   };
   if('data_vencimento' in r && !('vencimento' in r)) dados.data_vencimento=venc;
   else dados.vencimento=venc;
   const ok=await sbUpdate('contas_receber',dados,'id',id);
   if(ok){fecharModal();checkAlertas();nav('receber');}
 }
-function modalNovaCobranca(){
+function modalNovaCobranca(osIdPre){
+  const osList=[...D.os].sort((a,b)=>b.numero_os-a.numero_os);
   abrirModal('Nova Cobrança',`
   <div class="form-grid">
     <div class="form-group span2"><label>Cliente</label><input type="text" id="cr-cli"></div>
+    <div class="form-group span2"><label>Vincular à OS <span class="text-xs text-muted">(opcional, mas recomendado p/ relatórios)</span></label>
+      <select id="cr-os" onchange="cobrancaAoSelecionarOS()">
+        <option value="">— Sem vínculo —</option>
+        ${osList.map(o=>`<option value="${o.id}" ${osIdPre==o.id?'selected':''}>#${o.numero_os} — ${esc(o.cliente_nome||'')} ${o.servico?'('+esc(o.servico)+')':''}</option>`).join('')}
+      </select>
+    </div>
     <div class="form-group"><label>Valor total (R$)</label><input type="number" id="cr-val" value="0" step="0.01" oninput="previewParcelas()"></div>
     <div class="form-group"><label>1º Vencimento</label><input type="date" id="cr-venc" value="${hoje()}" oninput="previewParcelas()"></div>
     <div class="form-group"><label>Forma</label><select id="cr-forma"><option>Pix</option><option>Boleto</option><option>Cheque</option><option>Transferência</option><option>À Vista</option></select></div>
@@ -2211,6 +2307,18 @@ function modalNovaCobranca(){
     <div class="form-group span2"><label>Observação</label><textarea id="cr-obs" rows="2"></textarea></div>
   </div>`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarCobranca()">${icon('check',16)} Salvar</button>`);
+  if(osIdPre) cobrancaAoSelecionarOS();
+}
+
+// Ao selecionar uma OS no modal de cobrança, preenche cliente automaticamente
+function cobrancaAoSelecionarOS(){
+  const sel=document.getElementById('cr-os');
+  const cli=document.getElementById('cr-cli');
+  if(!sel||!cli) return;
+  const idOS=sel.value;
+  if(!idOS) return;
+  const o=D.os.find(x=>x.id==idOS);
+  if(o && !cli.value.trim()) cli.value=o.cliente_nome||'';
 }
 
 // Calcula as parcelas a partir do valor, 1º vencimento e nº de parcelas
@@ -2253,13 +2361,14 @@ async function salvarCobranca(){
   const val=parseFloat(document.getElementById('cr-val').value)||0;
   const venc=document.getElementById('cr-venc').value;
   const nParcelas=parseInt(document.getElementById('cr-parcelas').value||'1');
+  const osId=document.getElementById('cr-os')?.value || null;
   if(!cli||!val){alert('Informe cliente e valor.');return;}
   const forma=document.getElementById('cr-forma').value;
   const obsBase=document.getElementById('cr-obs').value;
 
   if(nParcelas<=1){
     // Cobrança simples (sem parcelamento)
-    const ok=await sbInsert('contas_receber',{cliente_nome:cli,valor:val,vencimento:venc,forma_pagamento:forma,status:'A VENCER',observacao:obsBase});
+    const ok=await sbInsert('contas_receber',{cliente_nome:cli,valor:val,vencimento:venc,forma_pagamento:forma,status:'A VENCER',observacao:obsBase,os_id:osId?parseInt(osId):null});
     if(ok){fecharModal();nav('receber');}
     return;
   }
@@ -2271,7 +2380,8 @@ async function salvarCobranca(){
     const obsParcela=`Parcela ${p.num}/${p.total}`+(obsBase?` — ${obsBase}`:'');
     const ok=await sbInsert('contas_receber',{
       cliente_nome:cli, valor:p.valor, vencimento:p.vencimento,
-      forma_pagamento:forma, status:'A VENCER', observacao:obsParcela
+      forma_pagamento:forma, status:'A VENCER', observacao:obsParcela,
+      os_id:osId?parseInt(osId):null
     });
     if(!ok) erros++;
   }
@@ -2560,6 +2670,193 @@ function render_funcionarios(){
       </tbody></table>
     </div>
   </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// AUDITORIA — detecta duplicidades e vínculos faltantes
+// ══════════════════════════════════════════════════════════════
+
+// Helpers de vínculo de OS (mesmos padrões usados no resultado da OS)
+function _osDoVinculo(osIdVal){
+  if(osIdVal==null||osIdVal==='') return null;
+  return D.os.find(o=>String(o.id)===String(osIdVal)||String(o.numero_os)===String(osIdVal))||null;
+}
+
+function auditar(){
+  const r={duplicReceber:[], duplicFluxo:[], osSemReceb:[], fluxoSemOS:[], receberSemOS:[], receitasDuplicadasCR:[]};
+  const norm=s=>String(s||'').toLowerCase().trim().replace(/\s+/g,' ');
+  const vd=x=>(x.vencimento||x.data_vencimento||'').slice(0,10);
+  const diasEntre=(a,b)=>Math.abs((new Date(a)-new Date(b))/(1000*60*60*24));
+
+  // 1) DUPLICIDADES em CONTAS A RECEBER (mesmo cliente + mesmo valor + venc até 3 dias)
+  const recs=[...D.receber];
+  for(let i=0;i<recs.length;i++){
+    for(let j=i+1;j<recs.length;j++){
+      const a=recs[i], b=recs[j];
+      if(Number(a.valor)===Number(b.valor) && Number(a.valor)>0 &&
+         norm(a.cliente_nome||a.cliente)===norm(b.cliente_nome||b.cliente) &&
+         norm(a.cliente_nome||a.cliente)!=='' &&
+         vd(a) && vd(b) && diasEntre(vd(a),vd(b))<=3){
+        // não marca se forem parcelas diferentes (1/3 vs 2/3)
+        const pa=String(a.observacao||'').match(/Parcela\s+(\d+)\/(\d+)/i);
+        const pb=String(b.observacao||'').match(/Parcela\s+(\d+)\/(\d+)/i);
+        if(pa&&pb&&pa[1]!==pb[1]) continue; // parcelas distintas, ok
+        r.duplicReceber.push([a,b]);
+      }
+    }
+  }
+
+  // 2) DUPLICIDADES no FLUXO (mesmo cliente + valor + tipo + data até 3 dias)
+  const flx=[...D.fluxo];
+  for(let i=0;i<flx.length;i++){
+    for(let j=i+1;j<flx.length;j++){
+      const a=flx[i], b=flx[j];
+      if(Number(a.valor)===Number(b.valor) && Number(a.valor)>0 &&
+         a.tipo===b.tipo &&
+         norm(a.cliente)===norm(b.cliente) && norm(a.cliente)!=='' &&
+         a.data_movimento && b.data_movimento && diasEntre(a.data_movimento,b.data_movimento)<=3){
+        r.duplicFluxo.push([a,b]);
+      }
+    }
+  }
+
+  // 3) OS sem nenhum recebimento contabilizado (finalizada/em execução, com valor, mas sem CR recebida nem receita no fluxo)
+  D.os.forEach(o=>{
+    if(!['EM EXECUÇÃO','A EXECUTAR','FINALIZADO'].includes(o.status)) return;
+    if(!Number(o.valor_total)) return;
+    const temCR=D.receber.some(x=>{const oo=_osDoVinculo(x.os_id);return oo&&oo.id===o.id;});
+    const temRecFluxo=D.fluxo.some(f=>{if(f.tipo!=='RECEITA')return false;const oo=_osDoVinculo(f.os_id);return oo&&oo.id===o.id;});
+    if(!temCR && !temRecFluxo) r.osSemReceb.push(o);
+  });
+
+  // 4) Receitas no fluxo SEM vínculo de OS (e que não quitam conta a receber)
+  D.fluxo.forEach(f=>{
+    if(f.tipo!=='RECEITA') return;
+    if(f.conta_receber_id) return; // veio de uma CR, ok
+    if(!f.os_id) r.fluxoSemOS.push(f);
+  });
+
+  // 5) Contas a receber sem vínculo de OS
+  D.receber.forEach(x=>{ if(!x.os_id) r.receberSemOS.push(x); });
+
+  // 6) Possível dupla contagem: CR recebida + receita no fluxo separada (mesmo cliente+valor, fluxo sem conta_receber_id)
+  D.receber.filter(x=>x.status==='RECEBIDO').forEach(cr=>{
+    const dup=D.fluxo.find(f=>f.tipo==='RECEITA' && !f.conta_receber_id &&
+      Number(f.valor)===Number(cr.valor) && norm(f.cliente)===norm(cr.cliente_nome||cr.cliente) &&
+      norm(f.cliente)!=='');
+    if(dup) r.receitasDuplicadasCR.push([cr,dup]);
+  });
+
+  return r;
+}
+
+function render_auditoria(){
+  const a=auditar();
+  const totalProblemas=a.duplicReceber.length+a.duplicFluxo.length+a.osSemReceb.length+a.fluxoSemOS.length+a.receitasDuplicadasCR.length;
+  const c=document.getElementById('content');
+
+  const cardDuplicReceber=a.duplicReceber.length?`
+    <div class="card" style="border-left:4px solid #D64045">
+      <div class="card-title">${icon('alert',18)} Possíveis cobranças duplicadas (${a.duplicReceber.length})</div>
+      <p class="text-sm text-muted" style="margin-bottom:10px">Mesmo cliente, mesmo valor e vencimento próximo (até 3 dias). Verifique se não lançou a mesma cobrança duas vezes.</p>
+      <div class="table-wrap"><table><thead><tr><th>Cobrança A</th><th>Cobrança B</th><th>Cliente</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
+        ${a.duplicReceber.map(([x,y])=>`<tr>
+          <td><b>#${x.id}</b><br><span class="text-xs">${fmtData(x.vencimento||x.data_vencimento)} · ${badge(x.status)}</span></td>
+          <td><b>#${y.id}</b><br><span class="text-xs">${fmtData(y.vencimento||y.data_vencimento)} · ${badge(y.status)}</span></td>
+          <td>${esc(x.cliente_nome||x.cliente||'')}</td>
+          <td class="td-num">${fmtBRL(x.valor)}</td>
+          <td><button class="btn btn-sm btn-outline" onclick="nav('receber')">Ver em Receber</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>
+    </div>`:'';
+
+  const cardDuplicFluxo=a.duplicFluxo.length?`
+    <div class="card" style="border-left:4px solid #D64045">
+      <div class="card-title">${icon('alert',18)} Possíveis lançamentos duplicados no Fluxo (${a.duplicFluxo.length})</div>
+      <p class="text-sm text-muted" style="margin-bottom:10px">Mesmo cliente, valor, tipo e data próxima. Pode ser dinheiro lançado duas vezes.</p>
+      <div class="table-wrap"><table><thead><tr><th>Lanç. A</th><th>Lanç. B</th><th>Cliente</th><th>Tipo</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
+        ${a.duplicFluxo.map(([x,y])=>`<tr>
+          <td><b>#${x.id}</b><br><span class="text-xs">${fmtData(x.data_movimento)}</span></td>
+          <td><b>#${y.id}</b><br><span class="text-xs">${fmtData(y.data_movimento)}</span></td>
+          <td>${esc(x.cliente||'')}</td>
+          <td>${badge(x.tipo)}</td>
+          <td class="td-num">${fmtBRL(x.valor)}</td>
+          <td><button class="btn btn-sm btn-outline" onclick="nav('fluxo')">Ver no Fluxo</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>
+    </div>`:'';
+
+  const cardDuplaContagem=a.receitasDuplicadasCR.length?`
+    <div class="card" style="border-left:4px solid #E8A020">
+      <div class="card-title">${icon('alert',18)} Possível dupla contagem: Conta a Receber + Fluxo (${a.receitasDuplicadasCR.length})</div>
+      <p class="text-sm text-muted" style="margin-bottom:10px">Há uma conta a receber RECEBIDA e também uma receita avulsa no fluxo com mesmo cliente e valor. Isso pode estar contando o dinheiro <b>duas vezes</b>. O ideal é que a receita do fluxo esteja vinculada à conta (campo "Quitar Conta a Receber"), ou excluir uma delas.</p>
+      <div class="table-wrap"><table><thead><tr><th>Conta a Receber</th><th>Receita no Fluxo</th><th>Cliente</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
+        ${a.receitasDuplicadasCR.map(([cr,f])=>`<tr>
+          <td><b>CR #${cr.id}</b> ${badge(cr.status)}</td>
+          <td><b>FX #${f.id}</b><br><span class="text-xs">${fmtData(f.data_movimento)}</span></td>
+          <td>${esc(cr.cliente_nome||cr.cliente||'')}</td>
+          <td class="td-num">${fmtBRL(cr.valor)}</td>
+          <td><button class="btn btn-sm btn-outline" onclick="nav('fluxo')">Revisar no Fluxo</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>
+    </div>`:'';
+
+  const cardOsSemReceb=a.osSemReceb.length?`
+    <div class="card" style="border-left:4px solid #E8A020">
+      <div class="card-title">${icon('alert',18)} OS sem recebimento registrado (${a.osSemReceb.length})</div>
+      <p class="text-sm text-muted" style="margin-bottom:10px">OS ativas/finalizadas com valor, mas sem nenhuma conta a receber nem receita vinculada. Confira se o recebimento foi lançado e vinculado.</p>
+      <div class="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Serviço</th><th>Status</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
+        ${a.osSemReceb.map(o=>`<tr>
+          <td><b>#${o.numero_os}</b></td>
+          <td>${esc(o.cliente_nome||'')}</td>
+          <td><span class="text-xs">${esc(o.servico||'')}</span></td>
+          <td>${badge(o.status)}</td>
+          <td class="td-num">${fmtBRL(o.valor_total)}</td>
+          <td><button class="btn btn-sm btn-primary" onclick="verResultadoOS(${o.id})">Ver OS</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>
+    </div>`:'';
+
+  const cardFluxoSemOS=a.fluxoSemOS.length?`
+    <div class="card" style="border-left:4px solid #2A6DBF">
+      <div class="card-title">${icon('alert',18)} Receitas no Fluxo sem vínculo de OS (${a.fluxoSemOS.length})</div>
+      <p class="text-sm text-muted" style="margin-bottom:10px">Dinheiro que entrou mas não está ligado a nenhuma OS — não aparece no resultado por OS. Edite no Fluxo e vincule a OS correta.</p>
+      <div class="table-wrap"><table><thead><tr><th>ID</th><th>Data</th><th>Cliente</th><th>Categoria</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
+        ${a.fluxoSemOS.map(f=>`<tr>
+          <td class="text-xs">#${f.id}</td>
+          <td>${fmtData(f.data_movimento)}</td>
+          <td>${esc(f.cliente||'')}</td>
+          <td><span class="text-xs">${esc(f.categoria||'')}</span></td>
+          <td class="td-num">${fmtBRL(f.valor)}</td>
+          <td><button class="btn btn-sm btn-outline" onclick="editarLancamento(${f.id})">Vincular OS</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>
+    </div>`:'';
+
+  c.innerHTML=`
+  <div class="card" style="margin-bottom:16px">
+    <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:17px;font-weight:700;color:var(--azul)">${icon('alert',20)} Auditoria do Sistema</div>
+        <p class="text-sm text-muted" style="margin-top:4px">Verificação automática de duplicidades e vínculos faltantes entre OS, Contas a Receber e Fluxo de Caixa.</p>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:28px;font-weight:800;color:${totalProblemas?'#D64045':'#1A8F5A'}">${totalProblemas}</div>
+        <div class="text-xs text-muted">ponto(s) a revisar</div>
+      </div>
+    </div>
+  </div>
+  ${totalProblemas===0?`<div class="card"><div class="alert-box alert-success" style="text-align:center;padding:24px">${icon('check',20)} Tudo certo! Nenhuma duplicidade ou vínculo faltante detectado.</div></div>`:''}
+  ${cardDuplaContagem}
+  ${cardDuplicReceber}
+  ${cardDuplicFluxo}
+  ${cardOsSemReceb}
+  ${cardFluxoSemOS}
+  ${a.receberSemOS.length?`<div class="card" style="border-left:4px solid #7B8FA1">
+    <div class="card-title">Contas a Receber sem OS vinculada (${a.receberSemOS.length})</div>
+    <p class="text-sm text-muted">Estas cobranças não estão ligadas a nenhuma OS. Use o botão "Ver sem vínculo" na tela de Contas a Receber para corrigir.</p>
+    <button class="btn btn-sm btn-outline mt-8" onclick="nav('receber')">Ir para Contas a Receber</button>
+  </div>`:''}`;
 }
 
 // ══════════════════════════════════════════════════════════════
