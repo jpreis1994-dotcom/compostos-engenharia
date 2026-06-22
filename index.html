@@ -620,8 +620,73 @@ async function carregarTudo(){
     else D.estoque_mov = [];
   } catch(e) { D.estoque_mov = []; }
 
+  await recalcularStatusVencimentos();
   checkAlertas();
   verificarAlertasLaudos();
+}
+
+// ══════════════════════════════════════════════════════════════
+// RECALCULA STATUS DE VENCIMENTO (Receber e Pagar) COM BASE NA DATA ATUAL
+// Roda a cada carregamento de dados (toda troca de aba). Persiste no
+// Supabase só o que realmente mudou, e nunca toca em quem já está
+// RECEBIDO/PAGO — isso preserva o histórico de contas já liquidadas.
+// ══════════════════════════════════════════════════════════════
+async function recalcularStatusVencimentos(){
+  const hojeStr = hoje(); // 'YYYY-MM-DD'
+
+  // Contas a Receber: A VENCER / VENCE HOJE / EM ATRASO
+  function statusEsperadoReceber(vencStr){
+    if(!vencStr) return null;
+    const v = String(vencStr).slice(0,10);
+    if(v < hojeStr) return 'EM ATRASO';
+    if(v === hojeStr) return 'VENCE HOJE';
+    return 'A VENCER';
+  }
+  // Contas a Pagar: mantém EM ABERTO enquanto não vence; some pra VENCIDA só depois.
+  function statusEsperadoPagar(vencStr, statusAtual){
+    if(!vencStr) return null;
+    const v = String(vencStr).slice(0,10);
+    if(v < hojeStr) return 'VENCIDA';
+    // Ainda não venceu: preserva o status atual (ex: EM ABERTO) ao invés de forçar nome novo
+    return statusAtual === 'VENCIDA' ? 'EM ABERTO' : null;
+  }
+
+  const updatesReceber = [];
+  D.receber.forEach(r => {
+    if(r.status === 'RECEBIDO') return; // nunca altera quem já foi recebido
+    const vencCampo = r.vencimento || r.data_vencimento;
+    const novo = statusEsperadoReceber(vencCampo);
+    if(novo && novo !== r.status){
+      r.status = novo; // reflete já na tela, sem esperar o round-trip do banco
+      updatesReceber.push({ id: r.id, status: novo });
+    }
+  });
+
+  const updatesPagar = [];
+  D.pagar.forEach(p => {
+    if(p.status === 'PAGO') return; // nunca altera quem já foi pago
+    const novo = statusEsperadoPagar(p.data_vencimento, p.status);
+    if(novo && novo !== p.status){
+      p.status = novo;
+      updatesPagar.push({ id: p.id, status: novo });
+    }
+  });
+
+  if(!updatesReceber.length && !updatesPagar.length) return;
+
+  const promises = [];
+  updatesReceber.forEach(u => {
+    promises.push(sb.from('contas_receber').update({status:u.status}).eq('id',u.id));
+  });
+  updatesPagar.forEach(u => {
+    promises.push(sb.from('contas_pagar').update({status:u.status}).eq('id',u.id));
+  });
+
+  try {
+    await Promise.all(promises);
+  } catch(e) {
+    console.error('Erro ao persistir status recalculados:', e);
+  }
 }
 
 async function sbInsert(tabela, dados){
