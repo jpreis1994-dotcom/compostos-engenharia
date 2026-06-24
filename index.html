@@ -1922,22 +1922,37 @@ function gerarNotaControle(osId){
       qtd:i.quantidade||i.qtd||1,
       desc:i.descricao||i.nome||'',
       vunit:i.valor_unit||i.valor_unitario||0,
-      total:(i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100)
+      total:(i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100),
+      tipo:i.tipo||'servico'
     }));
   }
   if(!itens.length){
-    itens=[{qtd:1, desc:o.servico||'Prestação de serviço', vunit:Number(o.valor_total||0), total:Number(o.valor_total||0)}];
+    itens=[{qtd:1, desc:o.servico||'Prestação de serviço', vunit:Number(o.valor_total||0), total:Number(o.valor_total||0), tipo:'servico'}];
   }
   const totalGeral=itens.reduce((a,i)=>a+i.total,0);
+  const servicosN=itens.filter(i=>i.tipo!=='material');
+  const materiaisN=itens.filter(i=>i.tipo==='material');
+  const subtotalN=arr=>arr.reduce((a,i)=>a+i.total,0);
 
-  const linhasItens=itens.map(i=>`<tr>
+  const linhaItem=i=>`<tr>
     <td style="text-align:center">${i.qtd}</td>
     <td>${esc(i.desc)}</td>
     <td style="text-align:right">${fmtBRL(i.vunit)}</td>
     <td style="text-align:right">${fmtBRL(i.total)}</td>
-  </tr>`).join('');
-  // Linhas em branco para preencher visual (até ~8 linhas)
-  const enchimento=Math.max(0, 8-itens.length);
+  </tr>`;
+  const subTituloN=t=>`<tr><td colspan="4" style="background:#e8edf3;font-weight:bold;font-size:10px;padding:4px 7px">${t}</td></tr>`;
+  const subTotalN=(rotulo,val)=>`<tr><td colspan="3" style="text-align:right;font-style:italic;background:#f5f6fa">${rotulo}</td><td style="text-align:right;background:#f5f6fa">${fmtBRL(val)}</td></tr>`;
+  // Monta o corpo da tabela com grupos (igual ao modelo)
+  let corpoItens='';
+  if(materiaisN.length){
+    corpoItens += subTituloN('SERVIÇOS') + servicosN.map(linhaItem).join('') + subTotalN('Subtotal serviços', subtotalN(servicosN));
+    corpoItens += subTituloN('PEÇAS UTILIZADAS') + materiaisN.map(linhaItem).join('') + subTotalN('Subtotal peças', subtotalN(materiaisN));
+  } else {
+    corpoItens = servicosN.map(linhaItem).join('');
+  }
+  // Linhas em branco para preencher visual
+  const totalLinhas=itens.length + (materiaisN.length?4:0);
+  const enchimento=Math.max(0, 7-totalLinhas);
   const linhasVazias=Array(enchimento).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('');
 
   const logo = D.config.logo_url || (typeof LOGO_B64!=='undefined'?LOGO_B64:'');
@@ -1964,8 +1979,6 @@ function gerarNotaControle(osId){
       ${logo?`<img src="${logo}" alt="logo">`:''}
       <div class="titulo">NOTA DE CONTROLE PRESTAÇÃO DE SERVIÇOS<br><span style="font-size:11px;font-weight:normal">OS #${o.numero_os}</span></div>
     </div>
-    <p class="aviso">DOCUMENTO DE CONTROLE INTERNO — NÃO POSSUI VALOR FISCAL</p>
-
     <div class="sec-titulo">PRESTADOR DE SERVIÇO</div>
     <table class="dados">
       <tr><td style="width:55%"><b>Nome/Razão Social:</b> ${esc(EMP.razao)}</td><td><b>CNPJ/CPF:</b> ${esc(EMP.cnpj)}</td></tr>
@@ -1984,7 +1997,7 @@ function gerarNotaControle(osId){
     <table class="itens">
       <thead><tr><th style="width:50px">QTD</th><th>DESCRIÇÃO</th><th style="width:110px">VALOR UNIT.</th><th style="width:110px">TOTAL</th></tr></thead>
       <tbody>
-        ${linhasItens}
+        ${corpoItens}
         ${linhasVazias}
         <tr class="total-row"><td colspan="3" style="text-align:right">VALOR TOTAL</td><td style="text-align:right">${fmtBRL(totalGeral)}</td></tr>
       </tbody>
@@ -4166,36 +4179,75 @@ function gerarPDFOrcamento(id){
   // 3. Tabela
   secTitulo('3. VALOR DA PROPOSTA');
   const cw1=CW*0.45, cw2=CW*0.18, cw3=CW*0.18, cw4=CW*0.19;
-  checkPag(8 + itens.length*9 + 13);
+  const servicos=itens.filter(i=>i.tipo!=='material');
+  const materiais=itens.filter(i=>i.tipo==='material');
+  checkPag(8 + itens.length*9 + 26);
+  // Cabeçalho da tabela
   doc.setFillColor(...AZUL);doc.rect(ML,y,CW,8,'F');
   setFont('bold',8.5,BRANCO);
-  txt('Descrição do serviço', ML+cw1/2,    y+5.5,{align:'center'});
+  txt('Descrição',     ML+cw1/2,    y+5.5,{align:'center'});
   txt('Quantidade',           ML+cw1+cw2/2,y+5.5,{align:'center'});
   txt('Valor unitário',       ML+cw1+cw2+cw3/2,y+5.5,{align:'center'});
   txt('Valor total',          ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
   y+=8;
-  let totalGeral=0;
-  itens.forEach((item,idx)=>{
+
+  // Desenha uma linha de item
+  const desenharLinha=(item,idx)=>{
     const q=Number(item.quantidade||item.qtd||1);
     const v=Number(item.valor_unit||item.valor_unitario||0);
     const d=Number(item.desconto||0);
-    const tot=q*v*(1-d/100); totalGeral+=tot;
+    const tot=q*v*(1-d/100);
     const bg=idx%2===0?CINZA_BG:BRANCO;
     doc.setFillColor(...bg);doc.rect(ML,y,CW,9,'F');
     doc.setDrawColor(220,220,220);doc.setLineWidth(0.2);
     doc.line(ML,y,ML,y+9);doc.line(ML+CW,y,ML+CW,y+9);doc.line(ML,y+9,ML+CW,y+9);
     [cw1,cw1+cw2,cw1+cw2+cw3].forEach(cx=>doc.line(ML+cx,y,ML+cx,y+9));
     setFont('bold',8.5,PRETO);
-    const descShort=doc.splitTextToSize(item.descricao||item.nome||'Serviço',cw1-4);
+    const descShort=doc.splitTextToSize(item.descricao||item.nome||'—',cw1-4);
     txt(descShort[0], ML+cw1/2,        y+5.5,{align:'center'});
     txt(String(q),    ML+cw1+cw2/2,    y+5.5,{align:'center'});
     txt(fmtBRL(v),    ML+cw1+cw2+cw3/2,y+5.5,{align:'center'});
     txt(fmtBRL(tot),  ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
     y+=9;
-  });
+    return tot;
+  };
+  // Desenha um subtítulo de grupo (SERVIÇOS / PEÇAS UTILIZADAS)
+  const subtitulo=(texto)=>{
+    checkPag(7);
+    doc.setFillColor(225,231,239);doc.rect(ML,y,CW,7,'F');
+    setFont('bold',8,AZUL);
+    txt(texto, ML+2, y+4.8);
+    y+=7;
+  };
+
+  let totalGeral=0, totServ=0, totMat=0;
+  // Grupo SERVIÇOS
+  if(servicos.length){
+    subtitulo('SERVIÇOS');
+    servicos.forEach((item,idx)=>{ const t=desenharLinha(item,idx); totServ+=t; totalGeral+=t; });
+    if(materiais.length){
+      // subtotal de serviços
+      doc.setFillColor(240,243,247);doc.rect(ML,y,CW,7,'F');
+      setFont('bold',8,PRETO);
+      txt('Subtotal serviços', ML+cw1/2, y+4.8,{align:'center'});
+      txt(fmtBRL(totServ), ML+cw1+cw2+cw3+cw4/2, y+4.8,{align:'center'});
+      y+=7;
+    }
+  }
+  // Grupo PEÇAS UTILIZADAS
+  if(materiais.length){
+    subtitulo('PEÇAS UTILIZADAS');
+    materiais.forEach((item,idx)=>{ const t=desenharLinha(item,idx); totMat+=t; totalGeral+=t; });
+    doc.setFillColor(240,243,247);doc.rect(ML,y,CW,7,'F');
+    setFont('bold',8,PRETO);
+    txt('Subtotal peças', ML+cw1/2, y+4.8,{align:'center'});
+    txt(fmtBRL(totMat), ML+cw1+cw2+cw3+cw4/2, y+4.8,{align:'center'});
+    y+=7;
+  }
+  // Total geral
   doc.setFillColor(...AZUL);doc.rect(ML,y,CW,9,'F');
   setFont('bold',9,BRANCO);
-  txt('VALOR TOTAL SERVIÇOS', ML+cw1/2, y+5.5,{align:'center'});
+  txt(materiais.length?'VALOR TOTAL (SERVIÇOS + PEÇAS)':'VALOR TOTAL SERVIÇOS', ML+cw1/2, y+5.5,{align:'center'});
   txt(fmtBRL(totalGeral), ML+cw1+cw2+cw3+cw4/2, y+5.5,{align:'center'});
   y+=13;
 
