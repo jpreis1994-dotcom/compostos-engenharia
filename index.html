@@ -1072,10 +1072,10 @@ async function voltarEtapaOrc(id){
     const os=D.os.find(o=>o.numero_os==numOS || o.id==numOS);
     if(os){
       // Verifica se a OS tem lançamentos (despesa, receita, conta a receber, materiais, funcionários)
-      const temReceber=D.receber.some(r=>String(r.os_id)===String(os.id)||String(r.os_id)===String(os.numero_os));
-      const temFluxo=D.fluxo.some(f=>String(f.os_id)===String(os.numero_os)||String(f.os_id)===String(os.id));
-      const temFunc=D.funcionarios_os.some(f=>String(f.os_id)===String(os.id)||String(f.os_id)===String(os.numero_os));
-      const temMat=D.estoque_mov.some(m=>String(m.os_id)===String(os.numero_os)||String(m.os_id)===String(os.id));
+      const temReceber=D.receber.some(r=>String(r.os_id)===String(os.id));
+      const temFluxo=D.fluxo.some(f=>String(f.os_id)===String(os.numero_os));
+      const temFunc=D.funcionarios_os.some(f=>String(f.os_id)===String(os.id));
+      const temMat=D.estoque_mov.some(m=>String(m.os_id)===String(os.numero_os));
       if(temReceber||temFluxo||temFunc||temMat){
         const itens=[];
         if(temReceber) itens.push('contas a receber');
@@ -1109,16 +1109,28 @@ async function converterOrcOS(id){
 function verOrcamento(id){
   const o=D.orcamentos.find(x=>x.id===id);if(!o)return;
   const itens=Array.isArray(o.itens)?o.itens:(o.itens?JSON.parse(o.itens):[]);
+  const servicos=itens.filter(i=>i.tipo!=='material');
+  const materiais=itens.filter(i=>i.tipo==='material');
+  const subtotal=(arr)=>arr.reduce((a,i)=>a+(i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100),0);
+  const linha=i=>`<tr><td>${esc(i.descricao||i.nome||'—')}</td><td class="td-num">${i.quantidade||i.qtd||1}</td><td class="td-num">${fmtBRL(i.valor_unit||i.valor_unitario||0)}</td><td class="td-num">${i.desconto||0}%</td><td class="td-num"><b>${fmtBRL((i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100))}</b></td></tr>`;
   abrirModal(`Orçamento #${o.numero}`,`
   <div class="form-grid">
     <div><b>Cliente:</b> ${esc(o.cli_razao)}</div><div><b>CNPJ:</b> ${esc(o.cli_cnpj||'—')}</div>
     <div><b>Município/UF:</b> ${esc(o.cli_municipio||'—')}/${esc(o.cli_uf||'—')}</div><div><b>Data:</b> ${fmtData(o.data_emissao)}</div>
     <div class="span2"><b>Serviço:</b> ${esc(o.tipo_servico||'—')}</div>
   </div><hr class="divider">
+  <div style="font-size:12px;font-weight:600;color:var(--azul);margin-bottom:4px">Serviços</div>
   <div class="table-wrap"><table><thead><tr><th>Descrição</th><th class="td-num">Qtd</th><th class="td-num">Unit.</th><th class="td-num">Desc%</th><th class="td-num">Total</th></tr></thead><tbody>
-  ${itens.map(i=>`<tr><td>${esc(i.descricao||i.nome||'—')}</td><td class="td-num">${i.quantidade||i.qtd||1}</td><td class="td-num">${fmtBRL(i.valor_unit||i.valor_unitario||0)}</td><td class="td-num">${i.desconto||0}%</td><td class="td-num"><b>${fmtBRL((i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100))}</b></td></tr>`).join('')}
-  <tr><td colspan="4"><b>TOTAL GERAL</b></td><td class="td-num"><b>${fmtBRL(o.total)}</b></td></tr>
-  </tbody></table></div>`,
+  ${servicos.map(linha).join('')}
+  ${materiais.length?`<tr><td colspan="4" class="td-num">Subtotal serviços</td><td class="td-num"><b>${fmtBRL(subtotal(servicos))}</b></td></tr>`:''}
+  </tbody></table></div>
+  ${materiais.length?`
+  <div style="font-size:12px;font-weight:600;color:var(--azul);margin:10px 0 4px">📦 Materiais / Peças</div>
+  <div class="table-wrap"><table><thead><tr><th>Descrição</th><th class="td-num">Qtd</th><th class="td-num">Unit.</th><th class="td-num">Desc%</th><th class="td-num">Total</th></tr></thead><tbody>
+  ${materiais.map(linha).join('')}
+  <tr><td colspan="4" class="td-num">Subtotal materiais</td><td class="td-num"><b>${fmtBRL(subtotal(materiais))}</b></td></tr>
+  </tbody></table></div>`:''}
+  <div class="item-total-bar" style="background:var(--azul);color:white;margin-top:10px">TOTAL GERAL: ${fmtBRL(o.total)}</div>`,
   `<button class="btn btn-primary" onclick="gerarPDFOrcamento(${id})">${icon('pdf',16)} Baixar PDF</button><button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`,true);
 }
 
@@ -1129,6 +1141,12 @@ function modalNovoOrcamento(){
   <div class="form-grid">
     <div class="form-group"><label>Nº Orçamento</label><input type="text" id="orc-num" value="${String(D.orcamentos.length+1).padStart(3,'0')}/${new Date().getFullYear()}"></div>
     <div class="form-group"><label>Data de Emissão</label><input type="date" id="orc-data" value="${hoje()}"></div>
+    <div class="form-group span2"><label>Tipo de Orçamento</label>
+      <select id="orc-tipo-orc" onchange="toggleMateriaisOrc()">
+        <option value="servico">Somente serviço</option>
+        <option value="servico_material">Serviço + Material</option>
+      </select>
+    </div>
   </div><hr class="divider">
   <div style="font-size:13px;font-weight:600;color:var(--azul);margin-bottom:8px">${icon('search',16)} Buscar Cliente por CNPJ</div>
   <div class="flex gap-8 flex-center" style="margin-bottom:12px">
@@ -1171,7 +1189,25 @@ function modalNovoOrcamento(){
     <span>Descrição</span><span>Qtd</span><span>Valor Unit.</span><span>Desc%</span><span></span>
   </div>
   <div id="itens-orc"></div>
-  <div class="item-total-bar">Total: <span id="orc-total-val">R$ 0,00</span></div>
+  <div class="item-total-bar">Subtotal serviços: <span id="orc-total-serv">R$ 0,00</span></div>
+
+  <div id="secao-materiais" style="display:none">
+    <hr class="divider">
+    <div class="flex flex-between flex-center" style="margin-bottom:8px">
+      <div style="font-size:13px;font-weight:600;color:var(--azul)">📦 Materiais / Peças</div>
+      <div class="flex gap-8">
+        <button class="btn btn-sm btn-outline" onclick="addMaterialDoEstoque()">${icon('box',16)} Do estoque</button>
+        <button class="btn btn-sm btn-outline" onclick="addMaterialOrc()">${icon('plus',16)} Item livre</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:3fr 1fr 1.3fr 0.8fr auto;gap:8px;font-size:11px;color:var(--cinza);padding:0 2px;margin-bottom:4px">
+      <span>Descrição</span><span>Qtd</span><span>Valor Unit.</span><span>Desc%</span><span></span>
+    </div>
+    <div id="itens-mat"></div>
+    <div class="item-total-bar">Subtotal materiais: <span id="orc-total-mat">R$ 0,00</span></div>
+  </div>
+
+  <div class="item-total-bar" style="background:var(--azul);color:white;font-size:15px;margin-top:8px">TOTAL GERAL: <span id="orc-total-val">R$ 0,00</span></div>
   <div class="form-group" style="margin-top:8px"><label>Observações adicionais</label><textarea id="orc-obs" rows="2"></textarea></div>`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarOrcamento()">${icon('check',16)} Salvar Orçamento</button>`,true);
   addItemOrc();
@@ -1200,6 +1236,71 @@ function atualizarEscopoDoServico(){
   calcTotalOrc();
 }
 
+let _orcMatIdx=0;
+// Mostra/esconde a seção de materiais conforme o tipo de orçamento
+function toggleMateriaisOrc(){
+  const tipo=document.getElementById('orc-tipo-orc')?.value;
+  const sec=document.getElementById('secao-materiais');
+  if(sec) sec.style.display = tipo==='servico_material' ? '' : 'none';
+  calcTotalOrc();
+}
+// Adiciona uma linha de material em branco (item livre)
+function addMaterialOrc(desc='', qtd=1, vunit=0){
+  const div=document.getElementById('itens-mat');
+  if(!div) return;
+  const idx=_orcMatIdx++;
+  div.insertAdjacentHTML('beforeend',`<div class="item-row" id="mrow-${idx}">
+    <input type="text" id="mat-desc-${idx}" placeholder="Descrição do material" value="${esc(desc)}">
+    <input type="number" id="mat-qty-${idx}" value="${qtd}" min="0" step="0.5" oninput="calcTotalOrc()" style="width:100%">
+    <input type="number" id="mat-vunit-${idx}" value="${vunit}" min="0" step="0.01" oninput="calcTotalOrc()" style="width:100%">
+    <input type="number" id="mat-desc-pct-${idx}" value="0" min="0" max="100" oninput="calcTotalOrc()" style="width:100%">
+    <button class="btn btn-sm btn-danger btn-icon" onclick="document.getElementById('mrow-${idx}').remove();calcTotalOrc()">${icon('close',16)}</button>
+  </div>`);
+  calcTotalOrc();
+}
+// Adiciona uma linha de material já com seletor de estoque embutido
+function addMaterialDoEstoque(){
+  if(!D.estoque||!D.estoque.length){ alert('Não há itens no estoque. Use "Item livre" para digitar.'); return; }
+  const div=document.getElementById('itens-mat');
+  if(!div) return;
+  const idx=_orcMatIdx++;
+  const opcoes=D.estoque.map(e=>`<option value="${e.id}" data-nome="${esc(e.nome)}" data-custo="${e.custo_medio||0}">${esc(e.nome)} (estoque: ${e.quantidade||0})</option>`).join('');
+  div.insertAdjacentHTML('beforeend',`<div class="item-row" id="mrow-${idx}" style="grid-template-columns:3fr 1fr 1.3fr 0.8fr auto">
+    <select id="mat-desc-${idx}" onchange="_sugerirCustoMat(${idx})" style="font-size:12px">${opcoes}</select>
+    <input type="number" id="mat-qty-${idx}" value="1" min="0" step="0.5" oninput="calcTotalOrc()" style="width:100%">
+    <input type="number" id="mat-vunit-${idx}" value="0" min="0" step="0.01" oninput="calcTotalOrc()" style="width:100%">
+    <input type="number" id="mat-desc-pct-${idx}" value="0" min="0" max="100" oninput="calcTotalOrc()" style="width:100%">
+    <button class="btn btn-sm btn-danger btn-icon" onclick="document.getElementById('mrow-${idx}').remove();calcTotalOrc()">${icon('close',16)}</button>
+  </div>`);
+  _sugerirCustoMat(idx);
+  calcTotalOrc();
+}
+// Sugere o custo médio do estoque como valor unitário do material selecionado
+function _sugerirCustoMat(idx){
+  const sel=document.getElementById('mat-desc-'+idx);
+  const vu=document.getElementById('mat-vunit-'+idx);
+  if(sel&&vu){
+    const opt=sel.options[sel.selectedIndex];
+    const custo=parseFloat(opt?.dataset.custo||0);
+    if(!parseFloat(vu.value)) vu.value=custo.toFixed(2);
+  }
+  calcTotalOrc();
+}
+function coletarMateriaisOrc(){
+  const mats=[];
+  document.querySelectorAll('#itens-mat .item-row').forEach(row=>{
+    const idx=row.id.split('-')[1];
+    const el=document.getElementById('mat-desc-'+idx);
+    // Pode ser <select> (do estoque) ou <input> (item livre)
+    const desc = el ? (el.tagName==='SELECT' ? (el.options[el.selectedIndex]?.dataset.nome || el.value) : el.value) : '';
+    const q=parseFloat(document.getElementById('mat-qty-'+idx)?.value||1);
+    const v=parseFloat(document.getElementById('mat-vunit-'+idx)?.value||0);
+    const d=parseFloat(document.getElementById('mat-desc-pct-'+idx)?.value||0);
+    if(v>0&&String(desc).trim()) mats.push({descricao:desc,quantidade:q,valor_unit:v,desconto:d,unidade:'un',tipo:'material'});
+  });
+  return mats;
+}
+
 let _orcIdx=0;
 function addItemOrc(){
   const div=document.getElementById('itens-orc');
@@ -1213,16 +1314,26 @@ function addItemOrc(){
   </div>`);
 }
 function calcTotalOrc(){
-  let t=0;
+  let tServ=0;
   document.querySelectorAll('#itens-orc .item-row').forEach(row=>{
     const idx=row.id.split('-')[1];
     const q=parseFloat(document.getElementById('item-qty-'+idx)?.value||0);
     const v=parseFloat(document.getElementById('item-vunit-'+idx)?.value||0);
     const d=parseFloat(document.getElementById('item-desc-pct-'+idx)?.value||0);
-    t+=q*v*(1-d/100);
+    tServ+=q*v*(1-d/100);
   });
+  let tMat=0;
+  document.querySelectorAll('#itens-mat .item-row').forEach(row=>{
+    const idx=row.id.split('-')[1];
+    const q=parseFloat(document.getElementById('mat-qty-'+idx)?.value||0);
+    const v=parseFloat(document.getElementById('mat-vunit-'+idx)?.value||0);
+    const d=parseFloat(document.getElementById('mat-desc-pct-'+idx)?.value||0);
+    tMat+=q*v*(1-d/100);
+  });
+  const elServ=document.getElementById('orc-total-serv'); if(elServ) elServ.textContent=fmtBRL(tServ);
+  const elMat=document.getElementById('orc-total-mat'); if(elMat) elMat.textContent=fmtBRL(tMat);
   const el=document.getElementById('orc-total-val');
-  if(el) el.textContent=fmtBRL(t);
+  if(el) el.textContent=fmtBRL(tServ+tMat);
 }
 function coletarItensOrc(){
   const itens=[];
@@ -1232,16 +1343,19 @@ function coletarItensOrc(){
     const q=parseFloat(document.getElementById('item-qty-'+idx)?.value||1);
     const v=parseFloat(document.getElementById('item-vunit-'+idx)?.value||0);
     const d=parseFloat(document.getElementById('item-desc-pct-'+idx)?.value||0);
-    if(v>0) itens.push({descricao:desc,quantidade:q,valor_unit:v,desconto:d,unidade:'un'});
+    if(v>0) itens.push({descricao:desc,quantidade:q,valor_unit:v,desconto:d,unidade:'un',tipo:'servico'});
   });
   return itens;
 }
 async function salvarOrcamento(){
   const razao=document.getElementById('orc-razao').value.trim();
   if(!razao){alert('Informe a Razão Social.');return;}
-  const itens=coletarItensOrc();
+  const servicos=coletarItensOrc();
+  const tipoOrc=document.getElementById('orc-tipo-orc')?.value||'servico';
+  const materiais=tipoOrc==='servico_material'?coletarMateriaisOrc():[];
+  const itens=[...servicos,...materiais];
   if(!itens.length){alert('Adicione ao menos um item com valor.');return;}
-  const total=itens.reduce((a,i)=>a+i.quantidade*i.valor_unit*(1-i.desconto/100),0);
+  const total=itens.reduce((a,i)=>a+i.quantidade*i.valor_unit*(1-(i.desconto||0)/100),0);
   const tipoServ=document.getElementById('orc-servico-id');
   const tipoNome=tipoServ.value&&tipoServ.value!=='custom'?tipoServ.options[tipoServ.selectedIndex].text:document.getElementById('orc-desc-visual').value.slice(0,80);
   const ok=await sbInsert('orcamentos',{
@@ -1327,6 +1441,7 @@ function render_os(){
           <button class="btn btn-sm btn-outline" onclick="editarOS(${o.id})">${icon('edit',16)}</button>
           <button class="btn btn-sm btn-primary" onclick="gerarCobrancaOS(${o.id})">💰</button>
           <button class="btn btn-sm btn-outline" onclick="verResultadoOS(${o.id})" title="Resultado da OS">📊</button>
+          <button class="btn btn-sm btn-outline" onclick="gerarNotaControle(${o.id})" title="Nota de Controle de Serviço">${icon('doc',16)}</button>
           <button class="btn btn-sm btn-outline" onclick="verFuncionariosOS(${o.id})">👷</button>
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarOS(${o.id})">${icon('close',16)}</button>
         </td></tr>`;}).join('')}
@@ -1537,11 +1652,12 @@ async function salvarEditOS(id){
 }
 async function deletarOS(id){
   const o=D.os.find(x=>x.id===id); if(!o)return;
-  const porIdOuNum=(v)=> v!=null && (String(v)===String(o.id)||String(v)===String(o.numero_os));
-  const nRec=D.receber.filter(r=>porIdOuNum(r.os_id)).length;
-  const nFlx=D.fluxo.filter(f=>porIdOuNum(f.os_id)).length;
-  const nFunc=D.funcionarios_os.filter(f=>porIdOuNum(f.os_id)).length;
-  const nMat=D.estoque_mov.filter(m=>porIdOuNum(m.os_id)).length;
+  const porId =(v)=> v!=null && String(v)===String(o.id);
+  const porNum=(v)=> v!=null && String(v)===String(o.numero_os);
+  const nRec=D.receber.filter(r=>porId(r.os_id)).length;          // contas_receber → id interno
+  const nFlx=D.fluxo.filter(f=>porNum(f.os_id)).length;           // fluxo → numero_os
+  const nFunc=D.funcionarios_os.filter(f=>porId(f.os_id)).length; // funcionarios → id interno
+  const nMat=D.estoque_mov.filter(m=>porNum(m.os_id)).length;     // estoque → numero_os
   let msg=`Excluir a OS #${o.numero_os}?`;
   if(nRec+nFlx+nFunc+nMat>0){
     const partes=[];
@@ -1635,13 +1751,13 @@ function calcularRateioIndireto(osId, periodo){
     .reduce((a,f)=>a+Number(f.valor||0),0);
 
   // 2) Faturamento (receita realizada) de CADA OS no período, para achar a proporção
-  // Receita de uma OS = receitas do fluxo vinculadas a ela (no período)
+  // Receita de uma OS = receitas do fluxo vinculadas a ela (no período).
+  // No fluxo_caixa o vínculo é por numero_os (sem misturar com id interno, evita colisão).
   const faturamentoPorOS={};
   let baseFat=0;
   D.os.forEach(os=>{
-    const idOuNum=(v)=> v!=null && (String(v)===String(os.id)||String(v)===String(os.numero_os));
     const fatReceita=D.fluxo
-      .filter(f=>f.tipo==='RECEITA' && idOuNum(f.os_id) && noPeriodo(f.data_movimento))
+      .filter(f=>f.tipo==='RECEITA' && f.os_id!=null && String(f.os_id)===String(os.numero_os) && noPeriodo(f.data_movimento))
       .reduce((a,f)=>a+Number(f.valor||0),0);
     if(fatReceita>0){ faturamentoPorOS[os.id]=fatReceita; baseFat+=fatReceita; }
   });
@@ -1657,34 +1773,38 @@ function calcularRateioIndireto(osId, periodo){
 function verResultadoOS(osId, periodoRateio){
   const o=D.os.find(x=>x.id===osId); if(!o)return;
   const vd=r=>(r.vencimento||r.data_vencimento||'').slice(0,10);
-  // Cada tabela tem seu padrão histórico de vínculo:
+  // CORREÇÃO IMPORTANTE: cada tabela usa SEU padrão de vínculo, sem misturar,
+  // para evitar colisão entre "id interno" de uma OS e "numero_os" de outra.
   //   contas_receber e funcionarios_os → id interno (o.id)
   //   fluxo_caixa e estoque_mov        → número da OS (o.numero_os)
-  // Para robustez, aceitamos ambos quando fizer sentido.
   const porId  =(v)=> v!=null && String(v)===String(o.id);
   const porNum =(v)=> v!=null && String(v)===String(o.numero_os);
-  const porIdOuNum=(v)=> porId(v)||porNum(v);
 
-  const recs=D.receber.filter(r=>porIdOuNum(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
+  const recs=D.receber.filter(r=>porId(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
   const totRecCR=recs.filter(r=>r.status==='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
   const totAReceber=recs.filter(r=>r.status!=='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
 
   // Receitas lançadas DIRETO no fluxo de caixa, vinculadas à OS,
   // que NÃO vieram de uma conta a receber (senão contaria duas vezes)
-  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA' && porIdOuNum(f.os_id) && !f.conta_receber_id);
+  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA' && porNum(f.os_id) && !f.conta_receber_id);
   const totRecFluxo=recFluxo.reduce((a,f)=>a+Number(f.valor||0),0);
 
   const totRecebido=totRecCR+totRecFluxo;
 
-  const equipe=D.funcionarios_os.filter(f=>porIdOuNum(f.os_id));
+  const equipe=D.funcionarios_os.filter(f=>porId(f.os_id));
   const totEquipe=equipe.reduce((a,f)=>a+Number(f.valor||0),0);
-  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&porIdOuNum(f.os_id));
+  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&porNum(f.os_id));
   const totDespFx=despFx.reduce((a,f)=>a+Number(f.valor||0),0);
-  const materiais=D.estoque_mov.filter(m=>m.tipo==='SAIDA'&&porIdOuNum(m.os_id));
+  const materiais=D.estoque_mov.filter(m=>m.tipo==='SAIDA'&&porNum(m.os_id));
   const totMateriais=materiais.reduce((a,m)=>a+Number(m.custo_total||0),0);
   const totDesp=totEquipe+totDespFx+totMateriais;
   const resCaixa=totRecebido-totDesp;
   const resPrev=(totRecebido+totAReceber)-totDesp;
+
+  // ── Diagnóstico: recebimentos com cliente diferente da OS (possível vínculo errado) ──
+  const _normCli=s=>String(s||'').toLowerCase().trim().replace(/\s+/g,' ');
+  const cliOS=_normCli(o.cliente_nome);
+  const recsClienteDif=recs.filter(r=>{const rc=_normCli(r.cliente_nome||r.cliente); return rc && cliOS && rc!==cliOS;});
 
   // ── Rateio de despesas indiretas ──
   // Período padrão: ano da OS (ou ano atual). Pode alternar mês/ano.
@@ -1702,6 +1822,15 @@ function verResultadoOS(osId, periodoRateio){
       <div class="kpi"><div class="kpi-label">💵 Resultado (caixa)</div><div class="kpi-val ${resCaixa>=0?'verde':'vermelho'}">${fmtBRL(resCaixa)}</div></div>
     </div>
     <p class="text-sm text-muted" style="margin:-6px 0 14px">Resultado previsto (recebendo tudo): <b class="${resPrev>=0?'verde':'vermelho'}">${fmtBRL(resPrev)}</b></p>
+    ${recsClienteDif.length?`<div class="alert-box alert-warning" style="margin-bottom:14px">
+      ${icon('alert',16)} <b>Atenção:</b> ${recsClienteDif.length} recebimento(s) vinculado(s) a esta OS têm <b>cliente diferente</b> de "${esc(o.cliente_nome||'')}". Podem ter sido vinculados por engano. Revise:
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
+        ${recsClienteDif.map(r=>`<div style="background:white;padding:7px 10px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span><b>CR#${r.id}</b> — ${esc(r.cliente_nome||r.cliente||'')} — ${fmtBRL(r.valor)} ${badge(r.status)}</span>
+          <button class="btn btn-sm btn-outline" onclick="fecharModal();editarReceber(${r.id})">Corrigir vínculo</button>
+        </div>`).join('')}
+      </div>
+    </div>`:''}
 
     <div class="card" style="background:var(--cinza-bg);border:1px solid var(--cinza-borda);margin-bottom:14px">
       <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
@@ -1760,26 +1889,145 @@ async function estornarMaterialOS(movId, osId){
   await carregarTudo();
   verResultadoOS(osId);
 }
+// ── Nota de Controle de Serviço (rascunho interno, NÃO é nota fiscal) ──
+function gerarNotaControle(osId){
+  const o=D.os.find(x=>x.id===osId); if(!o){alert('OS não encontrada.');return;}
+  // Dados da empresa (prestador)
+  const EMP={
+    razao: D.config.empresa_razao || 'H. Veloso Soares Compostos Engenharia & Manutenção',
+    cnpj: D.config.empresa_cnpj || '35.230.742/0001-98',
+    endereco: D.config.empresa_endereco || 'Av. Ney Siqueira Lopes',
+    numero: D.config.empresa_numero || '444',
+    bairro: D.config.empresa_bairro || 'Centro',
+    cidade: D.config.empresa_cidade || 'Dores do Rio Preto',
+    uf: D.config.empresa_uf || 'ES',
+    cep: D.config.empresa_cep || '29580-000',
+    tel: D.config.empresa_telefone || '(28) 99985-7915',
+    insc_mun: D.config.empresa_insc_mun || '-'
+  };
+  const BANCO={
+    banco: D.config.banco_nome || 'Sicoob',
+    ag: D.config.banco_agencia || '3118',
+    cc: D.config.banco_conta || '413 794 9',
+    titular: D.config.banco_titular || 'H. VELOSO SOARES COMPOSTOS ENG. & MAN.',
+    pix: D.config.banco_pix || '28999857915 (NÚMERO DE TELEFONE)'
+  };
+
+  // Itens: tenta puxar do orçamento vinculado; senão, usa o valor total da OS como item único
+  let itens=[];
+  const orc = o.orcamento_id ? D.orcamentos.find(x=>x.id===o.orcamento_id) : null;
+  if(orc){
+    const raw=Array.isArray(orc.itens)?orc.itens:(orc.itens?JSON.parse(orc.itens):[]);
+    itens=raw.map(i=>({
+      qtd:i.quantidade||i.qtd||1,
+      desc:i.descricao||i.nome||'',
+      vunit:i.valor_unit||i.valor_unitario||0,
+      total:(i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100)
+    }));
+  }
+  if(!itens.length){
+    itens=[{qtd:1, desc:o.servico||'Prestação de serviço', vunit:Number(o.valor_total||0), total:Number(o.valor_total||0)}];
+  }
+  const totalGeral=itens.reduce((a,i)=>a+i.total,0);
+
+  const linhasItens=itens.map(i=>`<tr>
+    <td style="text-align:center">${i.qtd}</td>
+    <td>${esc(i.desc)}</td>
+    <td style="text-align:right">${fmtBRL(i.vunit)}</td>
+    <td style="text-align:right">${fmtBRL(i.total)}</td>
+  </tr>`).join('');
+  // Linhas em branco para preencher visual (até ~8 linhas)
+  const enchimento=Math.max(0, 8-itens.length);
+  const linhasVazias=Array(enchimento).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('');
+
+  const logo = D.config.logo_url || (typeof LOGO_B64!=='undefined'?LOGO_B64:'');
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Controle de Serviço — OS #${o.numero_os}</title>
+  <style>
+    *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
+    body{margin:0;padding:24px;color:#111;font-size:12px}
+    .doc{max-width:780px;margin:0 auto;border:2px solid #1A3C5E}
+    .topo{display:flex;align-items:center;border-bottom:2px solid #1A3C5E}
+    .topo img{width:130px;height:auto;padding:8px}
+    .topo .titulo{flex:1;text-align:center;font-size:16px;font-weight:bold;color:#1A3C5E;padding:8px}
+    .sec-titulo{background:#1A3C5E;color:#fff;font-weight:bold;padding:5px 8px;font-size:12px}
+    table{width:100%;border-collapse:collapse}
+    .dados td{border:1px solid #999;padding:4px 7px;font-size:11px}
+    .itens th{background:#e8edf3;border:1px solid #999;padding:5px;font-size:11px}
+    .itens td{border:1px solid #999;padding:5px;font-size:11px}
+    .total-row td{font-weight:bold;background:#f0f3f7}
+    .rodape{padding:10px;font-size:11px}
+    .aviso{background:#FFF8E1;border:1px solid #E8A020;color:#7B5500;padding:6px 8px;font-size:10px;text-align:center;margin:0}
+    @media print{.noprint{display:none}body{padding:0}}
+  </style></head><body>
+  <div class="doc">
+    <div class="topo">
+      ${logo?`<img src="${logo}" alt="logo">`:''}
+      <div class="titulo">NOTA DE CONTROLE PRESTAÇÃO DE SERVIÇOS<br><span style="font-size:11px;font-weight:normal">OS #${o.numero_os}</span></div>
+    </div>
+    <p class="aviso">DOCUMENTO DE CONTROLE INTERNO — NÃO POSSUI VALOR FISCAL</p>
+
+    <div class="sec-titulo">PRESTADOR DE SERVIÇO</div>
+    <table class="dados">
+      <tr><td style="width:55%"><b>Nome/Razão Social:</b> ${esc(EMP.razao)}</td><td><b>CNPJ/CPF:</b> ${esc(EMP.cnpj)}</td></tr>
+      <tr><td><b>Endereço:</b> ${esc(EMP.endereco)}, ${esc(EMP.numero)}</td><td><b>Bairro:</b> ${esc(EMP.bairro)}</td></tr>
+      <tr><td><b>Cidade:</b> ${esc(EMP.cidade)} — ${esc(EMP.uf)}</td><td><b>CEP:</b> ${esc(EMP.cep)} &nbsp; <b>Tel:</b> ${esc(EMP.tel)}</td></tr>
+      <tr><td><b>Inscrição Municipal:</b> ${esc(EMP.insc_mun)}</td><td><b>Data:</b> ${fmtData(hoje())}</td></tr>
+    </table>
+
+    <div class="sec-titulo">TOMADOR DE SERVIÇO / DESTINATÁRIO</div>
+    <table class="dados">
+      <tr><td style="width:55%"><b>Nome/Razão Social:</b> ${esc(o.cliente_nome||'')}</td><td><b>CPF/CNPJ:</b> ${esc(o.cnpj||'—')}</td></tr>
+      <tr><td colspan="2"><b>Serviço:</b> ${esc(o.servico||'—')}</td></tr>
+    </table>
+
+    <div class="sec-titulo">DISCRIMINAÇÃO DOS SERVIÇOS</div>
+    <table class="itens">
+      <thead><tr><th style="width:50px">QTD</th><th>DESCRIÇÃO</th><th style="width:110px">VALOR UNIT.</th><th style="width:110px">TOTAL</th></tr></thead>
+      <tbody>
+        ${linhasItens}
+        ${linhasVazias}
+        <tr class="total-row"><td colspan="3" style="text-align:right">VALOR TOTAL</td><td style="text-align:right">${fmtBRL(totalGeral)}</td></tr>
+      </tbody>
+    </table>
+
+    <div class="rodape">
+      <b>Dados para depósito:</b><br>
+      Banco: ${esc(BANCO.banco)} &nbsp; Ag.: ${esc(BANCO.ag)} &nbsp; C/C: ${esc(BANCO.cc)}<br>
+      Titular: ${esc(BANCO.titular)}<br>
+      <b>PIX:</b> ${esc(BANCO.pix)}
+    </div>
+  </div>
+  <div class="noprint" style="text-align:center;margin-top:16px">
+    <button onclick="window.print()" style="background:#1A3C5E;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-size:14px;cursor:pointer">🖨️ Imprimir / Salvar PDF</button>
+  </div>
+  </body></html>`;
+
+  const win=window.open('','_blank');
+  if(!win){ alert('Permita pop-ups para gerar a nota.'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
 function imprimirResultadoOS(osId){
   const o=D.os.find(x=>x.id===osId); if(!o)return;
   const vd=r=>(r.vencimento||r.data_vencimento||'').slice(0,10);
+  // Cada tabela usa seu padrão correto (sem misturar id x número — evita colisão)
   const porId=(v)=> v!=null && String(v)===String(o.id);
   const porNum=(v)=> v!=null && String(v)===String(o.numero_os);
-  const porIdOuNum=(v)=> porId(v)||porNum(v);
 
-  const recs=D.receber.filter(r=>porIdOuNum(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
+  const recs=D.receber.filter(r=>porId(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
   const totRecCR=recs.filter(r=>r.status==='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
   const totAReceber=recs.filter(r=>r.status!=='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
   // Receitas do fluxo vinculadas à OS que não vieram de conta a receber (evita dupla contagem)
-  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA'&&porIdOuNum(f.os_id)&&!f.conta_receber_id);
+  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA'&&porNum(f.os_id)&&!f.conta_receber_id);
   const totRecFluxo=recFluxo.reduce((a,f)=>a+Number(f.valor||0),0);
   const totRecebido=totRecCR+totRecFluxo;
 
-  const equipe=D.funcionarios_os.filter(f=>porIdOuNum(f.os_id));
+  const equipe=D.funcionarios_os.filter(f=>porId(f.os_id));
   const totEquipe=equipe.reduce((a,f)=>a+Number(f.valor||0),0);
-  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&porIdOuNum(f.os_id));
+  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&porNum(f.os_id));
   const totDespFx=despFx.reduce((a,f)=>a+Number(f.valor||0),0);
-  const materiais=D.estoque_mov.filter(m=>m.tipo==='SAIDA'&&porIdOuNum(m.os_id));
+  const materiais=D.estoque_mov.filter(m=>m.tipo==='SAIDA'&&porNum(m.os_id));
   const totMateriais=materiais.reduce((a,m)=>a+Number(m.custo_total||0),0);
   const totDesp=totEquipe+totDespFx+totMateriais, resCaixa=totRecebido-totDesp, resPrev=(totRecebido+totAReceber)-totDesp;
   // Rateio de despesas indiretas (anual, padrão para o PDF de fechamento)
@@ -3125,8 +3373,17 @@ function render_auditoria(){
   ${cardFluxoSemOS}
   ${a.receberSemOS.length?`<div class="card" style="border-left:4px solid #7B8FA1">
     <div class="card-title">Contas a Receber sem OS vinculada (${a.receberSemOS.length})</div>
-    <p class="text-sm text-muted">Estas cobranças não estão ligadas a nenhuma OS. Use o botão "Ver sem vínculo" na tela de Contas a Receber para corrigir.</p>
-    <button class="btn btn-sm btn-outline mt-8" onclick="nav('receber')">Ir para Contas a Receber</button>
+    <p class="text-sm text-muted" style="margin-bottom:10px">Estas cobranças não estão ligadas a nenhuma OS. Vincule pela tela de Contas a Receber, ou marque OK se não precisar de vínculo.</p>
+    <div class="table-wrap"><table><thead><tr><th>ID</th><th>Cliente</th><th>Vencimento</th><th>Status</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
+      ${a.receberSemOS.map(x=>`<tr>
+        <td class="text-xs">#${x.id}</td>
+        <td>${esc(x.cliente_nome||x.cliente||'')}</td>
+        <td>${fmtData(x.vencimento||x.data_vencimento)}</td>
+        <td>${badge(x.status)}</td>
+        <td class="td-num">${fmtBRL(x.valor)}</td>
+        <td style="white-space:nowrap"><button class="btn btn-sm btn-outline" onclick="editarReceber(${x.id})">Vincular OS</button> ${btnOK('recSemOS',[x.id])}</td>
+      </tr>`).join('')}
+    </tbody></table></div>
   </div>`:''}`;
 }
 
