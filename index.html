@@ -1017,6 +1017,7 @@ function render_orcamentos(){
         <td style="white-space:nowrap">
           <button class="btn btn-sm btn-outline" onclick="verOrcamento(${o.id})">${icon('eye',16)}</button>
           <button class="btn btn-sm btn-primary" onclick="gerarPDFOrcamento(${o.id})">${icon('pdf',16)} PDF</button>
+          ${o.status==='PENDENTE'?`<button class="btn btn-sm btn-outline" onclick="editarOrcamento(${o.id})" title="Editar orçamento">${icon('edit',16)}</button>`:''}
           ${o.status==='PENDENTE'?`<button class="btn btn-sm btn-success" onclick="aprovarOrc(${o.id})" title="Aprovar e gerar OS">${icon('check',16)} Aprovar</button>`:''}
           ${o.status==='APROVADO'||o.status==='CONVERTIDO'?`<button class="btn btn-sm btn-outline" onclick="voltarEtapaOrc(${o.id})" title="Voltar para Pendente">${icon('back',16)} Pendente</button>`:''}
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarOrc(${o.id})">${icon('close',16)}</button>
@@ -1106,11 +1107,29 @@ async function converterOrcOS(id){
   if(ok){await sbUpdate('orcamentos',{status:'APROVADO',os_id:numOS},'id',id);alert(`✅ OS #${numOS} criada!`);nav('os');}
 }
 
+// Decide se um item do orçamento é MATERIAL/PEÇA.
+// 1º critério: o tipo marcado explicitamente (orçamentos novos).
+// 2º critério (fallback p/ orçamentos antigos sem marcação): palavras-chave no nome.
+function _ehMaterial(item){
+  if(item.tipo==='material') return true;
+  if(item.tipo==='servico') return false;
+  // Sem marcação → tenta adivinhar pelo nome
+  const d=String(item.descricao||item.nome||'').toLowerCase();
+  const palavrasMaterial=['válvula','valvula','elemento','coalescente','telha','telhas','peça','peças','peca','pecas',
+    'parafuso','tubo','cano','chapa','filtro','bomba','mangueira','conexão','conexao','flange','registro',
+    'material','rosca','vedante','selante','tinta','eletrodo','solda','viga','coluna','perfil','metálica','metalica',
+    'cumeeira','rufo','calha','equipamento','kit','engate','adaptador','curva','luva','niple','abraçadeira'];
+  // Se o nome contém "instalação", "mão de obra", "serviço", "execução" → é serviço (não material)
+  const palavrasServico=['instalação','instalacao','mão de obra','mao de obra','serviço','servico','execução','execucao','projeto','laudo','inspeção','inspecao','teste','ensaio','manutenção','manutencao','vistoria'];
+  if(palavrasServico.some(p=>d.includes(p))) return false;
+  return palavrasMaterial.some(p=>d.includes(p));
+}
+
 function verOrcamento(id){
   const o=D.orcamentos.find(x=>x.id===id);if(!o)return;
   const itens=Array.isArray(o.itens)?o.itens:(o.itens?JSON.parse(o.itens):[]);
-  const servicos=itens.filter(i=>i.tipo!=='material');
-  const materiais=itens.filter(i=>i.tipo==='material');
+  const servicos=itens.filter(i=>!_ehMaterial(i));
+  const materiais=itens.filter(i=>_ehMaterial(i));
   const subtotal=(arr)=>arr.reduce((a,i)=>a+(i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100),0);
   const linha=i=>`<tr><td>${esc(i.descricao||i.nome||'—')}</td><td class="td-num">${i.quantidade||i.qtd||1}</td><td class="td-num">${fmtBRL(i.valor_unit||i.valor_unitario||0)}</td><td class="td-num">${i.desconto||0}%</td><td class="td-num"><b>${fmtBRL((i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100))}</b></td></tr>`;
   abrirModal(`Orçamento #${o.numero}`,`
@@ -1134,13 +1153,16 @@ function verOrcamento(id){
   `<button class="btn btn-primary" onclick="gerarPDFOrcamento(${id})">${icon('pdf',16)} Baixar PDF</button><button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`,true);
 }
 
-function modalNovoOrcamento(){
+function editarOrcamento(id){ modalNovoOrcamento(id); }
+
+function modalNovoOrcamento(editId){
   const tipos = D.tipos_servico;
   let orcItemIdx=0;
-  abrirModal('Novo Orçamento',`
+  const ed = editId ? D.orcamentos.find(o=>o.id===editId) : null;
+  abrirModal(ed?`Editar Orçamento #${ed.numero}`:'Novo Orçamento',`
   <div class="form-grid">
-    <div class="form-group"><label>Nº Orçamento</label><input type="text" id="orc-num" value="${String(D.orcamentos.length+1).padStart(3,'0')}/${new Date().getFullYear()}"></div>
-    <div class="form-group"><label>Data de Emissão</label><input type="date" id="orc-data" value="${hoje()}"></div>
+    <div class="form-group"><label>Nº Orçamento</label><input type="text" id="orc-num" value="${ed?esc(ed.numero):String(D.orcamentos.length+1).padStart(3,'0')+'/'+new Date().getFullYear()}"></div>
+    <div class="form-group"><label>Data de Emissão</label><input type="date" id="orc-data" value="${ed?(ed.data_emissao||'').slice(0,10):hoje()}"></div>
     <div class="form-group span2"><label>Tipo de Orçamento</label>
       <select id="orc-tipo-orc" onchange="toggleMateriaisOrc()">
         <option value="servico">Somente serviço</option>
@@ -1209,8 +1231,43 @@ function modalNovoOrcamento(){
 
   <div class="item-total-bar" style="background:var(--azul);color:white;font-size:15px;margin-top:8px">TOTAL GERAL: <span id="orc-total-val">R$ 0,00</span></div>
   <div class="form-group" style="margin-top:8px"><label>Observações adicionais</label><textarea id="orc-obs" rows="2"></textarea></div>`,
-  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarOrcamento()">${icon('check',16)} Salvar Orçamento</button>`,true);
-  addItemOrc();
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarOrcamento(${editId||'null'})">${icon('check',16)} ${ed?'Salvar Alterações':'Salvar Orçamento'}</button>`,true);
+
+  if(ed){
+    // Pré-preenche todos os campos do orçamento em edição
+    const itensEd=Array.isArray(ed.itens)?ed.itens:(ed.itens?JSON.parse(ed.itens):[]);
+    const servicosEd=itensEd.filter(i=>!_ehMaterial(i));
+    const materiaisEd=itensEd.filter(i=>_ehMaterial(i));
+    const temMaterial=materiaisEd.length>0;
+    document.getElementById('orc-razao').value=ed.cli_razao||'';
+    document.getElementById('orc-cnpj').value=ed.cli_cnpj||'';
+    document.getElementById('orc-cidade').value=ed.cli_municipio||'';
+    document.getElementById('orc-uf').value=ed.cli_uf||'';
+    document.getElementById('orc-email').value=ed.cli_email||'';
+    document.getElementById('orc-tel').value=ed.cli_telefone||'';
+    document.getElementById('orc-desc-visual').value=ed.tipo_servico||'';
+    document.getElementById('orc-prazo-exec').value=ed.prazo_execucao||'';
+    document.getElementById('orc-prazo-laudo').value=ed.prazo_laudos||'';
+    document.getElementById('orc-validade').value=ed.validade_dias||15;
+    document.getElementById('orc-pgto').value=ed.condicoes||'';
+    document.getElementById('orc-obs').value=ed.observacoes||'';
+    if(ed.local_assinatura) document.getElementById('orc-local').value=ed.local_assinatura;
+    // Tipo de orçamento
+    document.getElementById('orc-tipo-orc').value = temMaterial?'servico_material':'servico';
+    toggleMateriaisOrc();
+    // Itens de serviço
+    document.getElementById('itens-orc').innerHTML='';
+    servicosEd.forEach(i=>addItemOrc(i.descricao||i.nome||'', i.quantidade||i.qtd||1, i.valor_unit||i.valor_unitario||0, i.desconto||0));
+    if(!servicosEd.length) addItemOrc();
+    // Itens de material
+    if(temMaterial){
+      document.getElementById('itens-mat').innerHTML='';
+      materiaisEd.forEach(i=>addMaterialOrc(i.descricao||i.nome||'', i.quantidade||i.qtd||1, i.valor_unit||i.valor_unitario||0, i.desconto||0));
+    }
+    calcTotalOrc();
+  } else {
+    addItemOrc();
+  }
   setTimeout(()=>{
     setupAutoCompleteCliente('orc-razao', cl=>{
       document.getElementById('orc-cnpj').value   = cl.cnpj||'';
@@ -1245,7 +1302,7 @@ function toggleMateriaisOrc(){
   calcTotalOrc();
 }
 // Adiciona uma linha de material em branco (item livre)
-function addMaterialOrc(desc='', qtd=1, vunit=0){
+function addMaterialOrc(desc='', qtd=1, vunit=0, descPct=0){
   const div=document.getElementById('itens-mat');
   if(!div) return;
   const idx=_orcMatIdx++;
@@ -1253,7 +1310,7 @@ function addMaterialOrc(desc='', qtd=1, vunit=0){
     <input type="text" id="mat-desc-${idx}" placeholder="Descrição do material" value="${esc(desc)}">
     <input type="number" id="mat-qty-${idx}" value="${qtd}" min="0" step="0.5" oninput="calcTotalOrc()" style="width:100%">
     <input type="number" id="mat-vunit-${idx}" value="${vunit}" min="0" step="0.01" oninput="calcTotalOrc()" style="width:100%">
-    <input type="number" id="mat-desc-pct-${idx}" value="0" min="0" max="100" oninput="calcTotalOrc()" style="width:100%">
+    <input type="number" id="mat-desc-pct-${idx}" value="${descPct}" min="0" max="100" oninput="calcTotalOrc()" style="width:100%">
     <button class="btn btn-sm btn-danger btn-icon" onclick="document.getElementById('mrow-${idx}').remove();calcTotalOrc()">${icon('close',16)}</button>
   </div>`);
   calcTotalOrc();
@@ -1302,16 +1359,17 @@ function coletarMateriaisOrc(){
 }
 
 let _orcIdx=0;
-function addItemOrc(){
+function addItemOrc(desc='', qtd=1, vunit=0, descPct=0){
   const div=document.getElementById('itens-orc');
   const idx=_orcIdx++;
   div.insertAdjacentHTML('beforeend',`<div class="item-row" id="irow-${idx}">
-    <input type="text" id="item-desc-${idx}" placeholder="Descrição do serviço">
-    <input type="number" id="item-qty-${idx}" value="1" min="0.5" step="0.5" oninput="calcTotalOrc()" style="width:100%">
-    <input type="number" id="item-vunit-${idx}" value="0" min="0" step="0.01" oninput="calcTotalOrc()" style="width:100%">
-    <input type="number" id="item-desc-pct-${idx}" value="0" min="0" max="100" oninput="calcTotalOrc()" style="width:100%">
+    <input type="text" id="item-desc-${idx}" placeholder="Descrição do serviço" value="${esc(desc)}">
+    <input type="number" id="item-qty-${idx}" value="${qtd}" min="0.5" step="0.5" oninput="calcTotalOrc()" style="width:100%">
+    <input type="number" id="item-vunit-${idx}" value="${vunit}" min="0" step="0.01" oninput="calcTotalOrc()" style="width:100%">
+    <input type="number" id="item-desc-pct-${idx}" value="${descPct}" min="0" max="100" oninput="calcTotalOrc()" style="width:100%">
     <button class="btn btn-sm btn-danger btn-icon" onclick="document.getElementById('irow-${idx}').remove();calcTotalOrc()">${icon('close',16)}</button>
   </div>`);
+  calcTotalOrc();
 }
 function calcTotalOrc(){
   let tServ=0;
@@ -1347,7 +1405,7 @@ function coletarItensOrc(){
   });
   return itens;
 }
-async function salvarOrcamento(){
+async function salvarOrcamento(editId){
   const razao=document.getElementById('orc-razao').value.trim();
   if(!razao){alert('Informe a Razão Social.');return;}
   const servicos=coletarItensOrc();
@@ -1358,11 +1416,10 @@ async function salvarOrcamento(){
   const total=itens.reduce((a,i)=>a+i.quantidade*i.valor_unit*(1-(i.desconto||0)/100),0);
   const tipoServ=document.getElementById('orc-servico-id');
   const tipoNome=tipoServ.value&&tipoServ.value!=='custom'?tipoServ.options[tipoServ.selectedIndex].text:document.getElementById('orc-desc-visual').value.slice(0,80);
-  const ok=await sbInsert('orcamentos',{
+  const dados={
     numero:document.getElementById('orc-num').value,
     data_emissao:document.getElementById('orc-data').value,
     validade_dias:parseInt(document.getElementById('orc-validade').value)||15,
-    status:'PENDENTE',
     cli_razao:razao,
     cli_cnpj:document.getElementById('orc-cnpj').value,
     cli_municipio:document.getElementById('orc-cidade').value,
@@ -1376,9 +1433,17 @@ async function salvarOrcamento(){
     total,
     condicoes:document.getElementById('orc-pgto').value,
     observacoes:document.getElementById('orc-obs').value,
-    local_assinatura:document.getElementById('orc-local').value,
-    criado_em:new Date().toISOString(),
-  });
+    local_assinatura:document.getElementById('orc-local').value
+  };
+  let ok;
+  if(editId){
+    // Edição: atualiza o orçamento existente (mantém status e data de criação)
+    ok=await sbUpdate('orcamentos',dados,'id',editId);
+  } else {
+    dados.status='PENDENTE';
+    dados.criado_em=new Date().toISOString();
+    ok=await sbInsert('orcamentos',dados);
+  }
   if(ok){fecharModal();nav('orcamentos');}
 }
 
@@ -1805,6 +1870,7 @@ function verResultadoOS(osId, periodoRateio){
   const _normCli=s=>String(s||'').toLowerCase().trim().replace(/\s+/g,' ');
   const cliOS=_normCli(o.cliente_nome);
   const recsClienteDif=recs.filter(r=>{const rc=_normCli(r.cliente_nome||r.cliente); return rc && cliOS && rc!==cliOS;});
+  const recFluxoClienteDif=recFluxo.filter(f=>{const fc=_normCli(f.cliente); return fc && cliOS && fc!==cliOS;});
 
   // ── Rateio de despesas indiretas ──
   // Período padrão: ano da OS (ou ano atual). Pode alternar mês/ano.
@@ -1828,6 +1894,15 @@ function verResultadoOS(osId, periodoRateio){
         ${recsClienteDif.map(r=>`<div style="background:white;padding:7px 10px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
           <span><b>CR#${r.id}</b> — ${esc(r.cliente_nome||r.cliente||'')} — ${fmtBRL(r.valor)} ${badge(r.status)}</span>
           <button class="btn btn-sm btn-outline" onclick="fecharModal();editarReceber(${r.id})">Corrigir vínculo</button>
+        </div>`).join('')}
+      </div>
+    </div>`:''}
+    ${recFluxoClienteDif.length?`<div class="alert-box alert-warning" style="margin-bottom:14px">
+      ${icon('alert',16)} <b>Atenção:</b> ${recFluxoClienteDif.length} receita(s) do Fluxo de Caixa vinculada(s) a esta OS têm <b>cliente diferente</b> de "${esc(o.cliente_nome||'')}". Talvez tenham sido vinculadas por engano (isso infla o "Recebido"). Revise:
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
+        ${recFluxoClienteDif.map(f=>`<div style="background:white;padding:7px 10px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span><b>FX#${f.id}</b> — ${esc(f.cliente||'')} — ${fmtBRL(f.valor)} — ${fmtData(f.data_movimento)}</span>
+          <button class="btn btn-sm btn-outline" onclick="fecharModal();editarLancamento(${f.id})">Corrigir vínculo</button>
         </div>`).join('')}
       </div>
     </div>`:''}
@@ -1858,8 +1933,28 @@ function verResultadoOS(osId, periodoRateio){
     ${recs.length?`<div class="table-wrap"><table>
       <thead><tr><th>Vencimento</th><th>Status</th><th>Forma</th><th class="td-num">Valor</th></tr></thead>
       <tbody>${recs.map(r=>`<tr><td>${fmtData(vd(r))}</td><td>${badge(r.status)}</td><td>${esc(r.forma_pagamento||'—')}</td><td class="td-num">${fmtBRL(r.valor)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr style="font-weight:700;border-top:2px solid var(--cinza-borda)"><td colspan="3">Recebido / A Receber</td><td class="td-num"><span class="verde">${fmtBRL(totRecebido)}</span> / <span class="azul">${fmtBRL(totAReceber)}</span></td></tr></tfoot>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--cinza-borda)"><td colspan="3">Subtotal (Recebido / A Receber)</td><td class="td-num"><span class="verde">${fmtBRL(totRecCR)}</span> / <span class="azul">${fmtBRL(totAReceber)}</span></td></tr></tfoot>
     </table></div>`:'<p class="text-sm text-muted">Nenhuma cobrança lançada para esta OS.</p>'}
+
+    ${recFluxo.length?`
+    <div class="card-title mt-16">💵 Receitas lançadas direto no Fluxo de Caixa</div>
+    <p class="text-xs text-muted" style="margin:-4px 0 8px">Receitas vinculadas a esta OS que entraram pelo Fluxo de Caixa (sem passar por Conta a Receber). Somam-se ao Recebido.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Data</th><th>Cliente</th><th>Categoria</th><th class="td-num">Valor</th></tr></thead>
+      <tbody>${recFluxo.map(f=>`<tr>
+        <td class="text-xs text-muted">#${f.id}</td>
+        <td>${fmtData(f.data_movimento)}</td>
+        <td>${esc(f.cliente||'—')}</td>
+        <td><span class="text-xs">${esc(f.categoria||'—')}</span></td>
+        <td class="td-num">${fmtBRL(f.valor)}</td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr style="font-weight:700;border-top:2px solid var(--cinza-borda)"><td colspan="4">Subtotal receitas do fluxo</td><td class="td-num verde">${fmtBRL(totRecFluxo)}</td></tr></tfoot>
+    </table></div>`:''}
+
+    <div style="background:var(--cinza-bg);border-radius:8px;padding:10px 14px;margin-top:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span style="font-weight:700;color:var(--azul)">TOTAL RECEBIDO (Contas a Receber + Fluxo)</span>
+      <span style="font-weight:800;font-size:16px" class="verde">${fmtBRL(totRecebido)}</span>
+    </div>
 
     <div class="flex flex-between flex-center mt-16">
       <div class="card-title" style="margin-bottom:0">📤 Despesas desta OS</div>
@@ -1923,15 +2018,16 @@ function gerarNotaControle(osId){
       desc:i.descricao||i.nome||'',
       vunit:i.valor_unit||i.valor_unitario||0,
       total:(i.quantidade||i.qtd||1)*(i.valor_unit||i.valor_unitario||0)*(1-(i.desconto||0)/100),
-      tipo:i.tipo||'servico'
+      tipo:i.tipo,
+      descricao:i.descricao||i.nome||''
     }));
   }
   if(!itens.length){
     itens=[{qtd:1, desc:o.servico||'Prestação de serviço', vunit:Number(o.valor_total||0), total:Number(o.valor_total||0), tipo:'servico'}];
   }
   const totalGeral=itens.reduce((a,i)=>a+i.total,0);
-  const servicosN=itens.filter(i=>i.tipo!=='material');
-  const materiaisN=itens.filter(i=>i.tipo==='material');
+  const servicosN=itens.filter(i=>!_ehMaterial(i));
+  const materiaisN=itens.filter(i=>_ehMaterial(i));
   const subtotalN=arr=>arr.reduce((a,i)=>a+i.total,0);
 
   const linhaItem=i=>`<tr>
@@ -4179,8 +4275,8 @@ function gerarPDFOrcamento(id){
   // 3. Tabela
   secTitulo('3. VALOR DA PROPOSTA');
   const cw1=CW*0.45, cw2=CW*0.18, cw3=CW*0.18, cw4=CW*0.19;
-  const servicos=itens.filter(i=>i.tipo!=='material');
-  const materiais=itens.filter(i=>i.tipo==='material');
+  const servicos=itens.filter(i=>!_ehMaterial(i));
+  const materiais=itens.filter(i=>_ehMaterial(i));
   checkPag(8 + itens.length*9 + 26);
   // Cabeçalho da tabela
   doc.setFillColor(...AZUL);doc.rect(ML,y,CW,8,'F');
