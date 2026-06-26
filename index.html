@@ -1866,12 +1866,6 @@ function verResultadoOS(osId, periodoRateio){
   const resCaixa=totRecebido-totDesp;
   const resPrev=(totRecebido+totAReceber)-totDesp;
 
-  // ── Diagnóstico: recebimentos com cliente diferente da OS (possível vínculo errado) ──
-  const _normCli=s=>String(s||'').toLowerCase().trim().replace(/\s+/g,' ');
-  const cliOS=_normCli(o.cliente_nome);
-  const recsClienteDif=recs.filter(r=>{const rc=_normCli(r.cliente_nome||r.cliente); return rc && cliOS && rc!==cliOS;});
-  const recFluxoClienteDif=recFluxo.filter(f=>{const fc=_normCli(f.cliente); return fc && cliOS && fc!==cliOS;});
-
   // ── Rateio de despesas indiretas ──
   // Período padrão: ano da OS (ou ano atual). Pode alternar mês/ano.
   const dataRef = (o.data_abertura||o.data_execucao||hoje()).slice(0,10);
@@ -1888,24 +1882,6 @@ function verResultadoOS(osId, periodoRateio){
       <div class="kpi"><div class="kpi-label">💵 Resultado (caixa)</div><div class="kpi-val ${resCaixa>=0?'verde':'vermelho'}">${fmtBRL(resCaixa)}</div></div>
     </div>
     <p class="text-sm text-muted" style="margin:-6px 0 14px">Resultado previsto (recebendo tudo): <b class="${resPrev>=0?'verde':'vermelho'}">${fmtBRL(resPrev)}</b></p>
-    ${recsClienteDif.length?`<div class="alert-box alert-warning" style="margin-bottom:14px">
-      ${icon('alert',16)} <b>Atenção:</b> ${recsClienteDif.length} recebimento(s) vinculado(s) a esta OS têm <b>cliente diferente</b> de "${esc(o.cliente_nome||'')}". Podem ter sido vinculados por engano. Revise:
-      <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
-        ${recsClienteDif.map(r=>`<div style="background:white;padding:7px 10px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-          <span><b>CR#${r.id}</b> — ${esc(r.cliente_nome||r.cliente||'')} — ${fmtBRL(r.valor)} ${badge(r.status)}</span>
-          <button class="btn btn-sm btn-outline" onclick="fecharModal();editarReceber(${r.id})">Corrigir vínculo</button>
-        </div>`).join('')}
-      </div>
-    </div>`:''}
-    ${recFluxoClienteDif.length?`<div class="alert-box alert-warning" style="margin-bottom:14px">
-      ${icon('alert',16)} <b>Atenção:</b> ${recFluxoClienteDif.length} receita(s) do Fluxo de Caixa vinculada(s) a esta OS têm <b>cliente diferente</b> de "${esc(o.cliente_nome||'')}". Talvez tenham sido vinculadas por engano (isso infla o "Recebido"). Revise:
-      <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
-        ${recFluxoClienteDif.map(f=>`<div style="background:white;padding:7px 10px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-          <span><b>FX#${f.id}</b> — ${esc(f.cliente||'')} — ${fmtBRL(f.valor)} — ${fmtData(f.data_movimento)}</span>
-          <button class="btn btn-sm btn-outline" onclick="fecharModal();editarLancamento(${f.id})">Corrigir vínculo</button>
-        </div>`).join('')}
-      </div>
-    </div>`:''}
 
     <div class="card" style="background:var(--cinza-bg);border:1px solid var(--cinza-borda);margin-bottom:14px">
       <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
@@ -2263,6 +2239,7 @@ function modalNovoLancamento(){
     <div class="form-group"><label>Data</label><input type="date" id="fc-data" value="${hoje()}"></div>
     <div class="form-group"><label>Tipo</label><select id="fc-tipo" onchange="toggleCatFC()"><option>RECEITA</option><option>DESPESA</option></select></div>
     <div class="form-group span2"><label>Cliente / Fornecedor</label><input type="text" id="fc-cli"></div>
+    <div class="form-group span2"><label>CNPJ / CPF <span class="text-xs text-muted">(opcional — ajuda a auditoria a cruzar pagamentos)</span></label><input type="text" id="fc-cnpj" placeholder="00.000.000/0001-00"></div>
     <div class="form-group"><label>Valor (R$)</label><input type="number" id="fc-valor" value="0" step="0.01"></div>
     <div class="form-group" id="fc-cat-wrap">
       <label>Categoria</label>
@@ -2413,6 +2390,8 @@ async function salvarLancamento(){
     os_id:osId,
     observacao:document.getElementById('fc-obs').value
   };
+  const cnpjFC=(document.getElementById('fc-cnpj')?.value||'').trim();
+  if(cnpjFC) dadosFC.cnpj=cnpjFC;
   // só envia as colunas de vínculo quando realmente vincular (evita erro se a coluna não existir)
   if(recSel) dadosFC.conta_receber_id=parseInt(recSel);
   if(pagSel) dadosFC.conta_pagar_id=parseInt(pagSel);
@@ -2517,7 +2496,23 @@ async function darEntradaEstoque(m, data, fluxoId, obs){
 }
 function preencherDeReceber(){
   const r=D.receber.find(x=>x.id===parseInt(document.getElementById('fc-rec-id').value||0));
-  if(r){document.getElementById('fc-cli').value=r.cliente_nome||r.cliente||'';document.getElementById('fc-valor').value=r.valor||0;}
+  if(r){
+    document.getElementById('fc-cli').value=r.cliente_nome||r.cliente||'';
+    document.getElementById('fc-valor').value=r.valor||0;
+    _preencherCNPJFluxo(r.cnpj || _cnpjDoClientePorNome(r.cliente_nome||r.cliente));
+  }
+}
+// Preenche o campo CNPJ do fluxo se estiver vazio (não sobrescreve o que o usuário digitou)
+function _preencherCNPJFluxo(cnpj){
+  const el=document.getElementById('fc-cnpj');
+  if(el && cnpj && !el.value.trim()) el.value=cnpj;
+}
+// Busca o CNPJ de um cliente pelo nome (no cadastro de clientes)
+function _cnpjDoClientePorNome(nome){
+  if(!nome) return '';
+  const n=String(nome).toLowerCase().trim();
+  const c=(D.clientes||[]).find(x=>String(x.razao_social||'').toLowerCase().trim()===n || String(x.nome_fantasia||'').toLowerCase().trim()===n);
+  return c?(c.cnpj||''):'';
 }
 
 // Quando vincula uma OS no lançamento de RECEITA, mostra as contas a receber
@@ -2532,6 +2527,8 @@ function fluxoAoSelecionarOS(){
 
   const o=D.os.find(x=>String(x.numero_os)===String(numOS));
   if(!o){ aviso.style.display='none'; return; }
+  // Preenche o CNPJ da OS (se o campo estiver vazio)
+  _preencherCNPJFluxo(o.cnpj || _cnpjDoClientePorNome(o.cliente_nome));
   // Contas a receber EM ABERTO dessa OS (aceita vínculo por id ou número)
   const abertas=D.receber.filter(r=>r.status!=='RECEBIDO' &&
     (String(r.os_id)===String(o.id)||String(r.os_id)===String(o.numero_os)));
@@ -2581,6 +2578,7 @@ function editarLancamento(id){
         <option ${tipo==='DESPESA'?'selected':''}>DESPESA</option>
       </select></div>
     <div class="form-group span2"><label>Cliente / Fornecedor</label><input type="text" id="efc-cli" value="${(r.cliente||r.cliente_nome||'').replace(/"/g,'&quot;')}"></div>
+    <div class="form-group span2"><label>CNPJ / CPF <span class="text-xs text-muted">(opcional)</span></label><input type="text" id="efc-cnpj" value="${(r.cnpj||'').replace(/"/g,'&quot;')}" placeholder="00.000.000/0001-00"></div>
     <div class="form-group"><label>Valor (R$)</label><input type="number" id="efc-valor" value="${r.valor}" step="0.01"></div>
     <div class="form-group" id="efc-cat-wrap">
       <label>Categoria</label>
@@ -2646,6 +2644,7 @@ async function salvarEditLancamento(id){
     observacao:obs
   };
   dados.conta_receber_id = vinculoNovo;
+  dados.cnpj = (document.getElementById('efc-cnpj')?.value||'').trim();
 
   const ok = await sbUpdate('fluxo_caixa',dados,'id',id);
   if(!ok) return;
@@ -3256,6 +3255,18 @@ function _foiIgnorado(chave){
 function auditar(){
   const r={duplicReceber:[], duplicFluxo:[], osSemReceb:[], fluxoSemOS:[], receberSemOS:[], naoVinculado:[], provavelPago:[]};
   const norm=s=>String(s||'').toLowerCase().trim().replace(/\s+/g,' ');
+  const normCNPJ=s=>String(s||'').replace(/\D/g,''); // só dígitos
+  // Compara duas "partes" (conta, receita, OS) representando o mesmo cliente.
+  // CNPJ tem PRIORIDADE: se os dois têm CNPJ, decide só por ele.
+  // Se faltar CNPJ em algum lado, usa o nome como reserva.
+  const mesmoCliente=(cnpjA, nomeA, cnpjB, nomeB)=>{
+    const ca=normCNPJ(cnpjA), cb=normCNPJ(cnpjB);
+    if(ca && cb) return ca===cb;       // ambos têm CNPJ → decide por CNPJ
+    const na=norm(nomeA), nb=norm(nomeB);
+    return na!=='' && na===nb;          // reserva: nome
+  };
+  // Busca CNPJ de uma OS (própria ou do cadastro do cliente)
+  const cnpjOS=o=>o.cnpj || (D.clientes||[]).find(c=>norm(c.razao_social)===norm(o.cliente_nome))?.cnpj || '';
   const vd=x=>(x.vencimento||x.data_vencimento||'').slice(0,10);
   const diasEntre=(a,b)=>Math.abs((new Date(a)-new Date(b))/(1000*60*60*24));
 
@@ -3292,17 +3303,8 @@ function auditar(){
     }
   }
 
-  // 3) OS sem nenhum recebimento contabilizado
-  D.os.forEach(o=>{
-    if(!['EM EXECUÇÃO','A EXECUTAR','FINALIZADO'].includes(o.status)) return;
-    if(!Number(o.valor_total)) return;
-    const temCR=D.receber.some(x=>{const oo=_osDoVinculo(x.os_id);return oo&&oo.id===o.id;});
-    const temRecFluxo=D.fluxo.some(f=>{if(f.tipo!=='RECEITA')return false;const oo=_osDoVinculo(f.os_id);return oo&&oo.id===o.id;});
-    if(!temCR && !temRecFluxo){
-      if(_foiIgnorado(_chaveAuditoria('osSemRec',[o.id]))) return;
-      r.osSemReceb.push(o);
-    }
-  });
+  // (Removido: "OS sem recebimento" gerava ruído — OS com prazo vigente é normal.
+  //  O que importa está no item 7: OS/contas que provavelmente já foram pagas.)
 
   // 4) Receitas no fluxo SEM vínculo de OS (e que não quitam conta a receber)
   D.fluxo.forEach(f=>{
@@ -3326,26 +3328,53 @@ function auditar(){
   // Pode estar certo, só falta vincular. Oferecemos vincular ou ignorar.
   D.receber.filter(x=>x.status==='RECEBIDO').forEach(cr=>{
     const dup=D.fluxo.find(f=>f.tipo==='RECEITA' && !f.conta_receber_id &&
-      Number(f.valor)===Number(cr.valor) && norm(f.cliente)===norm(cr.cliente_nome||cr.cliente) &&
-      norm(f.cliente)!=='');
+      Number(f.valor)===Number(cr.valor) &&
+      mesmoCliente(f.cnpj, f.cliente, cr.cnpj, cr.cliente_nome||cr.cliente));
     if(dup){
       if(_foiIgnorado(_chaveAuditoria('naoVinc',[cr.id,dup.id]))) return;
       r.naoVinculado.push([cr,dup]);
     }
   });
 
-  // 7) PROVÁVEL RECEBIMENTO NÃO IDENTIFICADO: CR em aberto com receita no fluxo de mesmo cliente/valor
+  // 7) PROVÁVEL RECEBIMENTO NÃO IDENTIFICADO
+  // Caso A: conta a receber EM ABERTO com receita no fluxo de mesmo cliente/valor (não vinculada)
   const fluxoReceitasLivres=D.fluxo.filter(f=>f.tipo==='RECEITA' && !f.conta_receber_id);
+  const fluxoJaUsado=new Set();
   D.receber.filter(x=>x.status!=='RECEBIDO').forEach(cr=>{
     const valCR=Number(cr.valor);
     if(!valCR) return;
-    const cliCR=norm(cr.cliente_nome||cr.cliente);
-    if(!cliCR) return;
     const match=fluxoReceitasLivres.find(f=>
-      Number(f.valor)===valCR && norm(f.cliente)===cliCR);
+      Number(f.valor)===valCR && !fluxoJaUsado.has(f.id) &&
+      mesmoCliente(f.cnpj, f.cliente, cr.cnpj, cr.cliente_nome||cr.cliente));
     if(match){
+      fluxoJaUsado.add(match.id);
       if(_foiIgnorado(_chaveAuditoria('provPago',[cr.id,match.id]))) return;
-      r.provavelPago.push([cr,match]);
+      r.provavelPago.push({tipo:'cr', cr, fluxo:match});
+    }
+  });
+
+  // Caso B: OS com valor, SEM recebimento contabilizado, mas há receita no fluxo
+  // de mesmo cliente e valor próximo (≈ valor da OS). Provável que já foi paga.
+  D.os.forEach(o=>{
+    if(!Number(o.valor_total)) return;
+    // Já tem recebimento (CR recebida ou receita no fluxo vinculada)? então não é "não identificado"
+    const temCRRecebida=D.receber.some(x=>{const oo=_osDoVinculo(x.os_id);return oo&&oo.id===o.id&&x.status==='RECEBIDO';});
+    const temRecFluxoVinc=D.fluxo.some(f=>{if(f.tipo!=='RECEITA')return false;const oo=_osDoVinculo(f.os_id);return oo&&oo.id===o.id;});
+    if(temCRRecebida||temRecFluxoVinc) return;
+    if(!norm(o.cliente_nome)) return;
+    const valOS=Number(o.valor_total);
+    const cnpjDaOS=cnpjOS(o);
+    // Procura receita no fluxo, mesmo cliente (CNPJ prioritário), valor igual ou próximo (até 5%)
+    const match=fluxoReceitasLivres.find(f=>{
+      if(fluxoJaUsado.has(f.id)) return false;
+      if(!mesmoCliente(f.cnpj, f.cliente, cnpjDaOS, o.cliente_nome)) return false;
+      const dif=Math.abs(Number(f.valor)-valOS);
+      return dif<=valOS*0.05;
+    });
+    if(match){
+      fluxoJaUsado.add(match.id);
+      if(_foiIgnorado(_chaveAuditoria('provPagoOS',[o.id,match.id]))) return;
+      r.provavelPago.push({tipo:'os', os:o, fluxo:match});
     }
   });
 
@@ -3354,7 +3383,7 @@ function auditar(){
 
 function render_auditoria(){
   const a=auditar();
-  const totalProblemas=a.duplicReceber.length+a.duplicFluxo.length+a.osSemReceb.length+a.fluxoSemOS.length+a.naoVinculado.length+a.provavelPago.length;
+  const totalProblemas=a.duplicReceber.length+a.duplicFluxo.length+a.fluxoSemOS.length+a.naoVinculado.length+a.provavelPago.length;
   const nIgnorados=(D.auditoria_ok||[]).length;
   const c=document.getElementById('content');
   // Botão "marcar OK" reutilizável
@@ -3363,18 +3392,36 @@ function render_auditoria(){
   const cardProvavelPago=a.provavelPago.length?`
     <div class="card" style="border-left:4px solid #1A8F5A">
       <div class="card-title">${icon('alert',18)} Provável recebimento não identificado (${a.provavelPago.length})</div>
-      <p class="text-sm text-muted" style="margin-bottom:10px">Estas contas estão <b>EM ABERTO</b>, mas existe uma receita no Fluxo de Caixa com o <b>mesmo cliente e valor</b> que não foi vinculada. Provavelmente já foram pagas — vincule para baixar a conta, ou marque OK se não for o caso.</p>
-      <div class="table-wrap"><table><thead><tr><th>Conta a Receber</th><th>Receita no Fluxo</th><th>Cliente</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
-        ${a.provavelPago.map(([cr,f])=>`<tr>
-          <td><b>#${cr.id}</b> ${badge(cr.status)}<br><span class="text-xs">vence ${fmtData(cr.vencimento||cr.data_vencimento)}</span></td>
-          <td><b>FX #${f.id}</b><br><span class="text-xs">${fmtData(f.data_movimento)}</span></td>
-          <td>${esc(cr.cliente_nome||cr.cliente||'')}</td>
-          <td class="td-num">${fmtBRL(cr.valor)}</td>
-          <td style="white-space:nowrap">
-            <button class="btn btn-sm btn-success" onclick="vincularPagamentoAuditoria(${f.id},${cr.id})" title="Vincular a receita à conta e baixar">${icon('check',16)} Vincular</button>
-            ${btnOK('provPago',[cr.id,f.id])}
-          </td>
-        </tr>`).join('')}
+      <p class="text-sm text-muted" style="margin-bottom:10px">Existe uma receita no Fluxo de Caixa com o <b>mesmo cliente e valor</b> de uma conta a receber em aberto, ou de uma OS sem recebimento. <b>Provavelmente já foi paga</b> — vincule para baixar, ou marque OK se não for o caso.</p>
+      <div class="table-wrap"><table><thead><tr><th>Origem</th><th>Receita no Fluxo</th><th>Cliente</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
+        ${a.provavelPago.map(p=>{
+          const f=p.fluxo;
+          if(p.tipo==='cr'){
+            const cr=p.cr;
+            return `<tr>
+              <td><b>CR #${cr.id}</b> ${badge(cr.status)}<br><span class="text-xs">vence ${fmtData(cr.vencimento||cr.data_vencimento)}</span></td>
+              <td><b>FX #${f.id}</b><br><span class="text-xs">${fmtData(f.data_movimento)}</span></td>
+              <td>${esc(cr.cliente_nome||cr.cliente||'')}</td>
+              <td class="td-num">${fmtBRL(cr.valor)}</td>
+              <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-success" onclick="vincularPagamentoAuditoria(${f.id},${cr.id})" title="Vincular a receita à conta e baixar">${icon('check',16)} Vincular</button>
+                ${btnOK('provPago',[cr.id,f.id])}
+              </td>
+            </tr>`;
+          } else {
+            const o=p.os;
+            return `<tr>
+              <td><b>OS #${o.numero_os}</b> ${badge(o.status)}<br><span class="text-xs">${esc(o.servico||'')}</span></td>
+              <td><b>FX #${f.id}</b><br><span class="text-xs">${fmtData(f.data_movimento)}</span></td>
+              <td>${esc(o.cliente_nome||'')}</td>
+              <td class="td-num">${fmtBRL(f.valor)}</td>
+              <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-primary" onclick="fecharModal();editarLancamento(${f.id})" title="Vincular a receita à OS">Vincular à OS</button>
+                ${btnOK('provPagoOS',[o.id,f.id])}
+              </td>
+            </tr>`;
+          }
+        }).join('')}
       </tbody></table></div>
     </div>`:'';
 
@@ -3427,22 +3474,6 @@ function render_auditoria(){
       </tbody></table></div>
     </div>`:'';
 
-  const cardOsSemReceb=a.osSemReceb.length?`
-    <div class="card" style="border-left:4px solid #E8A020">
-      <div class="card-title">${icon('alert',18)} OS sem recebimento registrado (${a.osSemReceb.length})</div>
-      <p class="text-sm text-muted" style="margin-bottom:10px">OS ativas/finalizadas com valor, mas sem nenhuma conta a receber nem receita vinculada. Confira se o recebimento foi lançado e vinculado.</p>
-      <div class="table-wrap"><table><thead><tr><th>OS</th><th>Cliente</th><th>Serviço</th><th>Status</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
-        ${a.osSemReceb.map(o=>`<tr>
-          <td><b>#${o.numero_os}</b></td>
-          <td>${esc(o.cliente_nome||'')}</td>
-          <td><span class="text-xs">${esc(o.servico||'')}</span></td>
-          <td>${badge(o.status)}</td>
-          <td class="td-num">${fmtBRL(o.valor_total)}</td>
-          <td style="white-space:nowrap"><button class="btn btn-sm btn-primary" onclick="verResultadoOS(${o.id})">Ver OS</button> ${btnOK('osSemRec',[o.id])}</td>
-        </tr>`).join('')}
-      </tbody></table></div>
-    </div>`:'';
-
   const cardFluxoSemOS=a.fluxoSemOS.length?`
     <div class="card" style="border-left:4px solid #2A6DBF">
       <div class="card-title">${icon('alert',18)} Receitas no Fluxo sem vínculo de OS (${a.fluxoSemOS.length})</div>
@@ -3478,7 +3509,6 @@ function render_auditoria(){
   ${cardNaoVinc}
   ${cardDuplicReceber}
   ${cardDuplicFluxo}
-  ${cardOsSemReceb}
   ${cardFluxoSemOS}
   ${a.receberSemOS.length?`<div class="card" style="border-left:4px solid #7B8FA1">
     <div class="card-title">Contas a Receber sem OS vinculada (${a.receberSemOS.length})</div>
@@ -4501,6 +4531,7 @@ function consolidarClientes(){
     const reg = mapa[k];
     reg.cadastro = cad;
     if(!reg.cnpj && _cnpjLimpo(cad.cnpj)) reg.cnpj = _cnpjLimpo(cad.cnpj);
+    if(cad.identificacao||cad.apelido) reg.identificacao = cad.identificacao||cad.apelido;
     if(cad.nome_fantasia) reg.nome_fantasia = cad.nome_fantasia;
     if(cad.cidade) reg.cidade = cad.cidade;
     if(cad.uf) reg.uf = cad.uf;
@@ -4574,7 +4605,7 @@ function render_clientes(){
         <tbody>
           ${lista.length ? lista.map((cl,i)=>`
           <tr>
-            <td><b>${esc(cl.nome)}</b>${cl.cadastro?' <span title="Cadastro completo" style="color:var(--verde)">✓</span>':''}${cl.nome_fantasia?`<br><span class="text-xs text-muted">${esc(cl.nome_fantasia)}</span>`:''}</td>
+            <td><b>${esc(cl.nome)}</b>${cl.identificacao?` <span class="text-xs" style="color:var(--azul2);font-weight:600">(${esc(cl.identificacao)})</span>`:''}${cl.cadastro?' <span title="Cadastro completo" style="color:var(--verde)">✓</span>':''}${cl.nome_fantasia?`<br><span class="text-xs text-muted">${esc(cl.nome_fantasia)}</span>`:''}</td>
             <td><span class="text-xs">${cl.cnpj?esc(fmtCNPJStr(cl.cnpj)):'—'}</span></td>
             <td>${esc(cl.uf||'—')}</td>
             <td class="td-center">${cl.os.length||'—'}</td>
@@ -4722,6 +4753,7 @@ function modalNovoCliente(){
   </div>
   <div class="form-grid">
     <div class="form-group span2"><label>Razão Social *</label><input type="text" id="cli-razao" placeholder="Nome completo da empresa"></div>
+    <div class="form-group span2"><label>Identificação <span class="text-xs text-muted">(p/ diferenciar clientes de mesmo nome, ex: "Posto Megane - Cachoeiro")</span></label><input type="text" id="cli-identificacao" placeholder="Nome que você usa para identificar"></div>
     <div class="form-group span2"><label>Nome Fantasia</label><input type="text" id="cli-fantasia"></div>
     <div class="form-group"><label>Cidade</label><input type="text" id="cli-cidade"></div>
     <div class="form-group"><label>UF</label><input type="text" id="cli-uf" maxlength="2" style="width:80px"></div>
@@ -4757,6 +4789,7 @@ async function salvarCliente(){
   if(!razao){ alert('Informe a Razão Social.'); return; }
   const ok = await sbInsert('clientes', {
     razao_social:  razao,
+    identificacao: document.getElementById('cli-identificacao').value,
     nome_fantasia: document.getElementById('cli-fantasia').value,
     cnpj:          document.getElementById('cli-cnpj').value,
     cidade:        document.getElementById('cli-cidade').value,
@@ -4775,6 +4808,7 @@ function editarCliente(id){
   <div class="form-grid">
     <div class="form-group span2"><label>CNPJ</label><input type="text" id="ecli-cnpj" value="${esc(cl.cnpj||'')}" oninput="fmtCNPJ(this)"></div>
     <div class="form-group span2"><label>Razão Social *</label><input type="text" id="ecli-razao" value="${esc(cl.razao_social||'')}"></div>
+    <div class="form-group span2"><label>Identificação <span class="text-xs text-muted">(p/ diferenciar de mesmo nome)</span></label><input type="text" id="ecli-identificacao" value="${esc(cl.identificacao||cl.apelido||'')}" placeholder="Ex: Posto Megane - Cachoeiro"></div>
     <div class="form-group span2"><label>Nome Fantasia</label><input type="text" id="ecli-fantasia" value="${esc(cl.nome_fantasia||'')}"></div>
     <div class="form-group"><label>Cidade</label><input type="text" id="ecli-cidade" value="${esc(cl.cidade||'')}"></div>
     <div class="form-group"><label>UF</label><input type="text" id="ecli-uf" value="${esc(cl.uf||'')}" maxlength="2" style="width:80px"></div>
@@ -4794,6 +4828,7 @@ async function salvarEditCliente(id){
   const ok = await sbUpdate('clientes', {
     cnpj:          document.getElementById('ecli-cnpj').value,
     razao_social:  razao,
+    identificacao: document.getElementById('ecli-identificacao').value,
     nome_fantasia: document.getElementById('ecli-fantasia').value,
     cidade:        document.getElementById('ecli-cidade').value,
     uf:            document.getElementById('ecli-uf').value,
