@@ -530,6 +530,7 @@ function badge(s){
   const m = {
     'RECEBIDO':'verde','FINALIZADO':'verde','PAGO':'verde','CONCLUÍDA':'verde','OK':'verde',
     'A VENCER':'azul','EM EXECUÇÃO':'azul','EM ABERTO':'azul','CONVERTIDO':'azul',
+    'PARCIAL':'amarelo',
     'EM ATRASO':'vermelho','VENCIDA':'vermelho','RECUSADO':'vermelho',
     'A EXECUTAR':'amarelo','VENCE HOJE':'amarelo','PENDENTE':'amarelo','EM CONVERSA':'cinza',
   };
@@ -1846,8 +1847,16 @@ function verResultadoOS(osId, periodoRateio){
   const porNum =(v)=> v!=null && String(v)===String(o.numero_os);
 
   const recs=D.receber.filter(r=>porId(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
-  const totRecCR=recs.filter(r=>r.status==='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
-  const totAReceber=recs.filter(r=>r.status!=='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
+  const totRecCR=recs.reduce((a,r)=>{
+    if(r.status==='RECEBIDO') return a+Number(r.valor||0);
+    if(r.status==='PARCIAL') return a+Number(r.valor_recebido||0);
+    return a;
+  },0);
+  const totAReceber=recs.reduce((a,r)=>{
+    if(r.status==='RECEBIDO') return a;
+    if(r.status==='PARCIAL') return a+Math.max(0,Number(r.valor||0)-Number(r.valor_recebido||0));
+    return a+Number(r.valor||0);
+  },0);
 
   // Receitas lançadas DIRETO no fluxo de caixa, vinculadas à OS,
   // que NÃO vieram de uma conta a receber (senão contaria duas vezes)
@@ -2101,8 +2110,16 @@ function imprimirResultadoOS(osId){
   const porNum=(v)=> v!=null && String(v)===String(o.numero_os);
 
   const recs=D.receber.filter(r=>porId(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
-  const totRecCR=recs.filter(r=>r.status==='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
-  const totAReceber=recs.filter(r=>r.status!=='RECEBIDO').reduce((a,r)=>a+Number(r.valor||0),0);
+  const totRecCR=recs.reduce((a,r)=>{
+    if(r.status==='RECEBIDO') return a+Number(r.valor||0);
+    if(r.status==='PARCIAL') return a+Number(r.valor_recebido||0);
+    return a;
+  },0);
+  const totAReceber=recs.reduce((a,r)=>{
+    if(r.status==='RECEBIDO') return a;
+    if(r.status==='PARCIAL') return a+Math.max(0,Number(r.valor||0)-Number(r.valor_recebido||0));
+    return a+Number(r.valor||0);
+  },0);
   // Receitas do fluxo vinculadas à OS que não vieram de conta a receber (evita dupla contagem)
   const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA'&&porNum(f.os_id)&&!f.conta_receber_id);
   const totRecFluxo=recFluxo.reduce((a,f)=>a+Number(f.valor||0),0);
@@ -2731,9 +2748,9 @@ function render_receber(){
         <td>${esc(r.cliente_nome||r.cliente||'—')}${_badgeParcela(r.observacao)}</td>
         <td>${esc(r.forma_pagamento||'—')}</td>
         <td>${badge(r.status)}${D.fluxo.some(f=>f.conta_receber_id===r.id)?' <span title="Lançado no Fluxo de Caixa">💰</span>':''}</td>
-        <td class="td-num font-600">${fmtBRL(r.valor)}</td>
+        <td class="td-num font-600">${fmtBRL(r.valor)}${(r.status==='PARCIAL'&&Number(r.valor_recebido))?`<br><span class="text-xs" style="color:#7B5500">recebido ${fmtBRL(r.valor_recebido)} · falta ${fmtBRL(Math.max(0,Number(r.valor)-Number(r.valor_recebido)))}</span>`:''}</td>
         <td style="white-space:nowrap">
-          ${r.status!=='RECEBIDO'?`<button class="btn btn-sm btn-success" onclick="marcarRecebido(${r.id})">${icon('check',16)}</button>`:''}
+          ${r.status!=='RECEBIDO'?`<button class="btn btn-sm btn-success" onclick="marcarRecebido(${r.id})" title="${r.status==='PARCIAL'?'Receber o restante':'Registrar recebimento'}">${icon('check',16)}</button>`:''}
           <button class="btn btn-sm btn-outline btn-icon" onclick="editarReceber(${r.id})" title="Editar">${icon('edit',16)}</button>
           <button class="btn btn-sm btn-danger btn-icon" onclick="deletarReceber(${r.id})">${icon('close',16)}</button>
         </td></tr>`).join('')}
@@ -2771,24 +2788,71 @@ function limparFiltrosReceber(){
 function aplicarFiltroReceber(){ lerFiltro(); render_receber(); }
 function marcarRecebido(id){
   const r=D.receber.find(x=>x.id===id); if(!r)return;
-  const cliente=r.cliente_nome||r.cliente||'', jaNoFluxo=D.fluxo.some(f=>f.conta_receber_id===id);
-  abrirModal('Confirmar Recebimento',`
-    ${alertaBox('info',`Recebimento de <b>${esc(cliente)}</b> — <b>${fmtBRL(r.valor||0)}</b>`)}
-    <div class="form-group"><label>Data do recebimento</label><input type="date" id="rec-data" value="${r.vencimento||r.data_vencimento||hoje()}"></div>
-    <label class="flex flex-center gap-8" style="margin-top:14px;font-size:13px;font-weight:500;color:var(--texto);cursor:pointer">
-      <input type="checkbox" id="rec-fluxo" ${jaNoFluxo?'':'checked'} style="width:auto"> Lançar no Fluxo de Caixa
+  const cliente=r.cliente_nome||r.cliente||'';
+  const total=Number(r.valor||0);
+  const jaRecebido=Number(r.valor_recebido||0);
+  const falta=Math.max(0, total-jaRecebido);
+  abrirModal('Registrar Recebimento',`
+    ${alertaBox('info',`<b>${esc(cliente)}</b><br>
+      Valor total: <b>${fmtBRL(total)}</b> &nbsp;•&nbsp;
+      Já recebido: <b class="verde">${fmtBRL(jaRecebido)}</b> &nbsp;•&nbsp;
+      Falta: <b class="${falta>0?'vermelho':'verde'}">${fmtBRL(falta)}</b>`)}
+    <div class="form-grid">
+      <div class="form-group"><label>Valor recebido agora (R$)</label>
+        <input type="number" id="rec-valor" value="${falta.toFixed(2)}" step="0.01" min="0" max="${total}" oninput="_previewRecParcial(${id})">
+      </div>
+      <div class="form-group"><label>Data do recebimento</label><input type="date" id="rec-data" value="${hoje()}"></div>
+    </div>
+    <div id="rec-preview" style="font-size:12px;color:var(--cinza);margin:-4px 0 10px"></div>
+    <label class="flex flex-center gap-8" style="margin-top:6px;font-size:13px;font-weight:500;color:var(--texto);cursor:pointer">
+      <input type="checkbox" id="rec-fluxo" checked style="width:auto"> Lançar este recebimento no Fluxo de Caixa
     </label>
-    ${jaNoFluxo?alertaBox('warning','⚠️ Esta conta já tem um lançamento vinculado no fluxo. Deixe desmarcado para não duplicar.'):''}
+    <p class="text-xs text-muted" style="margin-top:4px">Desmarque se este valor já foi recebido antes de você começar a usar o sistema (evita lançar no caixa de novo).</p>
   `,
-  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-success" onclick="confirmarRecebido(${id})">${icon('check',16)} Confirmar</button>`);
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-success" onclick="confirmarRecebido(${id})">${icon('check',16)} Registrar</button>`);
+  _previewRecParcial(id);
+}
+// Mostra prévia de quanto vai faltar após o recebimento
+function _previewRecParcial(id){
+  const r=D.receber.find(x=>x.id===id); if(!r)return;
+  const total=Number(r.valor||0), jaRecebido=Number(r.valor_recebido||0);
+  const agora=parseFloat(document.getElementById('rec-valor')?.value)||0;
+  const novoTotal=jaRecebido+agora;
+  const restante=total-novoTotal;
+  const prev=document.getElementById('rec-preview');
+  if(!prev) return;
+  if(agora<=0){ prev.innerHTML=''; return; }
+  if(restante<=0.005){
+    prev.innerHTML=`<span class="verde">✓ Com este valor, a conta fica totalmente QUITADA.</span>`;
+  } else {
+    prev.innerHTML=`Após este recebimento, ainda faltará <b class="vermelho">${fmtBRL(restante)}</b> (a conta fica como PARCIAL).`;
+  }
 }
 async function confirmarRecebido(id){
   const r=D.receber.find(x=>x.id===id); if(!r)return;
   const data=document.getElementById('rec-data').value||hoje();
   const lancar=document.getElementById('rec-fluxo').checked;
   const cliente=r.cliente_nome||r.cliente||'';
-  await sbUpdate('contas_receber',{status:'RECEBIDO'},'id',id);
-  if(lancar) await sbInsert('fluxo_caixa',{data_movimento:data,cliente,tipo:'RECEITA',categoria:'RECEBIMENTO',valor:r.valor||0,mes:parseInt(data.slice(5,7)),ano:parseInt(data.slice(0,4)),conta_receber_id:id});
+  const total=Number(r.valor||0);
+  const jaRecebido=Number(r.valor_recebido||0);
+  const agora=parseFloat(document.getElementById('rec-valor').value)||0;
+  if(agora<=0){alert('Informe o valor recebido.');return;}
+  const novoRecebido=jaRecebido+agora;
+  const quitou=novoRecebido>=total-0.005;
+  // Atualiza o acumulado e o status (RECEBIDO se quitou, senão PARCIAL)
+  await sbUpdate('contas_receber',{
+    valor_recebido:novoRecebido,
+    status: quitou?'RECEBIDO':'PARCIAL'
+  },'id',id);
+  // Lança no fluxo só o valor recebido agora (se marcado)
+  if(lancar){
+    await sbInsert('fluxo_caixa',{
+      data_movimento:data, cliente, tipo:'RECEITA', categoria:'RECEBIMENTO',
+      valor:agora, mes:parseInt(data.slice(5,7)), ano:parseInt(data.slice(0,4)),
+      conta_receber_id:id, cnpj:r.cnpj||'',
+      observacao: quitou?'':'Recebimento parcial'
+    });
+  }
   fecharModal();checkAlertas();nav('receber');
 }
 async function deletarReceber(id){if(!confirm('Excluir?'))return;await sbDelete('contas_receber','id',id);nav('receber');}
@@ -2796,7 +2860,7 @@ async function deletarReceber(id){if(!confirm('Excluir?'))return;await sbDelete(
 function editarReceber(id){
   const r=D.receber.find(x=>x.id===id); if(!r)return;
   const formas=['Pix','Boleto','Cheque','Transferência','À Vista'];
-  const statuses=['A VENCER','VENCE HOJE','EM ATRASO','RECEBIDO'];
+  const statuses=['A VENCER','VENCE HOJE','EM ATRASO','PARCIAL','RECEBIDO'];
   const formaAtual=r.forma_pagamento||'Pix';
   const statusAtual=r.status||'A VENCER';
   const jaNoFluxo=D.fluxo.some(f=>f.conta_receber_id===id);
@@ -2811,7 +2875,9 @@ function editarReceber(id){
         ${osList.map(o=>`<option value="${o.id}" ${r.os_id==o.id?'selected':''}>#${o.numero_os} — ${esc(o.cliente_nome||'')} ${o.servico?'('+esc(o.servico)+')':''}</option>`).join('')}
       </select>
     </div>
-    <div class="form-group"><label>Valor (R$)</label><input type="number" id="ecr-val" value="${r.valor||0}" step="0.01"></div>
+    <div class="form-group"><label>Valor total (R$)</label><input type="number" id="ecr-val" value="${r.valor||0}" step="0.01" oninput="_ecrFalta()"></div>
+    <div class="form-group"><label>Valor já recebido (R$)</label><input type="number" id="ecr-recebido" value="${r.valor_recebido||0}" step="0.01" min="0" oninput="_ecrFalta()"></div>
+    <div class="form-group span2" id="ecr-falta-box" style="font-size:12px;color:var(--cinza);margin-top:-6px"></div>
     <div class="form-group"><label>Vencimento</label><input type="date" id="ecr-venc" value="${(r.vencimento||r.data_vencimento||'').slice(0,10)}"></div>
     <div class="form-group"><label>Forma</label><select id="ecr-forma">${formas.map(f=>`<option ${formaAtual===f?'selected':''}>${f}</option>`).join('')}</select></div>
     <div class="form-group"><label>Status</label><select id="ecr-status">${statuses.map(s=>`<option ${statusAtual===s?'selected':''}>${s}</option>`).join('')}</select></div>
@@ -2820,20 +2886,37 @@ function editarReceber(id){
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
    <button class="btn btn-danger" onclick="deletarReceber(${id})">${icon('trash',16)} Excluir</button>
    <button class="btn btn-primary" onclick="salvarEditReceber(${id})">${icon('check',16)} Salvar</button>`);
+  _ecrFalta();
+}
+// Mostra quanto falta e ajusta sugestão de status na edição
+function _ecrFalta(){
+  const total=parseFloat(document.getElementById('ecr-val')?.value)||0;
+  const receb=parseFloat(document.getElementById('ecr-recebido')?.value)||0;
+  const box=document.getElementById('ecr-falta-box');
+  if(!box) return;
+  const falta=total-receb;
+  if(receb<=0){ box.innerHTML='Sem recebimentos registrados.'; }
+  else if(falta<=0.005){ box.innerHTML='<span class="verde">✓ Totalmente recebido.</span>'; }
+  else { box.innerHTML=`Recebido <b class="verde">${fmtBRL(receb)}</b> · falta <b class="vermelho">${fmtBRL(falta)}</b>`; }
 }
 async function salvarEditReceber(id){
   const cli=document.getElementById('ecr-cli').value.trim();
   const val=parseFloat(document.getElementById('ecr-val').value)||0;
+  const recebido=parseFloat(document.getElementById('ecr-recebido').value)||0;
   const venc=document.getElementById('ecr-venc').value;
   const osId=document.getElementById('ecr-os')?.value || null;
   if(!cli||!val){alert('Informe cliente e valor.');return;}
-  // Descobre qual coluna de vencimento a conta usa (vencimento ou data_vencimento)
+  let status=document.getElementById('ecr-status').value;
+  // Coerência automática: se recebeu tudo → RECEBIDO; se recebeu parte → PARCIAL
+  if(recebido>0 && recebido<val-0.005 && status==='RECEBIDO') status='PARCIAL';
+  if(recebido>=val-0.005 && val>0 && status==='PARCIAL') status='RECEBIDO';
   const r=D.receber.find(x=>x.id===id)||{};
   const dados={
     cliente_nome:cli,
     valor:val,
+    valor_recebido:recebido,
     forma_pagamento:document.getElementById('ecr-forma').value,
-    status:document.getElementById('ecr-status').value,
+    status:status,
     observacao:document.getElementById('ecr-obs').value,
     os_id:osId?parseInt(osId):null
   };
