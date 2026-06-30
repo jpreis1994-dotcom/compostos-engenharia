@@ -715,15 +715,47 @@ async function recalcularStatusVencimentos(){
 
 async function sbInsert(tabela, dados){
   if(typeof exigeOnline==='function' && !exigeOnline()) return false;
-  const {error} = await sb.from(tabela).insert([dados]);
-  if(error){ console.error(tabela, error); alert('Erro ao salvar: '+error.message); return false; }
+  let payload = {...dados};
+  // Tenta inserir; se o banco reclamar de uma coluna que não existe, remove e tenta de novo
+  for(let tentativa=0; tentativa<8; tentativa++){
+    const {error} = await sb.from(tabela).insert([payload]);
+    if(!error) return true;
+    const colFaltante = _colunaInexistente(error.message);
+    if(colFaltante && (colFaltante in payload)){
+      delete payload[colFaltante];
+      console.warn(`Coluna '${colFaltante}' não existe em ${tabela} — salvando sem ela.`);
+      continue;
+    }
+    console.error(tabela, error); alert('Erro ao salvar: '+error.message); return false;
+  }
   return true;
 }
 async function sbUpdate(tabela, dados, coluna, valor){
   if(typeof exigeOnline==='function' && !exigeOnline()) return false;
-  const {error} = await sb.from(tabela).update(dados).eq(coluna, valor);
-  if(error){ console.error(tabela, error); alert('Erro ao atualizar: '+error.message); return false; }
+  let payload = {...dados};
+  for(let tentativa=0; tentativa<8; tentativa++){
+    const {error} = await sb.from(tabela).update(payload).eq(coluna, valor);
+    if(!error) return true;
+    const colFaltante = _colunaInexistente(error.message);
+    if(colFaltante && (colFaltante in payload)){
+      delete payload[colFaltante];
+      console.warn(`Coluna '${colFaltante}' não existe em ${tabela} — atualizando sem ela.`);
+      continue;
+    }
+    console.error(tabela, error); alert('Erro ao atualizar: '+error.message); return false;
+  }
   return true;
+}
+// Detecta, na mensagem de erro do Supabase, o nome da coluna que não existe
+function _colunaInexistente(msg){
+  if(!msg) return null;
+  // Ex: "Could not find the 'email' column of 'clientes' in the schema cache"
+  let m = msg.match(/find the '([^']+)' column/i);
+  if(m) return m[1];
+  // Ex: "column \"email\" of relation \"clientes\" does not exist"
+  m = msg.match(/column "([^"]+)" of relation/i);
+  if(m) return m[1];
+  return null;
 }
 async function sbDelete(tabela, coluna, valor){
   if(typeof exigeOnline==='function' && !exigeOnline()) return false;
@@ -4930,20 +4962,50 @@ function _palavrasEspecificas(nome){
     .filter(w => w.length>2 && !_PALAVRAS_GENERICAS.has(w));
 }
 
+// Distância de edição (Levenshtein) entre duas palavras
+function _distEdicao(a, b){
+  a=String(a); b=String(b);
+  const m=a.length, n=b.length;
+  if(!m) return n; if(!n) return m;
+  let prev=Array.from({length:n+1},(_,i)=>i);
+  for(let i=1;i<=m;i++){
+    let cur=[i];
+    for(let j=1;j<=n;j++){
+      cur[j]=Math.min(
+        prev[j]+1, cur[j-1]+1,
+        prev[j-1]+(a[i-1]===b[j-1]?0:1)
+      );
+    }
+    prev=cur;
+  }
+  return prev[n];
+}
+// Duas palavras são "quase iguais" (ex: wimagran vs wimagram)?
+function _palavrasQuaseIguais(a, b){
+  if(a===b) return true;
+  const dist=_distEdicao(a,b);
+  const maxLen=Math.max(a.length,b.length);
+  if(maxLen<4) return dist===0;          // palavras curtas: exige igualdade
+  // tolera 1 letra diferente em palavras de 4-7; até ~15% em maiores
+  return dist<=Math.max(1, Math.floor(maxLen*0.15));
+}
+
 // Similaridade entre nomes considerando APENAS palavras específicas.
-// Retorna 0 quando não há palavra específica em comum (evita "Auto Posto" genérico).
+// Agora também reconhece palavras quase iguais (1 letra trocada).
 function _similaridadeNomes(a, b){
   const na=_nomeNorm(a), nb=_nomeNorm(b);
   if(!na||!nb) return 0;
   if(na===nb) return 1;
   const pa=_palavrasEspecificas(a);
   const pb=_palavrasEspecificas(b);
-  // Se algum dos dois não tem nenhuma palavra específica, não dá para sugerir por nome
   if(!pa.length || !pb.length) return 0;
-  const sa=new Set(pa), sb=new Set(pb);
-  let comuns=0; sa.forEach(w=>{ if(sb.has(w)) comuns++; });
-  if(comuns===0) return 0; // nenhuma palavra específica em comum → não sugere
-  return comuns/Math.max(sa.size, sb.size);
+  // Conta palavras específicas que casam (iguais OU quase iguais)
+  let comuns=0;
+  pa.forEach(wa=>{
+    if(pb.some(wb=>_palavrasQuaseIguais(wa, wb))) comuns++;
+  });
+  if(comuns===0) return 0;
+  return comuns/Math.max(pa.length, pb.length);
 }
 
 // Detecta grupos para sugerir unificação. Regras:
@@ -5075,14 +5137,25 @@ function modalUnificarClientes(){
     ${cardsSugestoes}
     <hr class="divider">
     <div style="font-size:14px;font-weight:600;color:var(--azul);margin-bottom:8px">Unir manualmente</div>
-    <p class="text-xs text-muted" style="margin-bottom:6px">Escolha 2 ou mais cadastros que são o mesmo cliente:</p>
-    <select id="manual-membros" multiple size="6" style="width:100%;margin-bottom:8px">${opcoesManual}</select>
+    <p class="text-xs text-muted" style="margin-bottom:6px">Digite para filtrar, segure Ctrl/Cmd (ou toque) para escolher 2 ou mais que são o mesmo cliente:</p>
+    <input type="text" id="manual-busca" placeholder="🔍 Filtrar por nome ou CNPJ..." oninput="_filtrarManual()" style="width:100%;margin-bottom:6px">
+    <select id="manual-membros" multiple size="8" style="width:100%;margin-bottom:8px">${opcoesManual}</select>
     <div class="form-group"><label>Nome principal (como vai aparecer)</label><input type="text" id="manual-principal" placeholder="Digite ou copie o nome que ficará"></div>
     <button class="btn btn-sm btn-success" onclick="unificarManual()">${icon('check',16)} Unificar selecionados</button>
     ${jaUnificados}
     ${dispensadas}
   `,
   `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`, true);
+}
+// Filtra as opções da lista manual conforme a busca
+function _filtrarManual(){
+  const termo=(document.getElementById('manual-busca')?.value||'').toLowerCase().trim();
+  const sel=document.getElementById('manual-membros');
+  if(!sel) return;
+  [...sel.options].forEach(opt=>{
+    const txt=opt.textContent.toLowerCase();
+    opt.style.display = (!termo || txt.includes(termo)) ? '' : 'none';
+  });
 }
 
 // Unifica um grupo das sugestões (pega o principal do radio selecionado)
