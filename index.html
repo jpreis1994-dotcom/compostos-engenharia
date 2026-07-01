@@ -912,6 +912,56 @@ function _mesAnterior(ano,mes){let m=parseInt(mes)-1,y=parseInt(ano);if(m<1){m=1
 function _ultimosMeses(ano,mes,n){const arr=[];let y=parseInt(ano),m=parseInt(mes);for(let i=0;i<n;i++){arr.unshift({ano:String(y),mes:String(m).padStart(2,'0')});m--;if(m<1){m=12;y--;}}return arr;}
 function _spark(vals,cor){const w=116,h=32,p=3;const max=Math.max(...vals,0),min=Math.min(...vals,0);if(max===min)return '';const rng=(max-min)||1;const pts=vals.map((v,i)=>{const x=p+i*(w-2*p)/((vals.length-1)||1);const y=h-p-((v-min)/rng)*(h-2*p);return x.toFixed(1)+','+y.toFixed(1);});const poly=pts.join(' ');const id='sg'+Math.random().toString(36).slice(2,7);return `<svg class="kpi-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${cor}" stop-opacity=".22"/><stop offset="1" stop-color="${cor}" stop-opacity="0"/></linearGradient></defs><polygon points="${p},${h-p} ${poly} ${w-p},${h-p}" fill="url(#${id})"/><polyline points="${poly}" fill="none" stroke="${cor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;}
 function _kpiCard(o){const cor=o.cor||'#2A6DBF';const valTxt=(typeof o.valor==='number')?(o.fmt||fmtBRL)(o.valor):o.valor;let foot='';if(o.prev!=null){const atual=Number(o.valor)||0,prev=Number(o.prev)||0;if(!(prev===0&&atual===0)){const pct=prev!==0?(atual-prev)/Math.abs(prev)*100:100;const up=atual>=prev;const good=(o.goodWhenUp!==false)?up:!up;foot=`<div class="kpi-trend ${good?'up':'down'}">${up?'▲':'▼'} ${Math.abs(pct).toFixed(1)}% <span class="kpi-trend-sub">vs mês ant.</span></div>`;}}else if(o.sub){foot=`<div class="kpi-delta">${o.sub}</div>`;}return `<div class="kpi kpi-modern"><div class="kpi-top"><div class="kpi-ico" style="background:${cor}22;color:${cor}">${icon(o.icon,22)}</div>${o.spark||''}</div><div class="kpi-label">${o.label}</div><div class="kpi-val ${o.valClass||''}">${valTxt}</div>${foot}</div>`;}
+// Descobre a cidade/UF de uma OS: 1º do orçamento vinculado, 2º do cadastro do cliente
+function _cidadeDaOS(o){
+  // Do orçamento vinculado
+  if(o.orcamento_id){
+    const orc=D.orcamentos.find(x=>x.id===o.orcamento_id);
+    if(orc && (orc.cli_municipio||orc.cli_uf)){
+      return {cidade:orc.cli_municipio||'', uf:orc.cli_uf||''};
+    }
+  }
+  // Do cadastro do cliente (por nome)
+  const nome=String(o.cliente_nome||'').toLowerCase().trim();
+  const cad=(D.clientes||[]).find(c=>String(c.razao_social||'').toLowerCase().trim()===nome);
+  if(cad && (cad.cidade||cad.uf)) return {cidade:cad.cidade||'', uf:cad.uf||''};
+  // Último recurso: procura um orçamento do mesmo cliente que tenha cidade
+  const orcCli=D.orcamentos.find(x=>String(x.cli_razao||'').toLowerCase().trim()===nome && (x.cli_municipio||x.cli_uf));
+  if(orcCli) return {cidade:orcCli.cli_municipio||'', uf:orcCli.cli_uf||''};
+  return {cidade:'', uf:''};
+}
+
+// Card do dashboard: OS em aberto (a executar / em execução) com cliente e cidade,
+// para o Hugo planejar as rotas de campo.
+function renderOsAbertasParaPlanejamento(){
+  const abertas = D.os
+    .filter(o=>['A EXECUTAR','EM EXECUÇÃO'].includes((o.status||'').toUpperCase()))
+    .map(o=>({...o, _loc:_cidadeDaOS(o)}))
+    // Ordena pela data de abertura (mais antiga primeiro — quem espera há mais tempo)
+    .sort((a,b)=>String(a.data_abertura||'').localeCompare(String(b.data_abertura||'')));
+  if(!abertas.length){
+    return '<p class="text-sm text-muted" style="padding:8px">Nenhuma OS em aberto no momento.</p>';
+  }
+  const total=abertas.reduce((a,o)=>a+Number(o.valor_total||0),0);
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Aberta em</th><th>OS</th><th>Cliente</th><th>📍 Cidade</th><th>Status</th><th class="td-num">Valor</th></tr></thead>
+    <tbody>
+    ${abertas.map(o=>{
+      const cid = o._loc.cidade ? `${esc(o._loc.cidade)}${o._loc.uf?' - '+esc(o._loc.uf):''}` : '<span class="text-muted">—</span>';
+      return `<tr>
+        <td><span class="text-xs">${o.data_abertura?fmtData(o.data_abertura):'—'}</span></td>
+        <td><b>#${o.numero_os}</b></td>
+        <td>${esc(o.cliente_nome||'—')}</td>
+        <td><b>${cid}</b></td>
+        <td>${badge(o.status)}</td>
+        <td class="td-num">${fmtBRL(o.valor_total)}</td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+    <tfoot><tr style="font-weight:700"><td colspan="5">Total em aberto (${abertas.length} OS)</td><td class="td-num">${fmtBRL(total)}</td></tr></tfoot>
+  </table></div>`;
+}
+
 function render_dashboard(){
   const fluxoF  = filtrarPorPeriodo(D.fluxo,   'data_movimento');
   const receberF = filtrarPorPeriodo(D.receber, 'vencimento');
@@ -959,6 +1009,10 @@ function render_dashboard(){
     ${_kpiCard({icon:'wrench',cor:'#1A3C5E',label:'OS em Execução',valor:osExec.length,fmt:v=>String(v),valClass:'azul',sub:'Carteira: '+fmtBRL(osExec.reduce((a,o)=>a+Number(o.valor_total||0),0))})}
     ${_kpiCard({icon:'pagar',cor:'#E8A020',label:'A Pagar (período)',valor:aPagar,valClass:'amarelo'})}
     ${_kpiCard({icon:'orcamentos',cor:'#7B8FA1',label:'Orçamentos Pendentes',valor:D.orcamentos.filter(o=>o.status==='PENDENTE').length,fmt:v=>String(v)})}
+  </div>
+  <div class="card" style="margin-bottom:16px;border-top:3px solid var(--azul)">
+    <div class="card-title">🗺️ OS em aberto por cidade <span class="text-xs text-muted" style="font-weight:400">— para planejar as visitas</span></div>
+    ${renderOsAbertasParaPlanejamento()}
   </div>
   <div class="grid-2">
     <div class="card"><div class="card-title">📊 Receita vs Despesa por Mês</div><canvas id="c-chart-mes" height="170"></canvas></div>
@@ -1052,12 +1106,20 @@ function render_orcamentos(){
         ${[...new Set(D.orcamentos.map(o=>o.tipo_servico).filter(Boolean))].sort().map(s=>`<option>${esc(s)}</option>`).join('')}
       </select>
     </div>
-    <button class="btn btn-sm btn-outline" onclick="document.getElementById('orc-busca').value='';document.getElementById('orc-fserv').value='';aplicarBuscaOrc()" style="align-self:flex-end">✕ Limpar</button>
+    <div class="filter-group">
+      <div class="filter-label">De</div>
+      <input type="date" id="orc-dini" onchange="aplicarBuscaOrc()">
+    </div>
+    <div class="filter-group">
+      <div class="filter-label">Até</div>
+      <input type="date" id="orc-dfim" onchange="aplicarBuscaOrc()">
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="document.getElementById('orc-busca').value='';document.getElementById('orc-fserv').value='';document.getElementById('orc-dini').value='';document.getElementById('orc-dfim').value='';aplicarBuscaOrc()" style="align-self:flex-end">✕ Limpar</button>
   </div>
   <div class="card">
     <div class="table-wrap">
       <table id="tbl-orc"><thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Tipo de Serviço</th><th class="td-num">Total</th><th>Status</th><th>Ações</th></tr></thead>
-      <tbody>${D.orcamentos.map(o=>`<tr data-status="${o.status}" data-busca="${esc(((o.numero||'')+' '+(o.cli_razao||'')+' '+(o.cli_cnpj||'')+' '+(o.tipo_servico||'')).toLowerCase())}" data-serv="${esc(o.tipo_servico||'')}">
+      <tbody>${D.orcamentos.map(o=>`<tr data-status="${o.status}" data-data="${(o.data_emissao||'').slice(0,10)}" data-busca="${esc(((o.numero||'')+' '+(o.cli_razao||'')+' '+(o.cli_cnpj||'')+' '+(o.tipo_servico||'')).toLowerCase())}" data-serv="${esc(o.tipo_servico||'')}">
         <td><b>#${o.numero}</b></td><td>${fmtData(o.data_emissao)}</td>
         <td>${esc(o.cli_razao||'—')}</td><td><span class="text-sm">${esc(o.tipo_servico||'—')}</span></td>
         <td class="td-num">${fmtBRL(o.total)}</td><td>${badge(o.status)}</td>
@@ -1082,6 +1144,8 @@ function filtrarOrc(el,status){
 function aplicarBuscaOrc(){
   const termo=(document.getElementById('orc-busca')?.value||'').toLowerCase().trim();
   const serv=document.getElementById('orc-fserv')?.value||'';
+  const dini=document.getElementById('orc-dini')?.value||'';
+  const dfim=document.getElementById('orc-dfim')?.value||'';
   let visiveis=0;
   document.querySelectorAll('#tbl-orc tbody tr').forEach(tr=>{
     // "APROVADO" engloba orçamentos antigos marcados como CONVERTIDO
@@ -1090,7 +1154,11 @@ function aplicarBuscaOrc(){
                      (_orcStatusFiltro==='APROVADO' && st==='CONVERTIDO');
     const okBusca  = !termo || (tr.dataset.busca||'').includes(termo);
     const okServ   = !serv  || tr.dataset.serv===serv;
-    const mostra = okStatus && okBusca && okServ;
+    // Filtro de intervalo de data (compara string YYYY-MM-DD)
+    const dataOrc  = tr.dataset.data||'';
+    const okDini   = !dini || (dataOrc && dataOrc>=dini);
+    const okDfim   = !dfim || (dataOrc && dataOrc<=dfim);
+    const mostra = okStatus && okBusca && okServ && okDini && okDfim;
     tr.style.display = mostra?'':'none';
     if(mostra) visiveis++;
   });
@@ -1278,7 +1346,7 @@ function modalNovoOrcamento(editId){
 
   <div class="item-total-bar" style="background:var(--azul);color:white;font-size:15px;margin-top:8px">TOTAL GERAL: <span id="orc-total-val">R$ 0,00</span></div>
   <div class="form-group" style="margin-top:8px"><label>Observações adicionais</label><textarea id="orc-obs" rows="2"></textarea></div>`,
-  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarOrcamento(${editId||'null'})">${icon('check',16)} ${ed?'Salvar Alterações':'Salvar Orçamento'}</button>`,true);
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>${ed?`<button class="btn btn-success" onclick="salvarOrcamento(${editId},true)">${icon('check',16)} Salvar e Aprovar</button>`:''}<button class="btn btn-primary" onclick="salvarOrcamento(${editId||'null'})">${icon('check',16)} ${ed?'Salvar Alterações':'Salvar Orçamento'}</button>`,true);
 
   if(ed){
     // Pré-preenche todos os campos do orçamento em edição
@@ -1452,7 +1520,7 @@ function coletarItensOrc(){
   });
   return itens;
 }
-async function salvarOrcamento(editId){
+async function salvarOrcamento(editId, aprovarDepois){
   const razao=document.getElementById('orc-razao').value.trim();
   if(!razao){alert('Informe a Razão Social.');return;}
   const servicos=coletarItensOrc();
@@ -1486,12 +1554,22 @@ async function salvarOrcamento(editId){
   if(editId){
     // Edição: atualiza o orçamento existente (mantém status e data de criação)
     ok=await sbUpdate('orcamentos',dados,'id',editId);
+    // Atualiza o cache local para a aprovação enxergar os dados novos
+    if(ok){ const oc=D.orcamentos.find(x=>x.id===editId); if(oc) Object.assign(oc, dados); }
   } else {
     dados.status='PENDENTE';
     dados.criado_em=new Date().toISOString();
     ok=await sbInsert('orcamentos',dados);
   }
-  if(ok){fecharModal();nav('orcamentos');}
+  if(ok){
+    fecharModal();
+    if(editId && aprovarDepois){
+      // Salva e já aprova (gera a OS) em seguida
+      await aprovarOrc(editId);
+    } else {
+      nav('orcamentos');
+    }
+  }
 }
 
 async function buscarCNPJReal(){
@@ -3929,6 +4007,7 @@ function render_relatorios(){
   c.innerHTML=`
   <div class="tabs" style="margin-bottom:4px">
     <div class="tab active" id="reltab-reuniao" onclick="relTab('reuniao')">📋 Resumo p/ Reunião</div>
+    <div class="tab" id="reltab-operacional" onclick="relTab('operacional')">📆 Resultado do Mês</div>
     <div class="tab" id="reltab-financeiro" onclick="relTab('financeiro')">💰 Financeiro</div>
     <div class="tab" id="reltab-rentab" onclick="relTab('rentab')">📊 Rentabilidade</div>
     <div class="tab" id="reltab-clientes" onclick="relTab('clientes')">👥 Clientes</div>
@@ -3986,13 +4065,214 @@ function render_relatorios(){
   <div class="rel-pane" id="relpane-rentab" style="display:none">${relRentabilidade()}</div>
   <div class="rel-pane" id="relpane-clientes" style="display:none">${relClientes()}</div>
   <div class="rel-pane" id="relpane-laudos" style="display:none">${relLaudos()}</div>
+  <div class="rel-pane" id="relpane-operacional" style="display:none"></div>
   <div class="rel-pane" id="relpane-reuniao">${relReuniao()}</div>`;
+  // Inicializa o relatório operacional com o mês atual
+  _relOpAno = new Date().getFullYear();
+  _relOpMes = new Date().getMonth()+1;
+  renderResultadoOperacional();
 }
 function relTab(name){
-  ['reuniao','financeiro','rentab','clientes','laudos'].forEach(n=>{
-    document.getElementById('relpane-'+n).style.display = n===name?'':'none';
-    document.getElementById('reltab-'+n).classList.toggle('active', n===name);
+  ['reuniao','operacional','financeiro','rentab','clientes','laudos'].forEach(n=>{
+    const pane=document.getElementById('relpane-'+n);
+    const tab=document.getElementById('reltab-'+n);
+    if(pane) pane.style.display = n===name?'':'none';
+    if(tab) tab.classList.toggle('active', n===name);
   });
+}
+
+// ══════════════════════════════════════════════════════════════
+// RELATÓRIO — RESULTADO OPERACIONAL DO MÊS
+// ══════════════════════════════════════════════════════════════
+let _relOpAno, _relOpMes;
+function relOpMudar(){
+  _relOpAno = parseInt(document.getElementById('relop-ano').value);
+  _relOpMes = parseInt(document.getElementById('relop-mes').value);
+  renderResultadoOperacional();
+}
+function renderResultadoOperacional(){
+  const pane=document.getElementById('relpane-operacional');
+  if(!pane) return;
+  const ano=_relOpAno, mes=_relOpMes;
+  const mesStr=String(mes).padStart(2,'0');
+  const noMes = d => { const s=String(d||'').slice(0,10); return s.slice(0,4)===String(ano) && s.slice(5,7)===mesStr; };
+
+  // ── Receitas e despesas do fluxo no mês ──
+  const receitas = D.fluxo.filter(f=>f.tipo==='RECEITA' && noMes(f.data_movimento));
+  const despesas = D.fluxo.filter(f=>f.tipo==='DESPESA' && noMes(f.data_movimento));
+  const totRec = receitas.reduce((a,f)=>a+Number(f.valor||0),0);
+  const totDesp = despesas.reduce((a,f)=>a+Number(f.valor||0),0);
+  const resultado = totRec - totDesp;
+  const margem = totRec ? (resultado/totRec*100) : 0;
+
+  // ── Serviços por resultado (receita − despesa vinculada, por categoria de receita) ──
+  const porServico = {};
+  receitas.forEach(f=>{
+    const k = f.categoria || f.tipo_servico || 'Sem categoria';
+    if(!porServico[k]) porServico[k]={rec:0,n:0};
+    porServico[k].rec += Number(f.valor||0);
+    porServico[k].n++;
+  });
+  const servicosRows = Object.entries(porServico).sort((a,b)=>b[1].rec-a[1].rec);
+
+  // ── Despesas por categoria ──
+  const porDesp = {};
+  despesas.forEach(f=>{
+    const k = f.categoria || 'Outras';
+    if(!porDesp[k]) porDesp[k]=0;
+    porDesp[k]+=Number(f.valor||0);
+  });
+  const despRows = Object.entries(porDesp).sort((a,b)=>b[1]-a[1]);
+
+  // ── Top clientes (por receita recebida no mês) ──
+  const porCliente = {};
+  receitas.forEach(f=>{
+    const k = (f.cliente||'—').trim()||'—';
+    if(!porCliente[k]) porCliente[k]={valor:0,n:0};
+    porCliente[k].valor += Number(f.valor||0);
+    porCliente[k].n++;
+  });
+  const clientesRows = Object.entries(porCliente).sort((a,b)=>b[1].valor-a[1].valor).slice(0,10);
+
+  // ── OS abertas no período (independente de recebimento) ──
+  const osAbertas = D.os.filter(o=>noMes(o.data_abertura));
+  const valorOSAbertas = osAbertas.reduce((a,o)=>a+Number(o.valor_total||0),0);
+  // ── Serviços realizados no mês (OS abertas OU finalizadas no período) ──
+  const osNoMes = D.os.filter(o=>noMes(o.data_abertura)||noMes(o.data_finalizacao));
+  const osFinalizadas = osNoMes.filter(o=>(o.status||'').toUpperCase()==='FINALIZADO');
+  const carteiraOSMes = osNoMes.reduce((a,o)=>a+Number(o.valor_total||0),0);
+
+  // ── Recebimentos do mês (contas a receber baixadas no período, via fluxo) ──
+  const nRecebimentos = receitas.length;
+
+  const anos = [...new Set(D.fluxo.map(f=>String(f.data_movimento||'').slice(0,4)).filter(Boolean))].sort().reverse();
+  if(!anos.includes(String(ano))) anos.unshift(String(ano));
+
+  pane.innerHTML = `
+  <div class="card" style="background:linear-gradient(135deg,#1A3C5E,#2A6DBF);color:white">
+    <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:12px;opacity:.85">Resultado Operacional</div>
+        <div style="font-size:20px;font-weight:700">${MESES[mes]} / ${ano}</div>
+      </div>
+      <div class="flex gap-8">
+        <select id="relop-mes" onchange="relOpMudar()" style="padding:6px 10px;border-radius:6px;border:none">
+          ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mes?'selected':''}>${MESES[m]}</option>`).join('')}
+        </select>
+        <select id="relop-ano" onchange="relOpMudar()" style="padding:6px 10px;border-radius:6px;border:none">
+          ${anos.map(a=>`<option value="${a}" ${String(a)===String(ano)?'selected':''}>${a}</option>`).join('')}
+        </select>
+        <button class="btn btn-sm" style="background:white;color:var(--azul)" onclick="imprimirResultadoOperacional()">${icon('print',16)} Imprimir</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-4" style="margin-bottom:14px">
+    <div class="kpi kpi-modern" style="border-left:4px solid #1A8F5A">
+      <div class="kpi-label">Recebido no mês</div>
+      <div class="kpi-val verde">${fmtBRL(totRec)}</div>
+      <div class="kpi-delta">${nRecebimentos} recebimento(s)</div>
+    </div>
+    <div class="kpi kpi-modern" style="border-left:4px solid #D64045">
+      <div class="kpi-label">Despesas no mês</div>
+      <div class="kpi-val vermelho">${fmtBRL(totDesp)}</div>
+      <div class="kpi-delta">${despesas.length} lançamento(s)</div>
+    </div>
+    <div class="kpi kpi-modern" style="border-left:4px solid ${resultado>=0?'#1A8F5A':'#D64045'}">
+      <div class="kpi-label">Resultado (caixa)</div>
+      <div class="kpi-val ${resultado>=0?'verde':'vermelho'}">${fmtBRL(resultado)}</div>
+      <div class="kpi-delta">margem ${margem.toFixed(1)}%</div>
+    </div>
+    <div class="kpi kpi-modern" style="border-left:4px solid #2A6DBF">
+      <div class="kpi-label">OS abertas no mês</div>
+      <div class="kpi-val">${osAbertas.length}</div>
+      <div class="kpi-delta">${fmtBRL(valorOSAbertas)} em serviços</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🏆 Serviços com melhor resultado</div>
+      ${servicosRows.length?`<div class="table-wrap"><table>
+        <thead><tr><th>Serviço / Categoria</th><th class="td-num">Recebido</th><th class="td-num">Qtd</th><th class="td-num">% do total</th></tr></thead>
+        <tbody>${servicosRows.map(([s,v])=>`<tr>
+          <td>${esc(s)}</td>
+          <td class="td-num verde">${fmtBRL(v.rec)}</td>
+          <td class="td-num">${v.n}</td>
+          <td class="td-num">${totRec?(v.rec/totRec*100).toFixed(1)+'%':'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`:'<p class="text-sm text-muted">Nenhuma receita no período.</p>'}
+    </div>
+    <div class="card">
+      <div class="card-title">👥 Clientes que mais contribuíram</div>
+      ${clientesRows.length?`<div class="table-wrap"><table>
+        <thead><tr><th>Cliente</th><th class="td-num">Recebido</th><th class="td-num">%</th></tr></thead>
+        <tbody>${clientesRows.map(([cli,v])=>`<tr>
+          <td>${esc(cli)}</td>
+          <td class="td-num verde">${fmtBRL(v.valor)}</td>
+          <td class="td-num">${totRec?(v.valor/totRec*100).toFixed(1)+'%':'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`:'<p class="text-sm text-muted">Nenhum recebimento no período.</p>'}
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">💸 Despesas por categoria</div>
+      ${despRows.length?`<div class="table-wrap"><table>
+        <thead><tr><th>Categoria</th><th class="td-num">Valor</th><th class="td-num">% desp.</th></tr></thead>
+        <tbody>${despRows.map(([s,v])=>`<tr>
+          <td>${esc(s)}</td>
+          <td class="td-num vermelho">${fmtBRL(v)}</td>
+          <td class="td-num">${totDesp?(v/totDesp*100).toFixed(1)+'%':'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`:'<p class="text-sm text-muted">Nenhuma despesa no período.</p>'}
+    </div>
+    <div class="card">
+      <div class="card-title">🔧 OS abertas no mês</div>
+      <p class="text-xs text-muted" style="margin:-4px 0 8px">Ordens de serviço abertas no período e seu valor total — independente de já ter sido recebido.</p>
+      ${osAbertas.length?`<div class="table-wrap"><table>
+        <thead><tr><th>OS</th><th>Cliente</th><th>Status</th><th class="td-num">Valor</th></tr></thead>
+        <tbody>${osAbertas.sort((a,b)=>(b.numero_os||0)-(a.numero_os||0)).map(o=>`<tr>
+          <td><b>#${o.numero_os}</b></td>
+          <td>${esc(o.cliente_nome||'—')}</td>
+          <td>${badge(o.status)}</td>
+          <td class="td-num">${fmtBRL(o.valor_total)}</td>
+        </tr>`).join('')}</tbody>
+        <tfoot><tr style="font-weight:700"><td colspan="3">Total (${osAbertas.length} OS)</td><td class="td-num">${fmtBRL(valorOSAbertas)}</td></tr></tfoot>
+      </table></div>`:'<p class="text-sm text-muted">Nenhuma OS aberta no período.</p>'}
+    </div>
+  </div>`;
+}
+
+// Versão imprimível do relatório operacional
+function imprimirResultadoOperacional(){
+  const pane=document.getElementById('relpane-operacional');
+  if(!pane) return;
+  const win=window.open('','_blank');
+  if(!win){ alert('Permita pop-ups para imprimir.'); return; }
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Resultado Operacional — ${MESES[_relOpMes]}/${_relOpAno}</title>
+  <style>
+    *{font-family:Arial,sans-serif;box-sizing:border-box}
+    body{margin:0;padding:24px;color:#111;font-size:12px}
+    h1{color:#1A3C5E;font-size:18px;margin:0 0 4px}
+    .sub{color:#666;font-size:12px;margin-bottom:16px}
+    table{width:100%;border-collapse:collapse;margin-bottom:16px}
+    th,td{border:1px solid #ccc;padding:5px 8px;font-size:11px;text-align:left}
+    th{background:#e8edf3}
+    .td-num{text-align:right}
+    .card-title{font-weight:bold;color:#1A3C5E;margin:14px 0 6px;font-size:13px}
+    .verde{color:#1A8F5A}.vermelho{color:#D64045}
+    @media print{.noprint{display:none}}
+  </style></head><body>
+  <h1>H. Veloso Soares Compostos Engenharia & Manutenção</h1>
+  <div class="sub">Resultado Operacional — ${MESES[_relOpMes]} de ${_relOpAno} · gerado em ${fmtData(hoje())}</div>
+  ${pane.innerHTML.replace(/<select[\s\S]*?<\/select>/g,'').replace(/<button[\s\S]*?<\/button>/g,'')}
+  <div class="noprint" style="text-align:center;margin-top:16px">
+    <button onclick="window.print()" style="background:#1A3C5E;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer">🖨️ Imprimir / Salvar PDF</button>
+  </div>
+  </body></html>`);
+  win.document.close();
 }
 // ── Relatório consolidado para a reunião de alinhamento (Hugo) ──
 function montarResumoSemanal(){
