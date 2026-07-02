@@ -7,7 +7,7 @@
 // IMPORTANTE: ao publicar uma nova versão do sistema, troque o número
 // abaixo (v1 -> v2 -> v3...). Isso força o app a baixar o código novo
 // e descartar o antigo — evita duplicidade/código velho em cache.
-const CACHE_VERSION = 'erp-compostos-v43';
+const CACHE_VERSION = 'erp-compostos-v45';
 
 // Arquivos do "casco" do app (interface). NÃO inclui dados do Supabase.
 const ASSETS = [
@@ -59,6 +59,10 @@ self.addEventListener('fetch', (event) => {
 
   const url = req.url;
 
+  // Ignora esquemas que não dá pra cachear (extensões do Chrome, data:, blob:, etc.)
+  // Só tratamos requisições http(s). Isso evita o erro "Request scheme 'chrome-extension' is unsupported".
+  if (!url.startsWith('http')) return;
+
   // Dados dinâmicos (Supabase, APIs): SEMPRE rede, nunca cache.
   // Se offline, deixa falhar normalmente — o app trata o erro e avisa o usuário.
   if (ehRedeDinamica(url)) {
@@ -70,9 +74,13 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(req)
       .then(resp => {
-        // Atualiza o cache com a versão fresca
-        const copia = resp.clone();
-        caches.open(CACHE_VERSION).then(cache => cache.put(req, copia));
+        // Só cacheia respostas válidas do mesmo esquema http(s)
+        if (resp && resp.ok && req.url.startsWith('http')) {
+          const copia = resp.clone();
+          caches.open(CACHE_VERSION).then(cache => {
+            try { cache.put(req, copia); } catch(e) { /* ignora esquemas não suportados */ }
+          });
+        }
         return resp;
       })
       .catch(() => caches.match(req).then(c => c || caches.match('./index.html')))
