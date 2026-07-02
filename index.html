@@ -5198,6 +5198,7 @@ function _aplicarGruposClientes(lista){
     const g = membroParaGrupo[_nomeNorm(reg.nome)];
     if(!g){ resultado.push(reg); return; }
     const gid = g.id || g.nome_principal;
+    const ehPrincipal = _nomeNorm(reg.nome)===_nomeNorm(g.nome_principal);
     if(!fundidos[gid]){
       // Cria o registro fundido baseado neste, mas com o nome principal
       fundidos[gid] = { ...reg,
@@ -5212,12 +5213,17 @@ function _aplicarGruposClientes(lista){
       f.os.push(...reg.os); f.orcamentos.push(...reg.orcamentos);
       f.receber.push(...reg.receber); f.fluxo.push(...reg.fluxo);
       f.faturado+=reg.faturado; f.emAberto+=reg.emAberto; f.recebido+=reg.recebido; f.carteiraOS+=reg.carteiraOS;
-      if(!f.cnpj && reg.cnpj) f.cnpj=reg.cnpj;
-      if(!f.cadastro && reg.cadastro) f.cadastro=reg.cadastro;
-      if(!f.codigo && reg.codigo) f.codigo=reg.codigo;
-      if(!f.identificacao && reg.identificacao) f.identificacao=reg.identificacao;
       f._membros.push(reg.nome);
     }
+    // Enriquecimento: qualquer membro pode fornecer CNPJ/cadastro/código que falte no fundido.
+    // O membro que é o PRINCIPAL tem prioridade nos dados de identificação.
+    const f = fundidos[gid];
+    if(reg.cnpj && (!f.cnpj || ehPrincipal)) f.cnpj=reg.cnpj;
+    if(reg.cadastro && (!f.cadastro || ehPrincipal)) f.cadastro=reg.cadastro;
+    if(reg.codigo && (!f.codigo || ehPrincipal)) f.codigo=reg.codigo;
+    if(reg.identificacao && (!f.identificacao || ehPrincipal)) f.identificacao=reg.identificacao;
+    if(reg.uf && (!f.uf || ehPrincipal)) f.uf=reg.uf;
+    if(reg.cidade && (!f.cidade || ehPrincipal)) f.cidade=reg.cidade;
   });
   return resultado;
 }
@@ -5329,24 +5335,21 @@ function _foiDispensado(chave){
 // Marca um grupo de sugestão como "não unificar" (não volta a sugerir)
 async function dispensarSugestao(nomes){
   const chave=_chaveDispensa(nomes);
-  D.cli_dispensados=D.cli_dispensados||[];
   if(!_foiDispensado(chave)){
-    D.cli_dispensados.push({chave});
-    try { await sbInsert('clientes_dispensados',{chave, criado_em:new Date().toISOString()}); }
-    catch(e){ /* tabela pode não existir; mantém em memória nesta sessão */ }
+    await sbInsert('clientes_dispensados',{chave, criado_em:new Date().toISOString()});
+    await carregarTudo();
   }
   // Reabre a tela para refletir
   modalUnificarClientes();
 }
 // Desfaz uma dispensa ("não unificar") — a sugestão volta a aparecer
 async function reverterDispensa(chave){
-  D.cli_dispensados=(D.cli_dispensados||[]).filter(d=>d.chave!==chave);
   try {
-    const item=(D.cli_dispensados_raw||[]).find(d=>d.chave===chave);
     // Busca o id no banco para apagar
     const achado=await sb.from('clientes_dispensados').select('id').eq('chave',chave).maybeSingle();
     if(achado&&achado.data&&achado.data.id) await sbDelete('clientes_dispensados','id',achado.data.id);
-  } catch(e){ /* mantém só em memória se não der */ }
+  } catch(e){ /* ignora se não achar */ }
+  await carregarTudo();
   modalUnificarClientes();
 }
 
@@ -5463,13 +5466,14 @@ async function _salvarGrupoUnificacao(principal, membros){
     membros: JSON.stringify(membros),
     criado_em: new Date().toISOString()
   });
-  if(ok){ fecharModal(); nav('clientes'); }
+  if(ok){ await carregarTudo(); modalUnificarClientes(); }
   else alert('Não foi possível salvar. Rode o SQL da tabela clientes_grupos (veja instruções).');
 }
 
 async function desfazerUnificacao(id, nomePrincipal){
   if(id){ await sbDelete('clientes_grupos','id',id); }
-  fecharModal(); nav('clientes');
+  await carregarTudo();
+  modalUnificarClientes();
 }
 
 function render_clientes(){
@@ -5712,14 +5716,35 @@ async function buscarCNPJCliente(){
   } catch(e) { alert('Erro ao consultar CNPJ. Preencha manualmente.'); }
 }
 
+// Busca CNPJ na edição — preenche os campos ecli- (completa o cadastro, NÃO cria outro)
+async function buscarCNPJEditCliente(){
+  const cnpj = document.getElementById('ecli-cnpj').value.replace(/\D/g,'');
+  if(cnpj.length !== 14){ alert('Digite os 14 dígitos do CNPJ.'); return; }
+  try {
+    const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+    const d = await r.json();
+    if(d.razao_social){
+      // Só preenche o que estiver vazio (não sobrescreve o que você já ajustou)
+      const setSeVazio=(id,v)=>{ const e=document.getElementById(id); if(e&&v&&!e.value.trim()) e.value=v; };
+      setSeVazio('ecli-fantasia', d.nome_fantasia||'');
+      setSeVazio('ecli-cidade', d.municipio||'');
+      setSeVazio('ecli-uf', d.uf||'');
+      setSeVazio('ecli-tel', d.ddd_telefone_1||'');
+      setSeVazio('ecli-email', d.email||'');
+      setSeVazio('ecli-end', `${d.logradouro||''} ${d.numero||''} ${d.bairro||''}`.trim());
+      alert('Dados encontrados! Confira e clique em Salvar para atualizar este cadastro.');
+    } else { alert('CNPJ não localizado. Preencha manualmente.'); }
+  } catch(e) { alert('Erro ao consultar CNPJ. Preencha manualmente.'); }
+}
+
 async function salvarCliente(){
   const razao = document.getElementById('cli-razao').value.trim();
   if(!razao){ alert('Informe a Razão Social.'); return; }
   const tipo = document.getElementById('cli-tipo')?.value || 'cliente';
-  const ok = await sbInsert('clientes', {
+  const cnpjDigitado = (document.getElementById('cli-cnpj').value||'').replace(/\D/g,'');
+  const dados = {
     razao_social:  razao,
     tipo_cadastro: tipo,
-    codigo:        _gerarCodigoCliente(tipo),
     identificacao: document.getElementById('cli-identificacao').value,
     nome_fantasia: document.getElementById('cli-fantasia').value,
     cnpj:          document.getElementById('cli-cnpj').value,
@@ -5729,8 +5754,26 @@ async function salvarCliente(){
     email:         document.getElementById('cli-email').value,
     endereco:      document.getElementById('cli-end').value,
     observacoes:   document.getElementById('cli-obs').value,
-  });
-  if(ok){ fecharModal(); nav('clientes'); }
+  };
+  // Evita duplicar: se já existe uma FICHA com o mesmo CNPJ ou mesma razão social, atualiza ela
+  let existente = null;
+  if(cnpjDigitado){
+    existente = (D.clientes||[]).find(c=>String(c.cnpj||'').replace(/\D/g,'')===cnpjDigitado);
+  }
+  if(!existente){
+    existente = (D.clientes||[]).find(c=>_nomeNorm(c.razao_social)===_nomeNorm(razao));
+  }
+  let ok;
+  if(existente){
+    // Já existe ficha: completa/atualiza (não cria outra). Mantém o código se já tiver.
+    if(!existente.codigo) dados.codigo = _gerarCodigoCliente(tipo);
+    ok = await sbUpdate('clientes', dados, 'id', existente.id);
+    if(ok) alert('Este cliente já tinha uma ficha — os dados foram atualizados nela (não criei outra).');
+  } else {
+    dados.codigo = _gerarCodigoCliente(tipo);
+    ok = await sbInsert('clientes', dados);
+  }
+  if(ok){ fecharModal(); await carregarTudo(); nav('clientes'); }
 }
 
 // Gera o próximo código sequencial (CLI-001, FOR-001) conforme o tipo
@@ -5759,7 +5802,12 @@ function editarCliente(id){
         <option value="ambos" ${tipoAtual==='ambos'?'selected':''}>Ambos (cliente e fornecedor)</option>
       </select>
     </div>
-    <div class="form-group span2"><label>CNPJ</label><input type="text" id="ecli-cnpj" value="${esc(cl.cnpj||'')}" oninput="fmtCNPJ(this)"></div>
+    <div class="form-group span2"><label>CNPJ</label>
+      <div class="flex gap-8 flex-center">
+        <input type="text" id="ecli-cnpj" value="${esc(cl.cnpj||'')}" oninput="fmtCNPJ(this)" style="flex:1">
+        <button class="btn btn-outline btn-sm" onclick="buscarCNPJEditCliente()">${icon('search',14)} Buscar na Receita</button>
+      </div>
+    </div>
     <div class="form-group span2"><label>Razão Social *</label><input type="text" id="ecli-razao" value="${esc(cl.razao_social||'')}"></div>
     <div class="form-group span2"><label>Identificação <span class="text-xs text-muted">(p/ diferenciar de mesmo nome)</span></label><input type="text" id="ecli-identificacao" value="${esc(cl.identificacao||cl.apelido||'')}" placeholder="Ex: Posto Megane - Cachoeiro"></div>
     <div class="form-group span2"><label>Nome Fantasia</label><input type="text" id="ecli-fantasia" value="${esc(cl.nome_fantasia||'')}"></div>
@@ -5796,7 +5844,7 @@ async function salvarEditCliente(id){
   // Se não tinha código ainda, gera um agora conforme o tipo
   if(!cl.codigo) dados.codigo = _gerarCodigoCliente(tipo);
   const ok = await sbUpdate('clientes', dados, 'id', id);
-  if(ok){ fecharModal(); nav('clientes'); }
+  if(ok){ fecharModal(); await carregarTudo(); nav('clientes'); }
 }
 
 async function deletarCliente(id){
