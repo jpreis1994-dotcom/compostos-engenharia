@@ -5320,7 +5320,12 @@ function gerarPDFOrcamento(id){
 // Normaliza CNPJ (só dígitos)
 function _cnpjLimpo(v){ return String(v||'').replace(/\D/g,''); }
 // Normaliza nome para comparação (minúsculo, sem espaços extras)
-function _nomeNorm(v){ return String(v||'').toLowerCase().trim().replace(/\s+/g,' '); }
+function _nomeNorm(v){
+  return String(v||'').toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')  // remove acentos (í→i)
+    .replace(/[.,\/\-]/g,' ')                          // pontuação vira espaço
+    .replace(/\s+/g,' ').trim();                       // espaços múltiplos
+}
 
 // Monta a lista consolidada de clientes a partir de todas as fontes
 function consolidarClientes(){
@@ -5452,48 +5457,69 @@ function consolidarClientes(){
 // Funde os registros que o usuário marcou como "mesmo cliente"
 function _aplicarGruposClientes(lista){
   const grupos = D.cli_grupos||[];
-  if(!grupos.length) return lista;
   // Mapa: membro (normalizado) -> grupo
   const membroParaGrupo = {};
   grupos.forEach(g=>{
     let membros=[];
     try { membros = Array.isArray(g.membros)?g.membros:JSON.parse(g.membros||'[]'); } catch(e){ membros=[]; }
     membros.forEach(m=>{ membroParaGrupo[_nomeNorm(m)] = g; });
+    // O nome principal também pertence ao grupo
+    membroParaGrupo[_nomeNorm(g.nome_principal)] = membroParaGrupo[_nomeNorm(g.nome_principal)] || g;
   });
-  const fundidos = {}; // id do grupo -> registro fundido
+  const fundidos = {}; // chave do grupo -> registro fundido
   const resultado = [];
-  lista.forEach(reg=>{
-    const g = membroParaGrupo[_nomeNorm(reg.nome)];
-    if(!g){ resultado.push(reg); return; }
-    const gid = g.id || g.nome_principal;
-    const ehPrincipal = _nomeNorm(reg.nome)===_nomeNorm(g.nome_principal);
-    if(!fundidos[gid]){
-      // Cria o registro fundido baseado neste, mas com o nome principal
-      fundidos[gid] = { ...reg,
-        nome: g.nome_principal || reg.nome,
-        _unificado:true, _membros:[reg.nome],
-        os:[...reg.os], orcamentos:[...reg.orcamentos], receber:[...reg.receber], fluxo:[...reg.fluxo]
-      };
-      resultado.push(fundidos[gid]);
-    } else {
-      // Funde os dados neste grupo
-      const f = fundidos[gid];
-      f.os.push(...reg.os); f.orcamentos.push(...reg.orcamentos);
-      f.receber.push(...reg.receber); f.fluxo.push(...reg.fluxo);
-      f.faturado+=reg.faturado; f.emAberto+=reg.emAberto; f.recebido+=reg.recebido; f.carteiraOS+=reg.carteiraOS;
-      f._membros.push(reg.nome);
-    }
-    // Enriquecimento: qualquer membro pode fornecer CNPJ/cadastro/código que falte no fundido.
-    // O membro que é o PRINCIPAL tem prioridade nos dados de identificação.
-    const f = fundidos[gid];
+  const fundir = (f, reg, ehPrincipal)=>{
+    f.os.push(...reg.os); f.orcamentos.push(...reg.orcamentos);
+    f.receber.push(...reg.receber); f.fluxo.push(...reg.fluxo);
+    f.faturado+=reg.faturado; f.emAberto+=reg.emAberto; f.recebido+=reg.recebido; f.carteiraOS+=reg.carteiraOS;
+    f._membros=(f._membros||[]); if(!f._membros.includes(reg.nome)) f._membros.push(reg.nome);
     if(reg.cnpj && (!f.cnpj || ehPrincipal)) f.cnpj=reg.cnpj;
     if(reg.cadastro && (!f.cadastro || ehPrincipal)) f.cadastro=reg.cadastro;
     if(reg.codigo && (!f.codigo || ehPrincipal)) f.codigo=reg.codigo;
     if(reg.identificacao && (!f.identificacao || ehPrincipal)) f.identificacao=reg.identificacao;
     if(reg.uf && (!f.uf || ehPrincipal)) f.uf=reg.uf;
     if(reg.cidade && (!f.cidade || ehPrincipal)) f.cidade=reg.cidade;
+  };
+  lista.forEach(reg=>{
+    const g = membroParaGrupo[_nomeNorm(reg.nome)];
+    if(!g){ resultado.push(reg); return; }
+    // CORREÇÃO: o identificador do grupo é o NOME PRINCIPAL normalizado.
+    // Assim, grupos repetidos (várias tentativas de unificar o mesmo cliente)
+    // fundem TODOS no mesmo registro, em vez de criar linhas duplicadas.
+    const gid = 'grp:'+_nomeNorm(g.nome_principal);
+    const ehPrincipal = _nomeNorm(reg.nome)===_nomeNorm(g.nome_principal);
+    if(!fundidos[gid]){
+      fundidos[gid] = { ...reg,
+        nome: g.nome_principal || reg.nome,
+        _unificado:true, _membros:[reg.nome],
+        os:[...reg.os], orcamentos:[...reg.orcamentos], receber:[...reg.receber], fluxo:[...reg.fluxo]
+      };
+      resultado.push(fundidos[gid]);
+      if(reg.cnpj && !fundidos[gid].cnpj) fundidos[gid].cnpj=reg.cnpj;
+    } else {
+      fundir(fundidos[gid], reg, ehPrincipal);
+    }
   });
-  return resultado;
+
+  // PASSADA FINAL DE SEGURANÇA: funde qualquer linha restante com nome idêntico
+  // (ex: ficha com CNPJ + lançamentos sem CNPJ que geraram chaves diferentes).
+  const porNome = {};
+  const final = [];
+  resultado.forEach(reg=>{
+    const k = _nomeNorm(reg.nome);
+    if(!k){ final.push(reg); return; }
+    if(!porNome[k]){
+      porNome[k] = reg;
+      final.push(reg);
+    } else {
+      // Prioriza como "principal" o que tem cadastro/CNPJ
+      const f = porNome[k];
+      const regEhMelhor = (reg.cadastro && !f.cadastro) || (reg.cnpj && !f.cnpj && !f.cadastro);
+      fundir(f, reg, regEhMelhor);
+      f._unificado = true;
+    }
+  });
+  return final;
 }
 
 // ══════════════════════════════════════════════════════════════
