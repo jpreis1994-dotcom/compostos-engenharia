@@ -398,6 +398,7 @@ tr:hover td{ background:#F3F8FF; }
       <a onclick="nav('pagar')" id="nav-pagar"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg> Contas a Pagar</a>
       <a onclick="nav('funcionarios')" id="nav-funcionarios"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 18h20v2H2zM4 18v-2a8 8 0 0 1 16 0v2"/><path d="M10 4.5V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5"/></svg> Funcionários / OS</a>
       <a onclick="nav('estoque')" id="nav-estoque"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg> Estoque</a>
+      <a onclick="nav('laudos')" id="nav-laudos"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg> Laudos Emitidos</a>
       <div class="nav-sep">Consolidação</div>
       <a onclick="nav('fluxo')" id="nav-fluxo"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg> Fluxo de Caixa</a>
       <div class="nav-sep">Análise</div>
@@ -507,7 +508,7 @@ function icon(nome, tam){
 
 
 // Cache local dos dados
-let D = { os:[], fluxo:[], receber:[], pagar:[], orcamentos:[], tipos_servico:[], funcionarios_os:[], config:{}, clientes:[], estoque:[], estoque_mov:[], auditoria_ok:[], cli_grupos:[], cli_dispensados:[], cli_ocultos:[] };
+let D = { os:[], fluxo:[], receber:[], pagar:[], orcamentos:[], tipos_servico:[], funcionarios_os:[], config:{}, clientes:[], estoque:[], estoque_mov:[], auditoria_ok:[], cli_grupos:[], cli_dispensados:[], cli_ocultos:[], laudos_emitidos:[] };
 
 // Categorias que afetam o SALDO mas NÃO são resultado operacional da empresa
 // (retiradas do dono e aportes de dinheiro pessoal)
@@ -583,6 +584,14 @@ function checkAlertas(){
       const venc = new Date(l.data_vencimento+'T12:00:00');
       if(venc <= limite) count++;
     });
+  });
+  // Laudos emitidos (avulsos) também contam no badge
+  (D.laudos_emitidos||[]).forEach(l => {
+    if(!l.vencimento) return;
+    const key = `lemit${l.id}`;
+    if(contatoF.includes(key)||lembrarD.includes(key)) return;
+    const venc = new Date(String(l.vencimento).slice(0,10)+'T12:00:00');
+    if(venc <= limite) count++;
   });
   const el = document.getElementById('badge-alerta');
   if(!el) return;
@@ -664,6 +673,13 @@ async function carregarTudo(){
     if(!resOc.error) D.cli_ocultos = resOc.data||[];
     else D.cli_ocultos = [];
   } catch(e) { D.cli_ocultos = []; }
+
+  // Carrega laudos emitidos (controle de vencimentos avulso)
+  try {
+    const resLau = await sb.from('laudos_emitidos').select('*').order('vencimento',{ascending:true});
+    if(!resLau.error) D.laudos_emitidos = resLau.data||[];
+    else D.laudos_emitidos = [];
+  } catch(e) { D.laudos_emitidos = []; }
 
   await recalcularStatusVencimentos();
   checkAlertas();
@@ -827,7 +843,7 @@ async function doLogout(){
 // ══════════════════════════════════════════════════════════════
 // NAVEGAÇÃO
 // ══════════════════════════════════════════════════════════════
-const PAGE_TITLES={dashboard:'Dashboard',agenda:'Agenda',clientes:'Clientes',orcamentos:'Orçamentos',os:'Ordens de Serviço',fluxo:'Fluxo de Caixa',receber:'Contas a Receber',pagar:'Contas a Pagar',funcionarios:'Funcionários por OS',estoque:'Estoque',relatorios:'Relatórios',auditoria:'Auditoria',config:'Configurações'};
+const PAGE_TITLES={dashboard:'Dashboard',agenda:'Agenda',clientes:'Clientes',orcamentos:'Orçamentos',os:'Ordens de Serviço',fluxo:'Fluxo de Caixa',receber:'Contas a Receber',pagar:'Contas a Pagar',funcionarios:'Funcionários por OS',estoque:'Estoque',laudos:'Laudos Emitidos',relatorios:'Relatórios',auditoria:'Auditoria',config:'Configurações'};
 function toggleSidebar(force){
   const sb=document.getElementById('sidebar'), bd=document.getElementById('sidebar-backdrop');
   if(!sb)return;
@@ -4111,6 +4127,240 @@ async function confirmarVinculoReceita(fluxoId, contaId){
 // ══════════════════════════════════════════════════════════════
 // RELATÓRIOS
 // ══════════════════════════════════════════════════════════════
+const _LAUDOS_HUGO=[
+  {e:'Nunes e Cia. Ltda.',c:'39321195000107',t:'TESTE DE ESTANQUEIDADE',v:'2025-06-27'},
+  {e:'TPJ Comércio Atacadista De Café Importação E Exportação Ltda (EF)',c:'09483354000109',t:'TANQUE AÉREO',v:'2025-10-02'},
+  {e:'ALMIROANA MARMORES E GRANITOS LTDA',c:'07736745000162',t:'TANQUE AÉREO',v:'2025-11-25'},
+  {e:'MARMORARIA VIP LTDA',c:'21334130000130',t:'NR 11',v:'2025-12-16'},
+  {e:'Sales Comercio de Combustíveis Ltda',c:'54767012000175',t:'TESTE DE ESTANQUEIDADE',v:'2026-01-23'},
+  {e:'Grupo Lider (Juiz de fora)',c:'',t:'TESTE DE ESTANQUEIDADE',v:'2026-02-04'},
+  {e:'AUTO POSTO TREVO D AGUA LTDA',c:'07619280000160',t:'TESTE DE ESTANQUEIDADE',v:'2026-03-17'},
+  {e:'Posto Visão Ltda',c:'25408964000102',t:'TESTE DE ESTANQUEIDADE',v:'2026-03-25'},
+  {e:'POSTO IGREJINHA',c:'03903050000177',t:'TESTE DE ESTANQUEIDADE',v:'2026-03-25'},
+  {e:'Frigorifico Estrela do Sul LTDA',c:'30977169000167',t:'TANQUE AÉREO',v:'2026-04-11'},
+  {e:'BML Stones Mármores e Granitos Ltda',c:'11070229000119',t:'NR 11',v:'2026-04-16'},
+  {e:'Darcy Travaglia Eireli',c:'27191022000132',t:'TANQUE AÉREO + COMPRESSOR',v:'2026-06-04'},
+  {e:'NKG Stockler',c:'61620753001590',t:'COMPRESSOR + REDE DE GÁS',v:'2026-06-06'},
+  {e:'Angramar Mármores e Granitos Ltda',c:'35968288000107',t:'NR 11',v:'2026-06-11'},
+  {e:'DISTRIBUIDORA DE BEBIDAS E ALIMENTOS VALE DO ITAPEMIRIM LTDA (Ambev)',c:'54836284000180',t:'LAUDOS DIVERSOS',v:'2026-06-23'},
+  {e:'MGC Stones',c:'47590242000146',t:'NR 11',v:'2026-07-07'},
+  {e:'Active Soluções Técnicas Ltda',c:'45210133000120',t:'NR 11',v:'2026-07-07'},
+  {e:'ANTÔNIO AUTO PEÇAS S.A  27.340.074/0017-90 SP',c:'',t:'EMPILHADEIRA',v:'2026-07-07'},
+  {e:'ANTÔNIO AUTO PEÇAS S.A 27.340.074/0023-39 BH',c:'',t:'EMPILHADEIRA',v:'2026-07-07'},
+  {e:'Cristally Export Ltda',c:'61241902000104',t:'NR 11',v:'2026-07-10'},
+  {e:'Wimagran Mármores e Granitos Ltda',c:'08857876000160',t:'NR 11',v:'2026-07-11'},
+  {e:'Antônio Auto Peças S.A 27.340.074/0008-08 CDI',c:'',t:'TANQUE AÉREO',v:'2026-07-14'},
+  {e:'AUTO POSTO SÃO LOURENÇO LTDA',c:'10985327000113',t:'TESTE DE ESTANQUEIDADE',v:'2026-08-03'},
+  {e:'GAP COMÉRCIO DE CAFÉ LTDA',c:'01917238000149',t:'TANQUE AÉREO',v:'2026-08-11'},
+  {e:'AUTO POSTO SANTO ANTONIO DE TOMBOS LTDA',c:'52432098000150',t:'TESTE DE ESTANQUEIDADE',v:'2026-08-12'},
+  {e:'AUTO POSTO LAGOA LTDA',c:'39627161000145',t:'TESTE DE ESTANQUEIDADE',v:'2026-08-15'},
+  {e:'Inamarmore Industria De Mármores E Calcário Do Brasil Ltda',c:'41704541000188',t:'TANQUE AÉREO',v:'2026-08-23'},
+  {e:'TPJ Comércio Atacadista de Café Importação e Exportação Ltda (EF)',c:'09483354000613',t:'REDE DE GÁS',v:'2026-09-04'},
+  {e:'TPJ Comércio Atacadista de Café Importação e Exportação Ltda (EF)',c:'09483354000613',t:'COMPRESSOR',v:'2026-09-04'},
+  {e:'Postos grupo itabira',c:'',t:'COMPRESSOR',v:'2026-09-05'},
+  {e:'SB Mineração Ltda',c:'02614827000110',t:'REDE DE GÁS',v:'2026-09-24'},
+  {e:'POSTO FREEWAY LTDA',c:'03408609000192',t:'TESTE DE ESTANQUEIDADE',v:'2026-09-29'},
+  {e:'Compressores ibitirama',c:'',t:'COMPRESSOR',v:'2026-10-01'},
+  {e:'Polirochas Industria E Comércio De Rochas Polidas Ltda',c:'08548046000151',t:'NR 11',v:'2026-10-08'},
+  {e:'Grupo Lider (Juiz de fora)',c:'',t:'COMPRESSOR',v:'2026-10-10'},
+  {e:'SB Mineração Ltda',c:'02614827000110',t:'TANQUE AÉREO',v:'2026-10-30'},
+  {e:'Rumagran Marmores e Granitos LTDA',c:'39810445000172',t:'TANQUE AÉREO',v:'2026-11-10'},
+  {e:'TPJ Comércio Atacadista de Café Importação e Exportação Ltda (DRP)',c:'09483354000370',t:'COMPRESSOR',v:'2026-11-11'},
+  {e:'POSTO CARIOQUINHA LTDA',c:'01283262000173',t:'TESTE DE ESTANQUEIDADE',v:'2026-11-14'},
+  {e:'AUTO POSTO PEDRA ROXA LTDA',c:'38211122000108',t:'TESTE DE ESTANQUEIDADE',v:'2026-11-18'},
+  {e:'TPJ Comércio Atacadista de Café Importação e Exportação Ltda (DRP)',c:'09483354000370',t:'ILHA DE GÁS + GERADOR',v:'2026-12-01'},
+  {e:'Coope Serrana – Cooperativa De Transporte Sul Serrana Capixaba',c:'05427772000128',t:'LINHA DE VIDA',v:'2027-01-03'},
+  {e:'POSTO DE COMBUSTIVEL CARAVELAS LTDA',c:'07447662000153',t:'TESTE DE ESTANQUEIDADE',v:'2027-02-06'},
+  {e:'Antônio Auto Peças S.A 27.340.074/0008-08 CDI',c:'',t:'EMPILHADEIRA',v:'2027-02-10'},
+  {e:'Imarcal - Ind. de Marmores e Calcario Ltda',c:'08916852000135',t:'TANQUE AÉREO',v:'2027-02-11'},
+  {e:'AUTO POSTO GUANDU LTDA',c:'16600774000193',t:'TESTE DE ESTANQUEIDADE',v:'2027-02-18'},
+  {e:'AUTO POSTO SÃO LOURENÇO LTDA',c:'10985327000113',t:'COMPRESSOR',v:'2027-02-22'},
+  {e:'Posto são Lourenço',c:'10985327000113',t:'COMPRESSOR',v:'2027-02-25'},
+  {e:'ALTOCORTE MARMORARIA LTDA',c:'12500539000199',t:'NR 11',v:'2027-03-01'},
+  {e:'Wimagran Mármores e Granitos Ltda',c:'08857876000160',t:'TANQUE AÉREO + REDE DE GÁS',v:'2027-03-01'},
+  {e:'Planeta G Mármores E Granitos Ltda',c:'07411639000109',t:'NR 11',v:'2027-03-01'},
+  {e:'Eucager Imperio Do Eucalipto Ltda',c:'44025588000103',t:'AUTOCLAVE',v:'2027-03-01'},
+  {e:'H&L Transportes Eireli',c:'40014227000198',t:'TANQUE AÉREO',v:'2027-03-07'},
+  {e:'BRUMAGRAN MARMORES E GRANIITOS EIIRELII -- EPP',c:'03485731000162',t:'TANQUE AÉREO',v:'2027-03-24'},
+  {e:'Cooperativa Riobranquense De Transportes Ltda',c:'86442720000637',t:'TANQUE AÉREO',v:'2027-03-31'},
+  {e:'Capital Log LTDA',c:'34234731000113',t:'TANQUE AÉREO',v:'2027-04-09'},
+  {e:'SEGALL & CESAR AUTO POSTO LTDA',c:'03476473000158',t:'TESTE DE ESTANQUEIDADE',v:'2027-04-10'},
+  {e:'D&D Stone Granitos e Mármores EIRELI',c:'19138496000192',t:'NR 11',v:'2027-05-01'},
+  {e:'WO Stones Ltda',c:'41946272000166',t:'NR 11',v:'2027-05-08'},
+  {e:'POSTO DOS MOTORISTAS LTDA',c:'28397354000130',t:'TESTE DE ESTANQUEIDADE',v:'2027-05-30'},
+  {e:'TPJ Comércio Atacadista De Café Importação E Exportação Ltda',c:'',t:'NR 11',v:'2027-06-01'},
+  {e:'Gramazini Granitos E Mármores Thomazini Ltda',c:'32485369000209',t:'NR 11',v:'2027-06-01'},
+  {e:'Schuina Import LTDA',c:'46722337000103',t:'NR 11',v:'2027-06-01'},
+  {e:'Coope Serrana – Cooperativa De Transporte Sul Serrana Capixaba',c:'05427772000128',t:'TANQUE AÉREO',v:'2027-06-04'},
+  {e:'BRASILMAG PEDRAS NATURAIS LTDA',c:'08624479000491',t:'TANQUE AÉREO',v:'2027-06-22'}
+];
+
+// ══════════════════════════════════════════════════════════════
+// LAUDOS EMITIDOS — controle de vencimentos (planilha do Hugo + novos)
+// ══════════════════════════════════════════════════════════════
+function _statusLaudo(venc){
+  if(!venc) return {txt:'—', cor:'cinza', dias:null};
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  const v=new Date(venc+'T12:00:00');
+  const dias=Math.ceil((v-hoje)/(1000*60*60*24));
+  if(dias<0)  return {txt:`VENCIDO há ${Math.abs(dias)}d`, cor:'vermelho', dias};
+  if(dias===0)return {txt:'VENCE HOJE', cor:'vermelho', dias};
+  if(dias<=7) return {txt:`vence em ${dias}d`, cor:'amarelo', dias};
+  if(dias<=30)return {txt:`vence em ${dias}d`, cor:'azul', dias};
+  return {txt:fmtData(venc), cor:'verde', dias};
+}
+
+function render_laudos(){
+  const c=document.getElementById('content');
+  const lista=[...(D.laudos_emitidos||[])].sort((a,b)=>String(a.vencimento||'').localeCompare(String(b.vencimento||'')));
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  const nVencidos=lista.filter(l=>{const s=_statusLaudo(l.vencimento);return s.dias!==null&&s.dias<0;}).length;
+  const n30=lista.filter(l=>{const s=_statusLaudo(l.vencimento);return s.dias!==null&&s.dias>=0&&s.dias<=30;}).length;
+
+  c.innerHTML=`
+  <div class="flex flex-between flex-center" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div class="filter-group" style="flex:1;min-width:200px">
+      <div class="filter-label">Buscar</div>
+      <input type="text" id="lau-busca" placeholder="Empresa, CNPJ ou tipo de laudo..." oninput="_filtrarLaudos()" style="width:100%">
+    </div>
+    <div style="display:flex;gap:8px;align-self:flex-end">
+      <button class="btn btn-outline" onclick="importarLaudosHugo()">${icon('download',16)} Importar planilha do Hugo (${_LAUDOS_HUGO.length})</button>
+      <button class="btn btn-primary" onclick="modalNovoLaudoEmitido()">${icon('plus',16)} Novo Laudo</button>
+    </div>
+  </div>
+  <div class="grid-4" style="margin-bottom:14px">
+    <div class="kpi kpi-modern" style="border-left:4px solid #D64045"><div class="kpi-label">Vencidos</div><div class="kpi-val vermelho">${nVencidos}</div></div>
+    <div class="kpi kpi-modern" style="border-left:4px solid #E8A020"><div class="kpi-label">Vencem em 30 dias</div><div class="kpi-val" style="color:#B25000">${n30}</div></div>
+    <div class="kpi kpi-modern" style="border-left:4px solid #2A6DBF"><div class="kpi-label">Total de laudos</div><div class="kpi-val">${lista.length}</div></div>
+    <div class="kpi kpi-modern" style="border-left:4px solid #1A8F5A"><div class="kpi-label">Em dia (>30 dias)</div><div class="kpi-val verde">${lista.length-nVencidos-n30}</div></div>
+  </div>
+  <div class="card">
+    <p class="text-xs text-muted" style="margin-bottom:10px">💡 Controle dos laudos já emitidos e seus vencimentos. Os que vencem em até 30 dias também aparecem nos <b>alertas do topo</b>, junto com os laudos das OS.</p>
+    <div class="table-wrap"><table id="tbl-laudos">
+      <thead><tr><th>Vencimento</th><th>Situação</th><th>Empresa</th><th>CNPJ</th><th>Tipo de Laudo</th><th>Ações</th></tr></thead>
+      <tbody>${lista.length?lista.map(l=>{
+        const s=_statusLaudo(l.vencimento);
+        return `<tr data-busca="${esc(((l.empresa||'')+' '+(l.cnpj||'')+' '+(l.tipo||'')).toLowerCase())}">
+          <td style="white-space:nowrap"><b>${l.vencimento?fmtData(l.vencimento):'—'}</b></td>
+          <td><span class="badge badge-${s.cor}">${s.txt}</span></td>
+          <td>${esc(l.empresa||'—')}</td>
+          <td class="text-xs">${l.cnpj?esc(fmtCNPJStr(l.cnpj)):'—'}</td>
+          <td>${esc(l.tipo||'—')}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-sm btn-outline btn-icon" onclick="editarLaudoEmitido(${l.id})" title="Editar">${icon('edit',16)}</button>
+            <button class="btn btn-sm btn-danger btn-icon" onclick="deletarLaudoEmitido(${l.id})">${icon('close',16)}</button>
+          </td>
+        </tr>`;
+      }).join(''):`<tr><td colspan="6" class="text-muted" style="text-align:center;padding:24px">Nenhum laudo cadastrado. Use "Importar planilha do Hugo" para trazer os ${_LAUDOS_HUGO.length} laudos, ou cadastre um novo.</td></tr>`}</tbody>
+    </table></div>
+  </div>`;
+}
+function _filtrarLaudos(){
+  const t=(document.getElementById('lau-busca')?.value||'').toLowerCase().trim();
+  document.querySelectorAll('#tbl-laudos tbody tr').forEach(tr=>{
+    tr.style.display = (!t || (tr.dataset.busca||'').includes(t)) ? '' : 'none';
+  });
+}
+
+function modalNovoLaudoEmitido(editId){
+  const l = editId ? (D.laudos_emitidos||[]).find(x=>x.id===editId) : null;
+  abrirModal(l?'Editar Laudo':'Novo Laudo Emitido', `
+  <div class="form-grid">
+    <div class="form-group span2"><label>Empresa *</label><input type="text" id="lau-empresa" value="${esc(l?.empresa||'')}"></div>
+    <div class="form-group span2"><label>CNPJ <span class="text-xs text-muted">(opcional)</span></label><input type="text" id="lau-cnpj" value="${esc(l?.cnpj?fmtCNPJStr(l.cnpj):'')}" oninput="fmtCNPJ(this)"></div>
+    <div class="form-group"><label>Tipo de Laudo *</label><input type="text" id="lau-tipo" value="${esc(l?.tipo||'')}" placeholder="Ex: TESTE DE ESTANQUEIDADE" list="lau-tipos-dl">
+      <datalist id="lau-tipos-dl">${['TESTE DE ESTANQUEIDADE','NR 11','TANQUE AÉREO','COMPRESSOR','REDE DE GÁS','EMPILHADEIRA','AUTOCLAVE','LINHA DE VIDA'].map(t=>`<option value="${t}">`).join('')}</datalist>
+    </div>
+    <div class="form-group"><label>Data de Vencimento *</label><input type="date" id="lau-venc" value="${(l?.vencimento||'').slice(0,10)}"></div>
+    <div class="form-group span2"><label>Observação</label><textarea id="lau-obs" rows="2">${esc(l?.observacao||'')}</textarea></div>
+  </div>`,
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
+   <button class="btn btn-primary" onclick="salvarLaudoEmitido(${editId||'null'})">${icon('check',16)} Salvar</button>`);
+}
+async function salvarLaudoEmitido(editId){
+  const empresa=document.getElementById('lau-empresa').value.trim();
+  const tipo=document.getElementById('lau-tipo').value.trim();
+  const venc=document.getElementById('lau-venc').value;
+  if(!empresa||!tipo||!venc){alert('Preencha empresa, tipo e vencimento.');return;}
+  const dados={
+    empresa, tipo,
+    cnpj:(document.getElementById('lau-cnpj').value||'').replace(/\D/g,''),
+    vencimento:venc,
+    observacao:document.getElementById('lau-obs').value
+  };
+  let ok;
+  if(editId) ok=await sbUpdate('laudos_emitidos',dados,'id',editId);
+  else { dados.criado_em=new Date().toISOString(); ok=await sbInsert('laudos_emitidos',dados); }
+  if(ok){ fecharModal(); nav('laudos'); }
+}
+function editarLaudoEmitido(id){ modalNovoLaudoEmitido(id); }
+async function deletarLaudoEmitido(id){
+  const l=(D.laudos_emitidos||[]).find(x=>x.id===id);
+  if(!confirm(`Excluir o laudo "${l?.tipo||''}" de ${l?.empresa||''}?`))return;
+  await sbDelete('laudos_emitidos','id',id);
+  nav('laudos');
+}
+
+// ── Importação da planilha do Hugo (com verificação de duplicados) ──
+function importarLaudosHugo(){
+  const norm=s=>_nomeNorm(s);
+  // Verifica cada laudo da planilha contra: (a) laudos_emitidos já importados; (b) laudos das OS
+  const analise=_LAUDOS_HUGO.map(h=>{
+    // (a) já existe nos laudos emitidos? (mesmo cnpj OU nome + mesmo tipo + mesmo vencimento)
+    const jaEmitido=(D.laudos_emitidos||[]).some(l=>{
+      const mesmoCli = (h.c && String(l.cnpj||'')===h.c) || norm(l.empresa)===norm(h.e);
+      return mesmoCli && norm(l.tipo)===norm(h.t) && String(l.vencimento||'').slice(0,10)===h.v;
+    });
+    // (b) existe nas OS? (mesmo cliente + vencimento igual em laudos_prazos)
+    let naOS=false;
+    if(!jaEmitido){
+      naOS=(D.os||[]).some(o=>{
+        const mesmoCli=(h.c && String(o.cnpj||'').replace(/\D/g,'')===h.c) || norm(o.cliente_nome)===norm(h.e);
+        if(!mesmoCli) return false;
+        let laudos=[]; try{laudos=o.laudos_prazos?JSON.parse(o.laudos_prazos):[];}catch(e){}
+        return laudos.some(la=>String(la.data_vencimento||'').slice(0,10)===h.v);
+      });
+    }
+    return {...h, jaEmitido, naOS, novo:!jaEmitido&&!naOS};
+  });
+  const novos=analise.filter(a=>a.novo);
+  const repetidos=analise.filter(a=>!a.novo);
+
+  abrirModal('Importar Laudos da Planilha do Hugo', `
+    ${alertaBox('info',`Analisei os <b>${_LAUDOS_HUGO.length} laudos</b> da planilha contra o que já existe no sistema:<br>
+      • <b class="verde">${novos.length} novos</b> (serão importados)<br>
+      • <b>${repetidos.length} já existem</b> (serão pulados — sem duplicar)`)}
+    <div style="max-height:45vh;overflow-y:auto;margin-top:10px">
+      ${analise.map((a,i)=>`
+        <label class="flex flex-center gap-8" style="font-size:12px;padding:6px 10px;border-radius:6px;margin-bottom:4px;cursor:pointer;background:${a.novo?'var(--cinza-bg)':'#FFF3D6'}">
+          <input type="checkbox" id="impl-${i}" ${a.novo?'checked':''} style="width:auto">
+          <span style="flex:1"><b>${esc(a.e)}</b> — ${esc(a.t)} — vence ${fmtData(a.v)}
+          ${!a.novo?`<span class="badge badge-amarelo" style="font-size:9px">${a.jaEmitido?'já importado':'já está numa OS'}</span>`:''}</span>
+        </label>`).join('')}
+    </div>
+  `,
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
+   <button class="btn btn-primary" onclick="confirmarImportLaudos()">${icon('check',16)} Importar marcados</button>`, true);
+  window._analiseImportLaudos=analise;
+}
+async function confirmarImportLaudos(){
+  const analise=window._analiseImportLaudos||[];
+  const marcados=analise.filter((a,i)=>document.getElementById('impl-'+i)?.checked);
+  if(!marcados.length){alert('Nenhum laudo marcado.');return;}
+  let ok=0, erros=0;
+  for(const a of marcados){
+    const r=await sbInsert('laudos_emitidos',{
+      empresa:a.e, cnpj:a.c, tipo:a.t, vencimento:a.v,
+      observacao:'Importado da planilha de controle', criado_em:new Date().toISOString()
+    });
+    if(r) ok++; else erros++;
+  }
+  fecharModal();
+  alert(`✅ ${ok} laudo(s) importado(s)!`+(erros?`\n⚠️ ${erros} falharam (verifique se rodou o SQL da tabela laudos_emitidos).`:''));
+  nav('laudos');
+}
+
+
 function render_relatorios(){
   const byServ={};
   D.fluxo.filter(r=>r.tipo==='RECEITA'&&(r.categoria||r.tipo_servico)).forEach(r=>{const k=r.categoria||r.tipo_servico;if(!byServ[k])byServ[k]={rec:0,n:0};byServ[k].rec+=Number(r.valor);byServ[k].n++;});
@@ -4960,6 +5210,25 @@ function verificarAlertasLaudos(){
       key,
       os: o,
       laudo: {descricao: 'Entrega de laudo — '+o.servico, data_vencimento: o.data_entrega_laudo},
+      diasRestantes, vencido,
+      urgencia: vencido ? 'vermelho' : diasRestantes <= 7 ? 'amarelo' : 'azul'
+    });
+  });
+
+  // Laudos emitidos (avulsos) — controle da planilha do Hugo
+  (D.laudos_emitidos||[]).forEach(l => {
+    if(!l.vencimento) return;
+    const key = `lemit${l.id}`;
+    if(getContatoFeito().includes(key)) return;
+    if(getLembrarDepois().includes(key)) return;
+    const venc = new Date(String(l.vencimento).slice(0,10)+'T12:00:00');
+    const diasRestantes = Math.ceil((venc - hoje) / (1000*60*60*24));
+    if(diasRestantes > 30) return;
+    const vencido = diasRestantes < 0;
+    alertas.push({
+      key,
+      os: {numero_os:'—', cliente_nome:l.empresa},
+      laudo: {descricao: l.tipo+' (laudo emitido)', data_vencimento: String(l.vencimento).slice(0,10)},
       diasRestantes, vencido,
       urgencia: vencido ? 'vermelho' : diasRestantes <= 7 ? 'amarelo' : 'azul'
     });
