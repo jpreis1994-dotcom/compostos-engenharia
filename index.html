@@ -585,9 +585,9 @@ function checkAlertas(){
       if(venc <= limite) count++;
     });
   });
-  // Laudos emitidos (avulsos) também contam no badge
+  // Laudos emitidos (avulsos) também contam no badge — exceto arquivados
   (D.laudos_emitidos||[]).forEach(l => {
-    if(!l.vencimento) return;
+    if(!l.vencimento || _laudoArquivado(l)) return;
     const key = `lemit${l.id}`;
     if(contatoF.includes(key)||lembrarD.includes(key)) return;
     const venc = new Date(String(l.vencimento).slice(0,10)+'T12:00:00');
@@ -4210,12 +4210,38 @@ function _statusLaudo(venc){
   return {txt:fmtData(venc), cor:'verde', dias};
 }
 
+// Um laudo está arquivado se foi arquivado manualmente OU venceu há mais de 30 dias
+function _laudoArquivado(l){
+  if(l.arquivado) return true;
+  const s=_statusLaudo(l.vencimento);
+  return s.dias!==null && s.dias < -30; // vencido há mais de 30 dias
+}
+
 function render_laudos(){
   const c=document.getElementById('content');
-  const lista=[...(D.laudos_emitidos||[])].sort((a,b)=>String(a.vencimento||'').localeCompare(String(b.vencimento||'')));
-  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  const todos=[...(D.laudos_emitidos||[])].sort((a,b)=>String(a.vencimento||'').localeCompare(String(b.vencimento||'')));
+  const lista=todos.filter(l=>!_laudoArquivado(l));      // ativos (visão principal)
+  const arquivados=todos.filter(l=>_laudoArquivado(l));  // arquivados
   const nVencidos=lista.filter(l=>{const s=_statusLaudo(l.vencimento);return s.dias!==null&&s.dias<0;}).length;
   const n30=lista.filter(l=>{const s=_statusLaudo(l.vencimento);return s.dias!==null&&s.dias>=0&&s.dias<=30;}).length;
+
+  const linhaLaudo=(l,ehArquivado)=>{
+    const s=_statusLaudo(l.vencimento);
+    return `<tr data-busca="${esc(((l.empresa||'')+' '+(l.cnpj||'')+' '+(l.tipo||'')).toLowerCase())}">
+      <td style="white-space:nowrap"><b>${l.vencimento?fmtData(l.vencimento):'—'}</b></td>
+      <td><span class="badge badge-${s.cor}">${s.txt}</span></td>
+      <td>${esc(l.empresa||'—')}</td>
+      <td class="text-xs">${l.cnpj?esc(fmtCNPJStr(l.cnpj)):'—'}</td>
+      <td>${esc(l.tipo||'—')}</td>
+      <td style="white-space:nowrap">
+        ${ehArquivado
+          ? `<button class="btn btn-sm btn-outline" onclick="desarquivarLaudo(${l.id})" title="Voltar para a lista">↩️ Desarquivar</button>`
+          : `<button class="btn btn-sm btn-outline btn-icon" onclick="arquivarLaudo(${l.id})" title="Arquivar">🗄️</button>
+             <button class="btn btn-sm btn-outline btn-icon" onclick="editarLaudoEmitido(${l.id})" title="Editar">${icon('edit',16)}</button>`}
+        <button class="btn btn-sm btn-danger btn-icon" onclick="deletarLaudoEmitido(${l.id})">${icon('close',16)}</button>
+      </td>
+    </tr>`;
+  };
 
   c.innerHTML=`
   <div class="flex flex-between flex-center" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
@@ -4229,37 +4255,41 @@ function render_laudos(){
     </div>
   </div>
   <div class="grid-4" style="margin-bottom:14px">
-    <div class="kpi kpi-modern" style="border-left:4px solid #D64045"><div class="kpi-label">Vencidos</div><div class="kpi-val vermelho">${nVencidos}</div></div>
+    <div class="kpi kpi-modern" style="border-left:4px solid #D64045"><div class="kpi-label">Vencidos (ativos)</div><div class="kpi-val vermelho">${nVencidos}</div></div>
     <div class="kpi kpi-modern" style="border-left:4px solid #E8A020"><div class="kpi-label">Vencem em 30 dias</div><div class="kpi-val" style="color:#B25000">${n30}</div></div>
-    <div class="kpi kpi-modern" style="border-left:4px solid #2A6DBF"><div class="kpi-label">Total de laudos</div><div class="kpi-val">${lista.length}</div></div>
+    <div class="kpi kpi-modern" style="border-left:4px solid #2A6DBF"><div class="kpi-label">Laudos ativos</div><div class="kpi-val">${lista.length}</div></div>
     <div class="kpi kpi-modern" style="border-left:4px solid #1A8F5A"><div class="kpi-label">Em dia (>30 dias)</div><div class="kpi-val verde">${lista.length-nVencidos-n30}</div></div>
   </div>
   <div class="card">
-    <p class="text-xs text-muted" style="margin-bottom:10px">💡 Controle dos laudos já emitidos e seus vencimentos. Os que vencem em até 30 dias também aparecem nos <b>alertas do topo</b>, junto com os laudos das OS.</p>
+    <p class="text-xs text-muted" style="margin-bottom:10px">💡 Controle dos laudos emitidos e seus vencimentos. Os que vencem em até 30 dias também aparecem nos <b>alertas do topo</b>. Laudos vencidos há mais de 30 dias vão automaticamente para os <b>arquivados</b>.</p>
     <div class="table-wrap"><table id="tbl-laudos">
       <thead><tr><th>Vencimento</th><th>Situação</th><th>Empresa</th><th>CNPJ</th><th>Tipo de Laudo</th><th>Ações</th></tr></thead>
-      <tbody>${lista.length?lista.map(l=>{
-        const s=_statusLaudo(l.vencimento);
-        return `<tr data-busca="${esc(((l.empresa||'')+' '+(l.cnpj||'')+' '+(l.tipo||'')).toLowerCase())}">
-          <td style="white-space:nowrap"><b>${l.vencimento?fmtData(l.vencimento):'—'}</b></td>
-          <td><span class="badge badge-${s.cor}">${s.txt}</span></td>
-          <td>${esc(l.empresa||'—')}</td>
-          <td class="text-xs">${l.cnpj?esc(fmtCNPJStr(l.cnpj)):'—'}</td>
-          <td>${esc(l.tipo||'—')}</td>
-          <td style="white-space:nowrap">
-            <button class="btn btn-sm btn-outline btn-icon" onclick="editarLaudoEmitido(${l.id})" title="Editar">${icon('edit',16)}</button>
-            <button class="btn btn-sm btn-danger btn-icon" onclick="deletarLaudoEmitido(${l.id})">${icon('close',16)}</button>
-          </td>
-        </tr>`;
-      }).join(''):`<tr><td colspan="6" class="text-muted" style="text-align:center;padding:24px">Nenhum laudo cadastrado. Use "Importar planilha do Hugo" para trazer os ${_LAUDOS_HUGO.length} laudos, ou cadastre um novo.</td></tr>`}</tbody>
+      <tbody>${lista.length?lista.map(l=>linhaLaudo(l,false)).join(''):`<tr><td colspan="6" class="text-muted" style="text-align:center;padding:24px">Nenhum laudo ativo. Use "Importar planilha do Hugo" para trazer os ${_LAUDOS_HUGO.length} laudos, ou cadastre um novo.</td></tr>`}</tbody>
     </table></div>
-  </div>`;
+  </div>
+  ${arquivados.length?`<div class="card">
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:var(--azul);font-size:14px">🗄️ Arquivados (${arquivados.length}) — vencidos há mais de 30 dias ou arquivados manualmente</summary>
+      <div class="table-wrap" style="margin-top:10px"><table id="tbl-laudos-arq">
+        <thead><tr><th>Vencimento</th><th>Situação</th><th>Empresa</th><th>CNPJ</th><th>Tipo de Laudo</th><th>Ações</th></tr></thead>
+        <tbody>${arquivados.map(l=>linhaLaudo(l,true)).join('')}</tbody>
+      </table></div>
+    </details>
+  </div>`:''}`;
 }
 function _filtrarLaudos(){
   const t=(document.getElementById('lau-busca')?.value||'').toLowerCase().trim();
-  document.querySelectorAll('#tbl-laudos tbody tr').forEach(tr=>{
+  document.querySelectorAll('#tbl-laudos tbody tr, #tbl-laudos-arq tbody tr').forEach(tr=>{
     tr.style.display = (!t || (tr.dataset.busca||'').includes(t)) ? '' : 'none';
   });
+}
+async function arquivarLaudo(id){
+  await sbUpdate('laudos_emitidos',{arquivado:true},'id',id);
+  nav('laudos');
+}
+async function desarquivarLaudo(id){
+  await sbUpdate('laudos_emitidos',{arquivado:false},'id',id);
+  nav('laudos');
 }
 
 function modalNovoLaudoEmitido(editId){
@@ -4457,6 +4487,101 @@ function relConcMudar(){
   _relConcMes = parseInt(document.getElementById('relconc-mes').value);
   renderConciliacao();
 }
+// Calcula o saldo acumulado ao fim de cada dia com movimento (estilo extrato).
+// Retorna array [{dia, entradas, saidas, saldoDia, saldoAcumulado}].
+function _saldoDiario(ano, mes){
+  const mesStr=String(mes).padStart(2,'0');
+  const noMes=d=>{const s=String(d||'').slice(0,10);return s.slice(0,4)===String(ano)&&s.slice(5,7)===mesStr;};
+  const lancs=D.fluxo.filter(f=>noMes(f.data_movimento)&&_afetaSaldo(f));
+  // Agrupa por dia
+  const porDia={};
+  lancs.forEach(f=>{
+    const dia=String(f.data_movimento).slice(0,10);
+    if(!porDia[dia]) porDia[dia]={entradas:0, saidas:0};
+    const v=Number(f.valor||0);
+    if(f.tipo==='RECEITA') porDia[dia].entradas+=v;
+    else porDia[dia].saidas+=v;
+  });
+  const dias=Object.keys(porDia).sort();
+  const saldoInicial=Number(D.config['saldo_inicial_'+ano+'-'+mesStr] || 0);
+  let acumulado=saldoInicial;
+  return dias.map(dia=>{
+    const d=porDia[dia];
+    const saldoDia=d.entradas-d.saidas;
+    acumulado+=saldoDia;
+    return { dia, entradas:d.entradas, saidas:d.saidas, saldoDia, saldoAcumulado:acumulado };
+  });
+}
+
+// Salva/lê o saldo do extrato informado manualmente por dia (em configuracoes)
+function _saldoExtratoDia(dia){
+  const v=D.config['saldo_extrato_'+dia];
+  return v!==undefined && v!=='' ? Number(v) : null;
+}
+async function salvarSaldoExtrato(dia, inputId){
+  const el=document.getElementById(inputId);
+  const raw=(el?.value||'').trim();
+  const chave='saldo_extrato_'+dia;
+  if(raw===''){
+    // Apaga se limpou o campo
+    const existe=(D._cfgRaw||[]).find(c=>c.chave===chave);
+    if(existe) await sbDelete('configuracoes','chave',chave);
+    delete D.config[chave];
+  } else {
+    const valor=parseFloat(raw);
+    if(isNaN(valor)){ alert('Valor inválido.'); return; }
+    const existe=(D._cfgRaw||[]).find(c=>c.chave===chave);
+    if(existe) await sbUpdate('configuracoes',{valor:String(valor)},'chave',chave);
+    else await sbInsert('configuracoes',{chave, valor:String(valor)});
+    D.config[chave]=String(valor);
+  }
+  await carregarTudo();
+  renderConciliacao();
+}
+
+// Card de saldo dia a dia (calculado x extrato)
+function _cardSaldoDiario(ano, mes){
+  const dias=_saldoDiario(ano, mes);
+  if(!dias.length){
+    return `<div class="card"><div class="card-title">📅 Saldo dia a dia</div><p class="text-sm text-muted">Nenhum movimento na conta neste mês ainda.</p></div>`;
+  }
+  return `<div class="card">
+    <div class="card-title">📅 Saldo dia a dia <span class="text-xs text-muted" style="font-weight:400">— confira com seu extrato</span></div>
+    <p class="text-xs text-muted" style="margin:-4px 0 10px">Saldo acumulado ao fim de cada dia com movimento. Digite o saldo do seu <b>extrato</b> na última coluna para ver se bate — a diferença ajuda a achar em qual dia falta algum lançamento.</p>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Dia</th>
+        <th class="td-num">Entradas</th>
+        <th class="td-num">Saídas</th>
+        <th class="td-num">Saldo calculado</th>
+        <th class="td-num">Saldo do extrato</th>
+        <th class="td-num">Diferença</th>
+      </tr></thead>
+      <tbody>${dias.map(d=>{
+        const ext=_saldoExtratoDia(d.dia);
+        const dif = ext!==null ? (ext - d.saldoAcumulado) : null;
+        const difTxt = dif===null ? '<span class="text-muted">—</span>'
+          : Math.abs(dif)<0.005 ? '<span class="verde">✓ bate</span>'
+          : `<b class="vermelho">${dif>0?'+':''}${fmtBRL(dif)}</b>`;
+        const inputId='ext-'+d.dia;
+        return `<tr>
+          <td style="white-space:nowrap"><b>${fmtData(d.dia)}</b></td>
+          <td class="td-num verde text-xs">${d.entradas?'+'+fmtBRL(d.entradas):'—'}</td>
+          <td class="td-num vermelho text-xs">${d.saidas?'−'+fmtBRL(d.saidas):'—'}</td>
+          <td class="td-num" style="font-weight:700">${fmtBRL(d.saldoAcumulado)}</td>
+          <td class="td-num">
+            <input type="number" id="${inputId}" value="${ext!==null?ext:''}" step="0.01" placeholder="digite"
+              onblur="salvarSaldoExtrato('${d.dia}','${inputId}')"
+              style="width:110px;text-align:right;padding:4px 6px;font-size:12px">
+          </td>
+          <td class="td-num">${difTxt}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <p class="text-xs text-muted" style="margin-top:8px">💡 Onde a diferença deixar de ser "✓ bate" é onde a divergência começou — confira os lançamentos daquele dia.</p>
+  </div>`;
+}
+
 function renderConciliacao(){
   const pane=document.getElementById('relpane-conciliacao');
   if(!pane) return;
@@ -4524,6 +4649,8 @@ function renderConciliacao(){
     </div>
     ${(c.entradasEspecie||c.saidasEspecie)?`<p class="text-xs text-muted" style="margin-top:8px">💵 Valores em espécie/outra conta neste mês (contam no resultado das OS, mas <b>não</b> neste saldo): +${fmtBRL(c.entradasEspecie)} de entradas, −${fmtBRL(c.saidasEspecie)} de saídas.</p>`:''}
   </div>
+
+  ${_cardSaldoDiario(ano, mes)}
 
   <div class="card">
     <div class="card-title">Lançamentos que passaram na conta (${lancsConta.length})</div>
@@ -5215,9 +5342,9 @@ function verificarAlertasLaudos(){
     });
   });
 
-  // Laudos emitidos (avulsos) — controle da planilha do Hugo
+  // Laudos emitidos (avulsos) — controle da planilha do Hugo (exceto arquivados)
   (D.laudos_emitidos||[]).forEach(l => {
-    if(!l.vencimento) return;
+    if(!l.vencimento || _laudoArquivado(l)) return;
     const key = `lemit${l.id}`;
     if(getContatoFeito().includes(key)) return;
     if(getLembrarDepois().includes(key)) return;
