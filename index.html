@@ -533,6 +533,21 @@ const LOGO_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAaQAAADvCAIAAAAyxjd5AAEAAElEQVR42uz9WZ
 const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const MESES_A = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
+// Monta o endereço do logo pronto para usar em <img src="...">.
+// O LOGO_B64 é só o base64 "puro" (sem cabeçalho), então precisa do prefixo
+// "data:image/png;base64," — sem ele a imagem aparece quebrada.
+function _logoSrc(){
+  let l = (typeof D!=='undefined' && D.config && D.config.logo_url)
+            ? D.config.logo_url
+            : (typeof LOGO_B64!=='undefined' ? LOGO_B64 : '');
+  l = String(l||'').trim();
+  if(!l) return '';
+  // Já é um endereço completo (data:... ou http://...) → usa como está
+  if(/^(data:|https?:\/\/|\/\/)/i.test(l)) return l;
+  // É base64 puro → coloca o cabeçalho que faltava
+  return 'data:image/png;base64,' + l;
+}
+
 function fmtBRL(v){ return 'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtData(d){ if(!d) return '—'; const p=d.split('T')[0].split('-'); return `${p[2]}/${p[1]}/${p[0]}`; }
 function hoje(){ return new Date().toISOString().slice(0,10); }
@@ -585,9 +600,11 @@ function checkAlertas(){
       if(venc <= limite) count++;
     });
   });
-  // Laudos emitidos (avulsos) também contam no badge — exceto arquivados
+  // Laudos emitidos também contam no badge — exceto arquivados
   (D.laudos_emitidos||[]).forEach(l => {
     if(!l.vencimento || _laudoArquivado(l)) return;
+    // Se veio de uma OS que ainda existe, o laço acima já contou — não repete
+    if(l.os_numero && (D.os||[]).some(o=>o.numero_os===l.os_numero)) return;
     const key = `lemit${l.id}`;
     if(contatoF.includes(key)||lembrarD.includes(key)) return;
     const venc = new Date(String(l.vencimento).slice(0,10)+'T12:00:00');
@@ -1806,6 +1823,8 @@ async function salvarOS(){
   if(ok){
     // Cria a ficha do cliente (se ainda não existir)
     await _garantirFichaCliente(dados.cliente_nome, dados.cnpj);
+    // Leva os laudos desta OS para o controle de Laudos Emitidos
+    await _syncLaudosDaOS(dados, laudos);
     // Envia cada laudo pro Google Calendar
     for(const l of laudos){
       await gcalOS({...dados, data_entrega_laudo: l.data_entrega, _laudo_desc: l.descricao, _laudo_venc: l.data_vencimento});
@@ -1831,7 +1850,8 @@ function editarOS(id){
   ${laudos.length ? `<div class="table-wrap" style="margin-bottom:10px"><table><thead><tr><th>Laudo</th><th>Entrega</th><th>Vencimento</th></tr></thead><tbody>
     ${laudos.map(l=>`<tr><td>${esc(l.descricao)}</td><td>${fmtData(l.data_entrega)}</td><td>${fmtData(l.data_vencimento)||'—'}</td></tr>`).join('')}
   </tbody></table></div>` : '<p class="text-muted text-sm">Nenhum laudo cadastrado nesta OS.</p>'}
-  <button class="btn btn-sm btn-outline mt-8" onclick="abrirModalLaudosOS(${id})">${icon('edit',16)} Gerenciar Laudos</button>`,
+  <button class="btn btn-sm btn-outline mt-8" onclick="abrirModalLaudosOS(${id})">${icon('edit',16)} Gerenciar Laudos</button>
+  ${laudos.length?`<button class="btn btn-sm btn-outline mt-8" onclick="enviarLaudosOSParaControle(${id})">📋 Enviar p/ controle de laudos</button>`:''}`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarEditOS(${id})">${icon('check',16)} Salvar</button>`);
 }
 
@@ -1866,11 +1886,13 @@ async function salvarLaudosOS(osId){
   const ok = await sbUpdate('ordens_servico',{laudos_prazos: JSON.stringify(laudos)},'id',osId);
   if(ok){
     const o = D.os.find(x=>x.id===osId);
+    // Leva os laudos desta OS para o controle de Laudos Emitidos (só os que faltam)
+    const novos = await _syncLaudosDaOS(o, laudos);
     for(const l of laudos){
       if(l.data_entrega) await gcalOS({...o, data_entrega_laudo:l.data_entrega, _laudo_desc:l.descricao, _laudo_venc:l.data_vencimento});
     }
     fecharModal();
-    alert('✅ Laudos salvos!');
+    alert('✅ Laudos salvos!' + (novos?`\n📋 ${novos} laudo(s) também foram para o controle de Laudos Emitidos.`:''));
     nav('os');
   }
 }
@@ -2287,7 +2309,7 @@ function _renderNotaControle(osId, itensCustom){
   const enchimento=Math.max(0, 7-totalLinhas);
   const linhasVazias=Array(enchimento).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('');
 
-  const logo = D.config.logo_url || (typeof LOGO_B64!=='undefined'?LOGO_B64:'');
+  const logo = _logoSrc();
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Controle de Serviço — OS #${o.numero_os}</title>
   <style>
     *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
@@ -4198,6 +4220,117 @@ const _LAUDOS_HUGO=[
 // ══════════════════════════════════════════════════════════════
 // LAUDOS EMITIDOS — controle de vencimentos (planilha do Hugo + novos)
 // ══════════════════════════════════════════════════════════════
+// ── Comparação de cliente nos laudos (CNPJ manda; nome é reserva) ──
+function _cnpjNum(s){ return String(s||'').replace(/\D/g,''); }
+function _mesmoClienteLaudo(cnpjA, nomeA, cnpjB, nomeB){
+  const ca=_cnpjNum(cnpjA), cb=_cnpjNum(cnpjB);
+  if(ca && cb) return ca===cb;                        // os dois têm CNPJ: decide só por ele
+  if(_nomeNorm(nomeA)===_nomeNorm(nomeB)) return true; // nome idêntico
+  return _similaridadeNomes(nomeA, nomeB) >= 0.6;      // nome parecido (ex: 1 letra trocada)
+}
+// Laudos do controle que são do MESMO cliente — qualquer data
+function _laudosDoMesmoCliente(cnpj, nome){
+  return (D.laudos_emitidos||[]).filter(l=>_mesmoClienteLaudo(cnpj, nome, l.cnpj, l.empresa));
+}
+// Já existe no controle um laudo idêntico (mesmo cliente + mesmo tipo + mesmo vencimento)?
+function _laudoJaNoControle(cnpj, nome, tipo, venc){
+  const v=String(venc||'').slice(0,10);
+  return (D.laudos_emitidos||[]).some(l=>
+    _mesmoClienteLaudo(cnpj, nome, l.cnpj, l.empresa) &&
+    _nomeNorm(l.tipo)===_nomeNorm(tipo) &&
+    String(l.vencimento||'').slice(0,10)===v
+  );
+}
+// Envia os laudos de uma OS para o controle de Laudos Emitidos.
+// Cria SÓ o que ainda não existe. Nunca altera laudos manuais/importados.
+async function _syncLaudosDaOS(o, laudos){
+  if(!o || !o.numero_os) return 0;
+  let criados=0;
+  for(const l of (laudos||[])){
+    if(!l.data_vencimento) continue;
+    const venc=String(l.data_vencimento).slice(0,10);
+    const tipo=(l.descricao||'Laudo').trim();
+    // Já existe um idêntico no controle (desta OS ou não)? então pula
+    if(_laudoJaNoControle(o.cnpj, o.cliente_nome, tipo, venc)) continue;
+    const dados={
+      empresa: o.cliente_nome||'',
+      cnpj: _cnpjNum(o.cnpj),
+      tipo, vencimento: venc,
+      os_numero: o.numero_os,
+      observacao: `Da OS #${o.numero_os}`,
+      criado_em: new Date().toISOString()
+    };
+    const ok=await sbInsert('laudos_emitidos', dados);
+    if(ok){ D.laudos_emitidos.push(dados); criados++; }
+  }
+  return criados;
+}
+
+// Envio MANUAL dos laudos de uma OS (antiga) para o controle.
+// Mostra os laudos que já existem do MESMO cliente (mesmo com data diferente)
+// para você decidir se é o mesmo laudo ou não.
+function enviarLaudosOSParaControle(osId){
+  const o=D.os.find(x=>x.id===osId); if(!o) return;
+  let laudos=[];
+  try { laudos = o.laudos_prazos ? (typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos) : []; } catch(e){ laudos=[]; }
+  laudos=laudos.filter(l=>l.data_vencimento);
+  if(!laudos.length){ alert('Esta OS não tem laudos com data de vencimento.'); return; }
+
+  const analise=laudos.map(l=>{
+    const venc=String(l.data_vencimento).slice(0,10);
+    const tipo=(l.descricao||'Laudo').trim();
+    const identico=_laudoJaNoControle(o.cnpj, o.cliente_nome, tipo, venc);
+    // Laudos do mesmo cliente já no controle (qualquer data), tirando o idêntico
+    const parecidos=_laudosDoMesmoCliente(o.cnpj, o.cliente_nome).filter(x=>
+      !(_nomeNorm(x.tipo)===_nomeNorm(tipo) && String(x.vencimento||'').slice(0,10)===venc)
+    );
+    return { tipo, venc, identico, parecidos };
+  });
+  const novos=analise.filter(a=>!a.identico).length;
+
+  abrirModal(`Enviar laudos da OS #${o.numero_os} para o controle`, `
+    ${alertaBox('info',`Cliente: <b>${esc(o.cliente_nome||'—')}</b>${o.cnpj?' · CNPJ '+esc(fmtCNPJStr(o.cnpj)):''}<br>
+      ${novos} de ${analise.length} laudo(s) ainda não estão no controle.`)}
+    <div style="max-height:50vh;overflow-y:auto;margin-top:10px">
+      ${analise.map((a,i)=>`
+        <div style="padding:10px;border-radius:8px;margin-bottom:8px;background:${a.identico?'#FFF3D6':'var(--cinza-bg)'}">
+          <label class="flex flex-center gap-8" style="cursor:pointer;font-size:13px">
+            <input type="checkbox" id="envl-${i}" ${a.identico?'':'checked'} ${a.identico?'disabled':''} style="width:auto">
+            <span style="flex:1"><b>${esc(a.tipo)}</b> — vence ${fmtData(a.venc)}
+            ${a.identico?'<span class="badge badge-amarelo" style="font-size:9px">já está no controle</span>':''}</span>
+          </label>
+          ${a.parecidos.length?`
+            <div style="margin:6px 0 0 26px;padding:8px;border-left:3px solid #E8A020;background:#FFFDF5;border-radius:0 6px 6px 0">
+              <div class="text-xs" style="color:#B25000;font-weight:600;margin-bottom:4px">⚠️ Este cliente já tem no controle — veja se é o mesmo laudo:</div>
+              ${a.parecidos.map(p=>`<div class="text-xs" style="padding:2px 0">• <b>${esc(p.tipo||'—')}</b> — vence ${fmtData(p.vencimento)}${p.os_numero?` <span class="text-muted">(da OS #${p.os_numero})</span>`:''}${p.observacao&&p.observacao.includes('planilha')?' <span class="text-muted">(da planilha)</span>':''}</div>`).join('')}
+              <div class="text-xs text-muted" style="margin-top:4px">Se for o mesmo laudo (só renovado), você pode desmarcar acima e editar o vencimento do que já existe.</div>
+            </div>`:''}
+        </div>`).join('')}
+    </div>
+  `,
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
+   <button class="btn btn-primary" onclick="confirmarEnvioLaudosOS(${osId})">${icon('check',16)} Enviar marcados</button>`, true);
+  window._analiseEnvioLaudos=analise;
+}
+async function confirmarEnvioLaudosOS(osId){
+  const o=D.os.find(x=>x.id===osId); if(!o) return;
+  const analise=window._analiseEnvioLaudos||[];
+  const marcados=analise.filter((a,i)=>document.getElementById('envl-'+i)?.checked);
+  if(!marcados.length){ alert('Nenhum laudo marcado.'); return; }
+  let ok=0, erros=0;
+  for(const a of marcados){
+    const r=await sbInsert('laudos_emitidos',{
+      empresa:o.cliente_nome||'', cnpj:_cnpjNum(o.cnpj),
+      tipo:a.tipo, vencimento:a.venc, os_numero:o.numero_os,
+      observacao:`Da OS #${o.numero_os}`, criado_em:new Date().toISOString()
+    });
+    if(r) ok++; else erros++;
+  }
+  fecharModal();
+  alert(`✅ ${ok} laudo(s) enviado(s) para o controle!`+(erros?`\n⚠️ ${erros} falharam.`:''));
+  nav('laudos');
+}
+
 function _statusLaudo(venc){
   if(!venc) return {txt:'—', cor:'cinza', dias:null};
   const hoje=new Date(); hoje.setHours(0,0,0,0);
@@ -4232,7 +4365,7 @@ function render_laudos(){
       <td><span class="badge badge-${s.cor}">${s.txt}</span></td>
       <td>${esc(l.empresa||'—')}</td>
       <td class="text-xs">${l.cnpj?esc(fmtCNPJStr(l.cnpj)):'—'}</td>
-      <td>${esc(l.tipo||'—')}</td>
+      <td>${esc(l.tipo||'—')}${l.os_numero?` <span class="badge badge-azul" style="font-size:9px">OS #${l.os_numero}</span>`:''}</td>
       <td style="white-space:nowrap">
         ${ehArquivado
           ? `<button class="btn btn-sm btn-outline" onclick="desarquivarLaudo(${l.id})" title="Voltar para a lista">↩️ Desarquivar</button>`
@@ -4249,7 +4382,8 @@ function render_laudos(){
       <div class="filter-label">Buscar</div>
       <input type="text" id="lau-busca" placeholder="Empresa, CNPJ ou tipo de laudo..." oninput="_filtrarLaudos()" style="width:100%">
     </div>
-    <div style="display:flex;gap:8px;align-self:flex-end">
+    <div style="display:flex;gap:8px;align-self:flex-end;flex-wrap:wrap">
+      <button class="btn btn-outline" onclick="verificarDuplicadosLaudos()">🔍 Verificar duplicados</button>
       <button class="btn btn-outline" onclick="importarLaudosHugo()">${icon('download',16)} Importar planilha do Hugo (${_LAUDOS_HUGO.length})</button>
       <button class="btn btn-primary" onclick="modalNovoLaudoEmitido()">${icon('plus',16)} Novo Laudo</button>
     </div>
@@ -4277,6 +4411,66 @@ function render_laudos(){
     </details>
   </div>`:''}`;
 }
+// Procura laudos possivelmente duplicados: mesmo cliente (CNPJ ou nome parecido)
+// + mesmo tipo de laudo — mesmo que a data seja diferente. Você decide o que fazer.
+function verificarDuplicadosLaudos(){
+  const todos=(D.laudos_emitidos||[]).filter(l=>!_laudoArquivado(l));
+  const usados=new Set();
+  const grupos=[];
+  todos.forEach((l,i)=>{
+    if(usados.has(i)) return;
+    const grupo=[l]; usados.add(i);
+    todos.forEach((x,j)=>{
+      if(j<=i || usados.has(j)) return;
+      const mesmoCli=_mesmoClienteLaudo(l.cnpj, l.empresa, x.cnpj, x.empresa);
+      const mesmoTipo=_nomeNorm(l.tipo)===_nomeNorm(x.tipo) || _similaridadeNomes(l.tipo, x.tipo)>=0.6;
+      if(mesmoCli && mesmoTipo){ grupo.push(x); usados.add(j); }
+    });
+    if(grupo.length>1){
+      grupo.sort((a,b)=>String(b.vencimento||'').localeCompare(String(a.vencimento||''))); // mais novo primeiro
+      grupos.push(grupo);
+    }
+  });
+
+  abrirModal('Verificar Laudos Duplicados', `
+    ${grupos.length
+      ? alertaBox('warning',`Encontrei <b>${grupos.length} grupo(s)</b> de laudos do <b>mesmo cliente</b> com o <b>mesmo tipo</b> de laudo — mesmo com datas diferentes. Confira se é o mesmo laudo repetido ou renovações diferentes.<br>💡 Normalmente o <b>mais recente</b> é o que vale; o antigo pode ser arquivado.`)
+      : alertaBox('info','✅ Nenhum laudo duplicado encontrado. Cada cliente tem tipos de laudo diferentes entre si.')}
+    <div style="max-height:55vh;overflow-y:auto;margin-top:10px">
+      ${grupos.map(g=>`
+        <div class="card" style="padding:12px;margin-bottom:10px;box-shadow:none;border:1px solid var(--cinza-borda)">
+          <div style="font-size:13px;font-weight:700;color:var(--azul);margin-bottom:2px">${esc(g[0].empresa||'—')}</div>
+          <div class="text-xs text-muted" style="margin-bottom:8px">${g[0].cnpj?esc(fmtCNPJStr(g[0].cnpj)):'sem CNPJ'} · ${g.length} laudos parecidos</div>
+          ${g.map((l,idx)=>`
+            <div class="flex flex-between flex-center" style="background:${idx===0?'#E8F7EF':'var(--cinza-bg)'};padding:8px 10px;border-radius:6px;margin-bottom:5px;gap:8px;flex-wrap:wrap">
+              <span style="font-size:12px;flex:1">
+                <b>${esc(l.tipo||'—')}</b> — vence <b>${fmtData(l.vencimento)}</b>
+                ${idx===0?'<span class="badge badge-verde" style="font-size:9px">mais recente</span>':''}
+                ${l.os_numero?`<span class="badge badge-azul" style="font-size:9px">OS #${l.os_numero}</span>`:''}
+                ${(l.observacao||'').includes('planilha')?'<span class="badge badge-cinza" style="font-size:9px">da planilha</span>':''}
+              </span>
+              <span style="white-space:nowrap">
+                <button class="btn btn-sm btn-outline" onclick="_dupLaudoAcao(${l.id},'arq')" title="Tirar da lista principal">🗄️ Arquivar</button>
+                <button class="btn btn-sm btn-danger" onclick="_dupLaudoAcao(${l.id},'del')" title="Apagar de vez">${icon('close',16)}</button>
+              </span>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>
+  `,
+  `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`, true);
+}
+async function _dupLaudoAcao(id, acao){
+  const l=(D.laudos_emitidos||[]).find(x=>x.id===id);
+  if(acao==='del'){
+    if(!confirm(`Excluir de vez o laudo "${l?.tipo||''}" de ${l?.empresa||''} (vence ${fmtData(l?.vencimento)})?`)) return;
+    await sbDelete('laudos_emitidos','id',id);
+  } else {
+    await sbUpdate('laudos_emitidos',{arquivado:true},'id',id);
+  }
+  await carregarTudo();
+  verificarDuplicadosLaudos(); // reabre já atualizado
+}
+
 function _filtrarLaudos(){
   const t=(document.getElementById('lau-busca')?.value||'').toLowerCase().trim();
   document.querySelectorAll('#tbl-laudos tbody tr, #tbl-laudos-arq tbody tr').forEach(tr=>{
@@ -5342,9 +5536,11 @@ function verificarAlertasLaudos(){
     });
   });
 
-  // Laudos emitidos (avulsos) — controle da planilha do Hugo (exceto arquivados)
+  // Laudos emitidos — controle próprio (exceto arquivados)
   (D.laudos_emitidos||[]).forEach(l => {
     if(!l.vencimento || _laudoArquivado(l)) return;
+    // Se veio de uma OS que ainda existe, o laço das OS já avisou — não repete
+    if(l.os_numero && (D.os||[]).some(o=>o.numero_os===l.os_numero)) return;
     const key = `lemit${l.id}`;
     if(getContatoFeito().includes(key)) return;
     if(getLembrarDepois().includes(key)) return;
