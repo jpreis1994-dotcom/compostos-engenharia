@@ -2312,26 +2312,48 @@ function _renderNotaControle(osId, itensCustom){
   const logo = _logoSrc();
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Controle de Serviço — OS #${o.numero_os}</title>
   <style>
+    /* Margem de segurança da folha: toda impressora tem uma faixa que não
+       imprime nas bordas. Usamos DUAS proteções para nada ser cortado:
+       1) o @page abaixo (respeitado pelos navegadores)
+       2) a margem do próprio .doc no @media print (vale mesmo se o
+          navegador ignorar o @page ou se você escolher "margens: nenhuma") */
+    @page { size: A4 portrait; margin: 10mm; }
     *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
-    body{margin:0;padding:24px;color:#111;font-size:12px}
-    .doc{max-width:780px;margin:0 auto;border:2px solid #1A3C5E}
-    .topo{display:flex;align-items:center;border-bottom:2px solid #1A3C5E}
-    .topo img{width:130px;height:auto;padding:8px}
-    .topo .titulo{flex:1;text-align:center;font-size:16px;font-weight:bold;color:#1A3C5E;padding:8px}
-    .sec-titulo{background:#1A3C5E;color:#fff;font-weight:bold;padding:5px 8px;font-size:12px}
+    body{
+      margin:0; padding:26px 18px; color:#111; font-size:12px; background:#eef1f5;
+      /* Faz o navegador imprimir os fundos coloridos (as faixas azuis) */
+      -webkit-print-color-adjust:exact; print-color-adjust:exact;
+    }
+    .doc{max-width:760px;margin:0 auto;background:#fff;border:1.5px solid #1A3C5E;box-shadow:0 2px 12px rgba(0,0,0,.12)}
+    .topo{display:flex;align-items:center;gap:8px;border-bottom:1.5px solid #1A3C5E;padding:10px 12px}
+    .topo img{width:112px;height:auto;flex:none}
+    .topo .titulo{flex:1;text-align:center;font-size:15px;font-weight:bold;color:#1A3C5E;letter-spacing:.4px;line-height:1.35}
+    .topo .titulo .os{display:block;font-size:11px;font-weight:normal;color:#555;margin-top:3px;letter-spacing:0}
+    .sec-titulo{background:#1A3C5E;color:#fff;font-weight:bold;padding:5px 10px;font-size:11.5px;letter-spacing:.5px}
     table{width:100%;border-collapse:collapse}
-    .dados td{border:1px solid #999;padding:4px 7px;font-size:11px}
-    .itens th{background:#e8edf3;border:1px solid #999;padding:5px;font-size:11px}
-    .itens td{border:1px solid #999;padding:5px;font-size:11px}
-    .total-row td{font-weight:bold;background:#f0f3f7}
-    .rodape{padding:10px;font-size:11px}
+    .dados td{border:1px solid #b8bfc7;padding:5px 8px;font-size:11px;vertical-align:top}
+    .itens th{background:#e8edf3;border:1px solid #b8bfc7;padding:6px 8px;font-size:11px;color:#1A3C5E;letter-spacing:.3px}
+    .itens td{border:1px solid #b8bfc7;padding:5px 8px;font-size:11px}
+    .total-row td{font-weight:bold;background:#f0f3f7;font-size:12px;padding:7px 8px}
+    .rodape{padding:12px}
+    .banco{border:1px solid #b8bfc7;border-radius:4px;background:#fafbfc;padding:9px 11px;font-size:11px;line-height:1.75}
+    .banco b{color:#1A3C5E}
     .aviso{background:#FFF8E1;border:1px solid #E8A020;color:#7B5500;padding:6px 8px;font-size:10px;text-align:center;margin:0}
-    @media print{.noprint{display:none}body{padding:0}}
+    @media print{
+      .noprint{display:none}
+      body{padding:0;background:#fff}
+      /* margem própria: garante a faixa de segurança mesmo sem o @page */
+      .doc{max-width:none;width:auto;margin:10mm;border-width:1px;box-shadow:none}
+      /* Não deixa quebrar uma linha da tabela no meio ao virar a página */
+      tr{page-break-inside:avoid}
+      thead{display:table-header-group}
+      .sec-titulo,.rodape{page-break-inside:avoid}
+    }
   </style></head><body>
   <div class="doc">
     <div class="topo">
       ${logo?`<img src="${logo}" alt="logo">`:''}
-      <div class="titulo">NOTA DE CONTROLE PRESTAÇÃO DE SERVIÇOS<br><span style="font-size:11px;font-weight:normal">OS #${o.numero_os}</span></div>
+      <div class="titulo">NOTA DE CONTROLE PRESTAÇÃO DE SERVIÇOS<span class="os">OS #${o.numero_os}</span></div>
     </div>
     <div class="sec-titulo">PRESTADOR DE SERVIÇO</div>
     <table class="dados">
@@ -2358,10 +2380,12 @@ function _renderNotaControle(osId, itensCustom){
     </table>
 
     <div class="rodape">
-      <b>Dados para depósito:</b><br>
-      Banco: ${esc(BANCO.banco)} &nbsp; Ag.: ${esc(BANCO.ag)} &nbsp; C/C: ${esc(BANCO.cc)}<br>
-      Titular: ${esc(BANCO.titular)}<br>
-      <b>PIX:</b> ${esc(BANCO.pix)}
+      <div class="banco">
+        <b>Dados para depósito</b><br>
+        Banco: ${esc(BANCO.banco)} &nbsp;·&nbsp; Ag.: ${esc(BANCO.ag)} &nbsp;·&nbsp; C/C: ${esc(BANCO.cc)}<br>
+        Titular: ${esc(BANCO.titular)}<br>
+        <b>PIX:</b> ${esc(BANCO.pix)}
+      </div>
     </div>
   </div>
   <div class="noprint" style="text-align:center;margin-top:16px">
