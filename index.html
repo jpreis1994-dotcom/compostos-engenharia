@@ -6138,14 +6138,38 @@ function consolidarClientes(){
   return lista;
 }
 
+// Lê a lista de membros de um grupo, não importa em que formato ela veio do banco.
+// Já vi vir de 4 jeitos: array pronto, texto JSON, texto JSON com aspas escapadas
+// 2x, ou até separado por vírgula. Antes, um formato inesperado fazia o
+// JSON.parse devolver uma string e o .forEach QUEBRAR toda a unificação —
+// por isso os cadastros não juntavam. Aqui a gente sempre devolve um array.
+function _lerMembrosGrupo(bruto){
+  if(Array.isArray(bruto)) return bruto.filter(Boolean);
+  if(bruto==null) return [];
+  let v = bruto;
+  // Tenta desempacotar JSON até 3 vezes (cobre o escape duplo)
+  for(let i=0; i<3 && typeof v==='string'; i++){
+    const s=v.trim();
+    if(!s){ return []; }
+    if(s[0]==='[' || s[0]==='"'){
+      try { v = JSON.parse(s); } catch(e){ break; }
+    } else break;
+  }
+  if(Array.isArray(v)) return v.filter(Boolean);
+  // Sobrou uma string simples → separa por vírgula (ou é um nome só)
+  if(typeof v==='string'){
+    return v.split(',').map(x=>x.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 // Funde os registros que o usuário marcou como "mesmo cliente"
 function _aplicarGruposClientes(lista){
   const grupos = D.cli_grupos||[];
   // Mapa: membro (normalizado) -> grupo
   const membroParaGrupo = {};
   grupos.forEach(g=>{
-    let membros=[];
-    try { membros = Array.isArray(g.membros)?g.membros:JSON.parse(g.membros||'[]'); } catch(e){ membros=[]; }
+    const membros = _lerMembrosGrupo(g.membros);
     membros.forEach(m=>{ membroParaGrupo[_nomeNorm(m)] = g; });
     // O nome principal também pertence ao grupo
     membroParaGrupo[_nomeNorm(g.nome_principal)] = membroParaGrupo[_nomeNorm(g.nome_principal)] || g;
@@ -6396,9 +6420,14 @@ function modalUnificarClientes(){
     <hr class="divider">
     <div style="font-size:13px;font-weight:600;margin-bottom:8px">Já unificados</div>
     ${(D.cli_grupos||[]).map(g=>{
-      let membros=[]; try{membros=Array.isArray(g.membros)?g.membros:JSON.parse(g.membros||'[]');}catch(e){}
-      return `<div class="flex flex-between flex-center" style="background:var(--cinza-bg);padding:8px 10px;border-radius:6px;margin-bottom:5px;font-size:12px">
-        <span><b>${esc(g.nome_principal)}</b> <span class="text-muted">← ${membros.filter(m=>_nomeNorm(m)!==_nomeNorm(g.nome_principal)).map(esc).join(', ')}</span></span>
+      const membros = _lerMembrosGrupo(g.membros);
+      const outros = membros.filter(m=>_nomeNorm(m)!==_nomeNorm(g.nome_principal));
+      // Um grupo sem outros membros não une nada — avisa em vez de fingir que está ok
+      const quebrado = outros.length===0;
+      return `<div class="flex flex-between flex-center" style="background:${quebrado?'#FFF3D6':'var(--cinza-bg)'};padding:8px 10px;border-radius:6px;margin-bottom:5px;font-size:12px">
+        <span><b>${esc(g.nome_principal)}</b> ${quebrado
+          ? '<span class="text-xs" style="color:#B25000">⚠️ grupo vazio (não uniu ninguém) — desfaça e tente de novo</span>'
+          : `<span class="text-muted">← ${outros.map(esc).join(', ')}</span>`}</span>
         <button class="btn btn-sm btn-outline" onclick="desfazerUnificacao(${g.id||'null'},'${esc(g.nome_principal)}')">Desfazer</button>
       </div>`;
     }).join('')}` : '';
