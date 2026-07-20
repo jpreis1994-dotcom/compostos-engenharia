@@ -6166,15 +6166,57 @@ function _lerMembrosGrupo(bruto){
 // Funde os registros que o usuário marcou como "mesmo cliente"
 function _aplicarGruposClientes(lista){
   const grupos = D.cli_grupos||[];
-  // Mapa: membro (normalizado) -> grupo
-  const membroParaGrupo = {};
+
+  // ── Passo 1: juntar grupos que compartilham QUALQUER nome ──
+  // Cada grupo tem um principal + membros. Se dois grupos têm um nome em comum
+  // (mesmo que os principais sejam diferentes), eles são o MESMO cliente e
+  // precisam virar um só. Sem isso, várias tentativas de unificar o mesmo
+  // cliente criavam "ilhas" separadas que não se fundiam — era este o bug
+  // do POSTO GATTE (3 grupos, nenhum vazio, mas não juntava).
+  // Algoritmo: união de conjuntos por nome normalizado.
+  const nomeParaCluster = {};   // nome normalizado -> id do cluster
+  let proximoCluster = 0;
+  const clusters = {};          // id -> { nomes:Set, principais:[] }
+
   grupos.forEach(g=>{
-    const membros = _lerMembrosGrupo(g.membros);
-    membros.forEach(m=>{ membroParaGrupo[_nomeNorm(m)] = g; });
-    // O nome principal também pertence ao grupo
-    membroParaGrupo[_nomeNorm(g.nome_principal)] = membroParaGrupo[_nomeNorm(g.nome_principal)] || g;
+    const nomes = _lerMembrosGrupo(g.membros).map(_nomeNorm);
+    if(g.nome_principal) nomes.push(_nomeNorm(g.nome_principal));
+    const nomesValidos = [...new Set(nomes.filter(Boolean))];
+    if(!nomesValidos.length) return;
+    // Algum desses nomes já está num cluster?
+    let alvo = null;
+    for(const n of nomesValidos){
+      if(nomeParaCluster[n]!==undefined){ alvo = nomeParaCluster[n]; break; }
+    }
+    if(alvo===null){ alvo = proximoCluster++; clusters[alvo] = {nomes:new Set(), principais:[]}; }
+    // Adiciona todos os nomes deste grupo ao cluster; se algum já estava em
+    // OUTRO cluster, funde os dois clusters.
+    nomesValidos.forEach(n=>{
+      const antigo = nomeParaCluster[n];
+      if(antigo!==undefined && antigo!==alvo){
+        // move tudo do cluster antigo para o alvo
+        clusters[antigo].nomes.forEach(x=>{ clusters[alvo].nomes.add(x); nomeParaCluster[x]=alvo; });
+        clusters[alvo].principais.push(...clusters[antigo].principais);
+        delete clusters[antigo];
+      }
+      clusters[alvo].nomes.add(n);
+      nomeParaCluster[n] = alvo;
+    });
+    if(g.nome_principal) clusters[alvo].principais.push(g.nome_principal);
   });
-  const fundidos = {}; // chave do grupo -> registro fundido
+
+  // Mapa final: nome normalizado -> id do cluster (grupo unificado de verdade)
+  const membroParaCluster = nomeParaCluster;
+  // Escolhe o nome de exibição de cada cluster: prefere um principal que exista
+  // (o último escolhido pelo usuário costuma ser o mais completo)
+  const nomeClusterExibe = {};
+  Object.keys(clusters).forEach(cid=>{
+    const p = clusters[cid].principais;
+    nomeClusterExibe[cid] = p.length ? p[p.length-1] : [...clusters[cid].nomes][0];
+  });
+
+  // ── Passo 2: fundir as linhas da lista conforme o cluster ──
+  const fundidos = {}; // id do cluster -> registro fundido
   const resultado = [];
   const fundir = (f, reg, ehPrincipal)=>{
     f.os.push(...reg.os); f.orcamentos.push(...reg.orcamentos);
@@ -6189,23 +6231,20 @@ function _aplicarGruposClientes(lista){
     if(reg.cidade && (!f.cidade || ehPrincipal)) f.cidade=reg.cidade;
   };
   lista.forEach(reg=>{
-    const g = membroParaGrupo[_nomeNorm(reg.nome)];
-    if(!g){ resultado.push(reg); return; }
-    // CORREÇÃO: o identificador do grupo é o NOME PRINCIPAL normalizado.
-    // Assim, grupos repetidos (várias tentativas de unificar o mesmo cliente)
-    // fundem TODOS no mesmo registro, em vez de criar linhas duplicadas.
-    const gid = 'grp:'+_nomeNorm(g.nome_principal);
-    const ehPrincipal = _nomeNorm(reg.nome)===_nomeNorm(g.nome_principal);
-    if(!fundidos[gid]){
-      fundidos[gid] = { ...reg,
-        nome: g.nome_principal || reg.nome,
+    const cid = membroParaCluster[_nomeNorm(reg.nome)];
+    if(cid===undefined){ resultado.push(reg); return; }
+    const nomeExibe = nomeClusterExibe[cid] || reg.nome;
+    const ehPrincipal = _nomeNorm(reg.nome)===_nomeNorm(nomeExibe);
+    if(!fundidos[cid]){
+      fundidos[cid] = { ...reg,
+        nome: nomeExibe,
         _unificado:true, _membros:[reg.nome],
         os:[...reg.os], orcamentos:[...reg.orcamentos], receber:[...reg.receber], fluxo:[...reg.fluxo]
       };
-      resultado.push(fundidos[gid]);
-      if(reg.cnpj && !fundidos[gid].cnpj) fundidos[gid].cnpj=reg.cnpj;
+      resultado.push(fundidos[cid]);
+      if(reg.cnpj && !fundidos[cid].cnpj) fundidos[cid].cnpj=reg.cnpj;
     } else {
-      fundir(fundidos[gid], reg, ehPrincipal);
+      fundir(fundidos[cid], reg, ehPrincipal);
     }
   });
 
