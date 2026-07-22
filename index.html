@@ -564,6 +564,57 @@ const LOGO_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAaQAAADvCAIAAAAyxjd5AAEAAElEQVR42uz9WZ
 const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const MESES_A = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
+// ═══ Tipos de serviço (lista única, usada no formulário da OS e na divisão) ═══
+const TIPOS_SERVICO = ['OBRA','ESTANQUEIDADE','INTEGRIDADE','NR 11','NR 12','NR 13',
+  'LIMPEZA DE TANQUE','TANQUE AEREO','RESPONSABILIDADE TECNICA','LAUDO DE CLASSE','OUTRO'];
+
+// Categorias de RECEITA do fluxo de caixa. Começa com os mesmos tipos de
+// serviço (para a categoria bater com o serviço da OS ao vincular) e depois
+// as categorias financeiras que não são serviço.
+const CATEGORIAS_RECEITA = [
+  ...TIPOS_SERVICO.filter(t=>t!=='OUTRO'),
+  'RECEBIMENTO','COMISSÃO','VENDA DE PEÇAS','APORTE (PRÓPRIO)','OUTRO'
+];
+
+// Lê a divisão por tipo de serviço de uma OS. Aceita qualquer formato vindo do
+// banco (lista pronta, texto JSON ou JSON com escape duplo) e sempre devolve
+// uma lista [{tipo, valor}].
+function _lerServicosItens(bruto){
+  if(Array.isArray(bruto)) return bruto;
+  if(bruto==null) return [];
+  let v=bruto;
+  for(let i=0;i<3 && typeof v==='string';i++){
+    const s=v.trim();
+    if(!s) return [];
+    if(s[0]==='[' || s[0]==='"'){ try{ v=JSON.parse(s); }catch(e){ return []; } }
+    else return [];
+  }
+  return Array.isArray(v)?v:[];
+}
+
+// Divisão por tipo de serviço de uma OS, JÁ com a regra de compatibilidade:
+// se a OS não tem divisão lançada, ela conta 100% no seu tipo único.
+// Assim as OS antigas entram nos relatórios sem precisar refazer nada.
+function _servicosDaOS(o){
+  const itens=_lerServicosItens(o.servicos_itens)
+    .map(i=>({ tipo:String(i.tipo||'').trim()||'OUTRO', valor:Number(i.valor)||0 }))
+    .filter(i=>i.valor>0 || i.tipo);
+  if(itens.length) return itens;
+  return [{ tipo:(o.servico||'OUTRO'), valor:Number(o.valor_total||0), _unico:true }];
+}
+// A OS tem divisão lançada (mais de um tipo)?
+function _osTemDivisao(o){ return _lerServicosItens(o.servicos_itens).length>0; }
+
+// Como o tipo de serviço aparece na LINHA da lista de OS.
+// Com divisão: mostra cada tipo com o seu valor. Sem divisão: o tipo único.
+function _servicoLabelOS(o){
+  if(!_osTemDivisao(o)) return `<span class="text-xs">${esc(o.servico||'—')}</span>`;
+  const itens=_servicosDaOS(o);
+  return `<div style="display:flex;flex-direction:column;gap:2px">`+
+    itens.map(i=>`<span class="text-xs"><b>${esc(i.tipo)}</b> <span class="text-muted">${fmtBRL(i.valor)}</span></span>`).join('')+
+    `</div>`;
+}
+
 // Monta o endereço do logo pronto para usar em <img src="...">.
 // O LOGO_B64 é só o base64 "puro" (sem cabeçalho), então precisa do prefixo
 // "data:image/png;base64," — sem ele a imagem aparece quebrada.
@@ -1021,7 +1072,7 @@ function labelPeriodo(){
 function atualizarFiltro(){ lerFiltro(); render_dashboard(); }
 
 // ── Helpers dos KPIs modernos (Dashboard) ──
-function _fluxoMes(ano,mes,tipo){const k=`${ano}-${mes}`;return D.fluxo.filter(r=>r.tipo===tipo&&(r.data_movimento||'').slice(0,7)===k).reduce((a,b)=>a+Number(b.valor||0),0);}
+function _fluxoMes(ano,mes,tipo){const k=`${ano}-${mes}`;return D.fluxo.filter(r=>r.tipo===tipo&&(r.data_movimento||'').slice(0,7)===k&&!_ehNaoOperacional(r.categoria||r.tipo_servico||r.tipo_despesa)).reduce((a,b)=>a+Number(b.valor||0),0);}
 function _mesAnterior(ano,mes){let m=parseInt(mes)-1,y=parseInt(ano);if(m<1){m=12;y--;}return {ano:String(y),mes:String(m).padStart(2,'0')};}
 function _ultimosMeses(ano,mes,n){const arr=[];let y=parseInt(ano),m=parseInt(mes);for(let i=0;i<n;i++){arr.unshift({ano:String(y),mes:String(m).padStart(2,'0')});m--;if(m<1){m=12;y--;}}return arr;}
 function _spark(vals,cor){const w=116,h=32,p=3;const max=Math.max(...vals,0),min=Math.min(...vals,0);if(max===min)return '';const rng=(max-min)||1;const pts=vals.map((v,i)=>{const x=p+i*(w-2*p)/((vals.length-1)||1);const y=h-p-((v-min)/rng)*(h-2*p);return x.toFixed(1)+','+y.toFixed(1);});const poly=pts.join(' ');const id='sg'+Math.random().toString(36).slice(2,7);return `<svg class="kpi-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${cor}" stop-opacity=".22"/><stop offset="1" stop-color="${cor}" stop-opacity="0"/></linearGradient></defs><polygon points="${p},${h-p} ${poly} ${w-p},${h-p}" fill="url(#${id})"/><polyline points="${poly}" fill="none" stroke="${cor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;}
@@ -1098,10 +1149,79 @@ function renderOsAbertasParaPlanejamento(){
   </table></div>`;
 }
 
+// ══════════════════════════════════════════════════════════════
+// PRINCIPAIS DESPESAS (por tipo e por fornecedor)
+// Recebe o fluxo JÁ filtrado pelo período e SEM os lançamentos pessoais.
+// ══════════════════════════════════════════════════════════════
+function _rankingDespesas(fluxo, chaveFn){
+  const acc={};
+  fluxo.filter(r=>r.tipo==='DESPESA').forEach(r=>{
+    const k=(chaveFn(r)||'').trim() || '(sem informação)';
+    if(!acc[k]) acc[k]={valor:0, n:0};
+    acc[k].valor += Number(r.valor||0);
+    acc[k].n++;
+  });
+  const linhas=Object.entries(acc).sort((a,b)=>b[1].valor-a[1].valor);
+  const total=linhas.reduce((a,[,d])=>a+d.valor,0);
+  return {linhas, total};
+}
+function _tabelaDespesas(titulo, dica, fluxo, chaveFn, rotuloCol){
+  const {linhas, total} = _rankingDespesas(fluxo, chaveFn);
+  if(!linhas.length){
+    return `<div class="card"><div class="card-title">${titulo}</div>
+      <p class="text-sm text-muted">Nenhuma despesa no período selecionado.</p></div>`;
+  }
+  const top=linhas.slice(0,8);
+  const resto=linhas.slice(8);
+  const somaResto=resto.reduce((a,[,d])=>a+d.valor,0);
+  return `<div class="card">
+    <div class="card-title">${titulo}</div>
+    <p class="text-xs text-muted" style="margin:-4px 0 8px">${dica}</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>${rotuloCol}</th><th class="td-num">Lanç.</th><th class="td-num">Valor</th><th class="td-num">%</th><th style="width:90px"></th></tr></thead>
+      <tbody>
+        ${top.map(([nome,d])=>{
+          const pct = total ? d.valor/total*100 : 0;
+          return `<tr>
+            <td class="text-xs"><b>${esc(nome)}</b></td>
+            <td class="td-num text-xs">${d.n}</td>
+            <td class="td-num vermelho" style="font-weight:700">${fmtBRL(d.valor)}</td>
+            <td class="td-num text-xs">${pct.toFixed(1)}%</td>
+            <td><div style="background:var(--cinza-borda);border-radius:4px;height:7px;overflow:hidden">
+              <div style="background:#D64045;height:100%;width:${pct.toFixed(1)}%"></div></div></td>
+          </tr>`;
+        }).join('')}
+        ${resto.length?`<tr><td class="text-xs text-muted">+ outros ${resto.length}</td><td></td>
+          <td class="td-num text-xs text-muted">${fmtBRL(somaResto)}</td><td colspan="2"></td></tr>`:''}
+      </tbody>
+      <tfoot><tr class="total-row"><td><b>TOTAL</b></td><td></td>
+        <td class="td-num" style="font-weight:700">${fmtBRL(total)}</td><td colspan="2"></td></tr></tfoot>
+    </table></div>
+  </div>`;
+}
+function _cardDespesasPorTipo(fluxo){
+  return _tabelaDespesas('💸 Principais Despesas por Tipo',
+    'Onde o dinheiro está saindo. Não inclui retiradas nem aportes pessoais.',
+    fluxo, r=>r.categoria||r.tipo_despesa, 'Tipo de despesa');
+}
+function _cardDespesasPorFornecedor(fluxo){
+  return _tabelaDespesas('🏢 Principais Despesas por Fornecedor',
+    'Para quem você mais paga. Não inclui retiradas nem aportes pessoais.',
+    fluxo, r=>{
+      const p=(typeof _fluxoPartes==='function') ? _fluxoPartes(r) : {forn:r.fornecedor||''};
+      return p.forn || r.fornecedor || '';
+    }, 'Fornecedor');
+}
+
 function render_dashboard(){
-  const fluxoF  = filtrarPorPeriodo(D.fluxo,   'data_movimento');
-  const receberF = filtrarPorPeriodo(D.receber, 'vencimento');
-  const pagarF   = filtrarPorPeriodo(D.pagar,   'data_vencimento');
+  // IMPORTANTE: o dashboard mostra só o movimento OPERACIONAL da empresa.
+  // Retiradas do proprietário e aportes de dinheiro pessoal ficam de fora de
+  // todos os números e gráficos, senão eles distorcem o resultado do negócio.
+  const soOperacional = arr => arr.filter(f=>!_ehNaoOperacional(f.categoria||f.tipo_servico||f.tipo_despesa));
+
+  const fluxoF  = soOperacional(filtrarPorPeriodo(D.fluxo, 'data_movimento'));
+  const receberF = soOperacional(filtrarPorPeriodo(D.receber, 'vencimento'));
+  const pagarF   = soOperacional(filtrarPorPeriodo(D.pagar,   'data_vencimento'));
 
   const recTotal = fluxoF.filter(x=>x.tipo==='RECEITA').reduce((a,b)=>a+Number(b.valor),0);
   const despTotal= fluxoF.filter(x=>x.tipo==='DESPESA').reduce((a,b)=>a+Number(b.valor),0);
@@ -1161,10 +1281,14 @@ function render_dashboard(){
   <div class="grid-2">
     <div class="card"><div class="card-title">📤 Próximas Contas a Pagar</div>${renderProxPagar(pagarF)}</div>
     <div class="card"><div class="card-title">📈 Top Clientes por Receita</div><canvas id="c-chart-cli" height="170"></canvas></div>
+  </div>
+  <div class="grid-2">
+    ${_cardDespesasPorTipo(fluxoF)}
+    ${_cardDespesasPorFornecedor(fluxoF)}
   </div>`;
 
-  // Gráfico meses — mostra todos os meses do ano filtrado
-  const fluxoGraf = FILTRO.ano ? D.fluxo.filter(r=>(r.data_movimento||'').startsWith(FILTRO.ano)) : D.fluxo;
+  // Gráfico meses — mostra todos os meses do ano filtrado (só operacional)
+  const fluxoGraf = soOperacional(FILTRO.ano ? D.fluxo.filter(r=>(r.data_movimento||'').startsWith(FILTRO.ano)) : D.fluxo);
   const byMes={};
   fluxoGraf.forEach(r=>{const k=r.data_movimento?.slice(5,7)||'00';if(!byMes[k])byMes[k]={r:0,d:0};if(r.tipo==='RECEITA')byMes[k].r+=Number(r.valor);else byMes[k].d+=Number(r.valor);});
   const mks=Object.keys(byMes).sort();
@@ -1762,7 +1886,7 @@ function render_os(){
         const finalizado=(o.status||'').toUpperCase()==='FINALIZADO';
         return`<tr>
         <td><b>#${o.numero_os}</b></td><td>${esc(o.cliente_nome||'—')}</td>
-        <td><span class="text-xs">${esc(o.servico||'—')}</span></td>
+        <td>${_servicoLabelOS(o)}</td>
         <td>${badge(o.status||'—')}</td>
         <td>${fmtData(o.data_abertura)}</td>
         <td>${fmtData(o.data_execucao)}</td>
@@ -1796,7 +1920,7 @@ function _secaoOSArquivadas(){
         <tbody>${arq.map(o=>`<tr>
           <td><b>#${o.numero_os}</b></td>
           <td>${esc(o.cliente_nome||'—')}</td>
-          <td><span class="text-xs">${esc(o.servico||'—')}</span></td>
+          <td>${_servicoLabelOS(o)}</td>
           <td>${badge(o.status||'—')}</td>
           <td class="td-num">${fmtBRL(o.valor_total)}</td>
           <td style="white-space:nowrap">
@@ -1843,7 +1967,7 @@ function modalNovaOS(){
       </div>
     </div>
     <div class="form-group span2"><label>Tipo de Serviço</label>
-      <select id="os-serv"><option>OBRA</option><option>ESTANQUEIDADE</option><option>INTEGRIDADE</option><option>NR 11</option><option>NR 12</option><option>NR 13</option><option>LIMPEZA DE TANQUE</option><option>TANQUE AEREO</option><option>RESPONSABILIDADE TECNICA</option><option>LAUDO DE CLASSE</option><option>OUTRO</option></select></div>
+      <select id="os-serv">${TIPOS_SERVICO.map(s=>`<option>${esc(s)}</option>`).join('')}</select></div>
     <div class="form-group"><label>Valor Total (R$)</label><input type="number" id="os-valor" value="0" step="0.01"></div>
     <div class="form-group"><label>Data de Abertura</label><input type="date" id="os-abertura" value="${hoje()}"></div>
     <div class="form-group"><label>Data de Execução em Campo</label><input type="date" id="os-execucao"></div>
@@ -1970,6 +2094,12 @@ function editarOS(id){
   <div class="form-grid">
     <div class="form-group span2"><label>Status</label>
       <select id="edit-os-st">${['A EXECUTAR','EM EXECUÇÃO','FINALIZADO','EM CONVERSA'].map(s=>`<option ${o.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    <div class="form-group span2"><label>Tipo de Serviço</label>
+      <select id="edit-os-serv">${TIPOS_SERVICO.map(s=>`<option ${_nomeNorm(o.servico)===_nomeNorm(s)?'selected':''}>${esc(s)}</option>`).join('')}${
+        // se a OS tem um tipo que não está na lista padrão, mantém como opção para não perder
+        (o.servico && !TIPOS_SERVICO.some(s=>_nomeNorm(s)===_nomeNorm(o.servico)))
+          ? `<option selected>${esc(o.servico)}</option>` : ''}</select>
+      ${_osTemDivisao(o)?'<p class="text-xs text-muted" style="margin-top:4px">Esta OS tem divisão por tipo de serviço — ela é quem vale nos relatórios.</p>':''}</div>
     <div class="form-group"><label>Data de Execução</label><input type="date" id="edit-os-exec" value="${o.data_execucao||''}"></div>
     <div class="form-group"><label>Valor Total (R$)</label><input type="number" id="edit-os-val" value="${o.valor_total}" step="0.01"></div>
     <div class="form-group span2"><label>Observação</label><textarea id="edit-os-obs">${esc(o.observacao||'')}</textarea></div>
@@ -1980,6 +2110,7 @@ function editarOS(id){
     ${laudos.map(l=>`<tr><td>${esc(l.descricao)}</td><td>${fmtData(l.data_entrega)}</td><td>${fmtData(l.data_vencimento)||'—'}</td></tr>`).join('')}
   </tbody></table></div>` : '<p class="text-muted text-sm">Nenhum laudo cadastrado nesta OS.</p>'}
   <button class="btn btn-sm btn-outline mt-8" onclick="abrirModalLaudosOS(${id})">${icon('edit',16)} Gerenciar Laudos</button>
+  <button class="btn btn-sm btn-outline mt-8" onclick="abrirModalDivisaoOS(${id})">🔧 Dividir por tipo de serviço</button>
   ${laudos.length?`<button class="btn btn-sm btn-outline mt-8" onclick="enviarLaudosOSParaControle(${id})">📋 Enviar p/ controle de laudos</button>`:''}
   <hr class="divider">
   ${o.arquivada
@@ -2016,6 +2147,133 @@ function abrirModalLaudosOS(osId){
    <button class="btn btn-primary" onclick="salvarLaudosOS(${osId})">${icon('check',16)} Salvar Laudos</button>`,false);
 }
 
+// ══════════════════════════════════════════════════════════════
+// DIVISÃO DA OS POR TIPO DE SERVIÇO
+// ══════════════════════════════════════════════════════════════
+let _divIdx = 0;
+function abrirModalDivisaoOS(osId){
+  const o=D.os.find(x=>x.id===osId); if(!o) return;
+  let itens=_lerServicosItens(o.servicos_itens)
+    .map(i=>({tipo:String(i.tipo||''), valor:Number(i.valor)||0}));
+  // Se ainda não dividiu, começa com o tipo único da OS levando o valor todo
+  if(!itens.length) itens=[{tipo:o.servico||'', valor:Number(o.valor_total||0)}];
+  _divIdx=0;
+  const total=Number(o.valor_total||0);
+  abrirModal(`Divisão por Tipo de Serviço — OS #${o.numero_os}`, `
+    <p class="text-sm text-muted" style="margin-bottom:4px">Quando a OS tem mais de um serviço, informe quanto cada tipo representa. O sistema confere com o valor total da OS.</p>
+    <p class="text-xs text-muted" style="margin-bottom:10px">Valor total da OS: <b>${fmtBRL(total)}</b>${o.itens_nota?` · <a href="javascript:void(0)" onclick="_divPuxarDaNota(${osId})" style="color:var(--azul2);font-weight:600">puxar dos itens da nota</a>`:''}</p>
+    <div style="display:grid;grid-template-columns:1fr 130px auto;gap:8px;font-size:11px;color:var(--cinza);padding:0 2px;margin-bottom:4px">
+      <span>Tipo de serviço</span><span>Valor (R$)</span><span></span>
+    </div>
+    <div id="div-serv-list">
+      ${itens.map(i=>_divLinhaHTML(i.tipo,i.valor)).join('')}
+    </div>
+    <button class="btn btn-sm btn-outline mt-8" onclick="addDivRow()">${icon('plus',16)} Adicionar serviço</button>
+    <div id="div-conferencia" style="margin-top:12px"></div>
+  `,
+  `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button>
+   <button class="btn btn-primary" onclick="salvarDivisaoOS(${osId})">${icon('check',16)} Salvar divisão</button>`, false);
+  setTimeout(()=>_divConferir(osId), 30);
+}
+function _divLinhaHTML(tipo, valor){
+  const i=_divIdx++;
+  const opts=TIPOS_SERVICO.map(t=>`<option${_nomeNorm(t)===_nomeNorm(tipo)?' selected':''}>${esc(t)}</option>`).join('');
+  return `<div class="item-row" id="div-row-${i}" style="grid-template-columns:1fr 130px auto;margin-bottom:8px;align-items:end">
+    <select id="div-tipo-${i}" style="width:100%">${opts}</select>
+    <input type="number" id="div-valor-${i}" value="${Number(valor)||0}" step="0.01" style="width:100%" oninput="_divConferir()">
+    <button class="btn btn-sm btn-danger btn-icon" onclick="document.getElementById('div-row-${i}').remove();_divConferir()">${icon('close',16)}</button>
+  </div>`;
+}
+function addDivRow(){
+  document.getElementById('div-serv-list').insertAdjacentHTML('beforeend', _divLinhaHTML('', 0));
+  _divConferir();
+}
+function _coletarDivisao(){
+  const itens=[];
+  document.querySelectorAll('#div-serv-list .item-row').forEach(row=>{
+    const i=row.id.replace('div-row-','');
+    const tipo=document.getElementById('div-tipo-'+i)?.value||'';
+    const valor=parseFloat(document.getElementById('div-valor-'+i)?.value)||0;
+    if(tipo) itens.push({tipo, valor});
+  });
+  return itens;
+}
+// Mostra se a soma bate com o valor total da OS
+function _divConferir(osId){
+  const el=document.getElementById('div-conferencia'); if(!el) return;
+  const o=osId?D.os.find(x=>x.id===osId):(window._divOS||null);
+  if(osId) window._divOS=o;
+  const total=Number((window._divOS||o||{}).valor_total||0);
+  const soma=_coletarDivisao().reduce((a,i)=>a+i.valor,0);
+  const dif=+(total-soma).toFixed(2);
+  let cor='#1A8F5A', txt=`✓ A soma bate com o valor da OS (${fmtBRL(soma)})`;
+  if(Math.abs(dif)>=0.01){
+    cor='#B25000';
+    txt = dif>0
+      ? `⚠️ Faltam ${fmtBRL(dif)} para fechar o valor da OS (${fmtBRL(total)}). Soma atual: ${fmtBRL(soma)}`
+      : `⚠️ A soma passou ${fmtBRL(Math.abs(dif))} do valor da OS (${fmtBRL(total)}). Soma atual: ${fmtBRL(soma)}`;
+  }
+  el.innerHTML=`<div style="background:${cor==='#1A8F5A'?'#E8F7EF':'#FFF3D6'};color:${cor};border-radius:6px;padding:9px 12px;font-size:12px;font-weight:600">${txt}</div>`;
+}
+// Sugere a divisão a partir dos itens da nota (agrupa por tipo pelo texto do item)
+function _divPuxarDaNota(osId){
+  const o=D.os.find(x=>x.id===osId); if(!o) return;
+  let itens=[];
+  try { itens = Array.isArray(o.itens_nota)?o.itens_nota:JSON.parse(o.itens_nota||'[]'); } catch(e){ itens=[]; }
+  if(!itens.length){ alert('Esta OS não tem itens de nota para usar como base.'); return; }
+  const porTipo={};
+  itens.forEach(it=>{
+    const desc=String(it.desc||it.descricao||'');
+    const val=(Number(it.qtd||it.quantidade||1))*(Number(it.vunit||it.valor_unit||0));
+    const tipo=_tipoPeloTexto(desc) || (o.servico||'OUTRO');
+    porTipo[tipo]=(porTipo[tipo]||0)+val;
+  });
+  _divIdx=0;
+  document.getElementById('div-serv-list').innerHTML =
+    Object.entries(porTipo).map(([t,v])=>_divLinhaHTML(t, +v.toFixed(2))).join('');
+  _divConferir(osId);
+}
+// Tenta reconhecer o tipo de serviço pelo texto do item da nota
+function _tipoPeloTexto(txt){
+  const t=_nomeNorm(txt);
+  if(!t) return '';
+  const pistas=[
+    ['ESTANQUEIDADE', ['estanqueidade','estanque']],
+    ['NR 13',         ['nr 13','nr13','vaso de pressao','caldeira']],
+    ['NR 12',         ['nr 12','nr12']],
+    ['NR 11',         ['nr 11','nr11','empilhadeira']],
+    ['LIMPEZA DE TANQUE', ['limpeza']],
+    ['TANQUE AEREO',  ['aereo','aerea']],
+    ['INTEGRIDADE',   ['integridade']],
+    ['LAUDO DE CLASSE',['classe']],
+    ['RESPONSABILIDADE TECNICA', ['responsabilidade','art ','anotacao']],
+    ['OBRA',          ['obra','instalacao','montagem']],
+  ];
+  for(const [tipo,chaves] of pistas){ if(chaves.some(k=>t.includes(k))) return tipo; }
+  return '';
+}
+async function salvarDivisaoOS(osId){
+  const itens=_coletarDivisao().filter(i=>i.valor>0);
+  const o=D.os.find(x=>x.id===osId);
+  if(!itens.length){
+    if(!confirm('Nenhum serviço com valor. Deseja LIMPAR a divisão desta OS?')) return;
+    const ok=await sbUpdate('ordens_servico',{servicos_itens:null},'id',osId);
+    if(ok){ if(o) o.servicos_itens=null; fecharModal(); nav('os'); }
+    return;
+  }
+  const total=Number(o?.valor_total||0);
+  const soma=itens.reduce((a,i)=>a+i.valor,0);
+  if(Math.abs(total-soma)>=0.01){
+    const dif=total-soma;
+    const msg = dif>0
+      ? `A soma dos serviços (${fmtBRL(soma)}) é MENOR que o valor da OS (${fmtBRL(total)}).\nFaltam ${fmtBRL(dif)}.`
+      : `A soma dos serviços (${fmtBRL(soma)}) é MAIOR que o valor da OS (${fmtBRL(total)}).\nPassou ${fmtBRL(Math.abs(dif))}.`;
+    if(!confirm(msg+'\n\nSalvar mesmo assim?')) return;
+  }
+  const ok=await sbUpdate('ordens_servico',{servicos_itens:JSON.stringify(itens)},'id',osId);
+  if(ok){ if(o) o.servicos_itens=JSON.stringify(itens); fecharModal(); nav('os'); }
+}
+
 async function salvarLaudosOS(osId){
   const laudos = coletarLaudos();
   const ok = await sbUpdate('ordens_servico',{laudos_prazos: JSON.stringify(laudos)},'id',osId);
@@ -2034,6 +2292,7 @@ async function salvarLaudosOS(osId){
 async function salvarEditOS(id){
   const ok=await sbUpdate('ordens_servico',{
     status:       document.getElementById('edit-os-st').value,
+    servico:      document.getElementById('edit-os-serv').value,
     data_execucao:document.getElementById('edit-os-exec').value||null,
     valor_total:  parseFloat(document.getElementById('edit-os-val').value)||0,
     observacao:   document.getElementById('edit-os-obs').value
@@ -2795,7 +3054,7 @@ function modalNovoLancamento(){
     </div>
     <div class="form-group" id="fc-cat-wrap">
       <label>Categoria</label>
-      <select id="fc-cat-rec"><option>OBRA</option><option>ESTANQUEIDADE</option><option>INTEGRIDADE</option><option>NR 11</option><option>NR 12</option><option>NR 13</option><option>LIMPEZA DE TANQUE</option><option>TANQUE AEREO</option><option>RESPONSABILIDADE TECNICA</option><option>RECEBIMENTO</option><option>COMISSÃO</option><option>VENDA DE PEÇAS</option><option>APORTE (PRÓPRIO)</option><option>OUTRO</option></select>
+      <select id="fc-cat-rec">${CATEGORIAS_RECEITA.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
       <select id="fc-cat-desp" style="display:none" onchange="toggleEstoqueWrap()"><option>FUNCIONÁRIO</option><option>SALARIO</option><option>IMPOSTO</option><option>ART</option><option>CONTADOR</option><option>ROYALTES</option><option>FINANCIAMENTO CARRO</option><option>SEGURO</option><option>PEÇAS CUSTO</option><option>COMPRA DE EQUIPAMENTOS</option><option>ALUGUEL DE EQUIPAMENTOS</option><option>ALIMENTAÇÃO E DESLOCAMENTO</option><option>DESLOCAMENTO</option><option>COMPRA DE MATERIAL (INSUMOS)</option><option>TERCEIRIZAÇÃO DE MÃO DE OBRA</option><option>TARIFAS BANCÁRIAS</option><option>RETIRADAS (PROPRIETÁRIO)</option><option>DEMAIS GASTOS</option><option>SERVENTE DE PEDREIRO</option><option>MULTA</option><option>FERRAMENTAS</option><option>VALE</option></select>
     </div>
     <div class="form-group span2">
@@ -2806,6 +3065,7 @@ function modalNovoLancamento(){
         ${osAtivas.map(o=>`<option value="${o.numero_os}" data-busca="${esc((o.cliente_nome||'')+' '+(o.cnpj||'')).toLowerCase()}">#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico)})</option>`).join('')}
       </select>
     </div>
+    <div id="fc-os-serv-aviso" style="display:none;grid-column:1/-1;margin-top:-4px"></div>
     <div id="fc-os-cr-aviso" style="display:none;grid-column:1/-1"></div>
     <div class="form-group span2" id="fc-rec-wrap">
       <label>💰 Quitar uma Conta a Receber (opcional)</label>
@@ -3072,6 +3332,52 @@ function _cnpjDoClientePorNome(nome){
 
 // Quando vincula uma OS no lançamento de RECEITA, mostra as contas a receber
 // em aberto dessa OS e sugere quitá-las (evita duplicação receita x conta a receber)
+// Ao vincular uma OS num lançamento de RECEITA, a categoria passa a ser o
+// mesmo tipo de serviço da OS. Se a OS tem divisão por tipo, usa o de maior
+// valor e avisa quais são os outros, para você escolher se preferir.
+// Mesma regra ao EDITAR um lançamento já existente
+function _efcOSMudou(){
+  const num=document.getElementById('efc-os-id')?.value;
+  if(!num){
+    const av=document.getElementById('efc-os-serv-aviso');
+    if(av){ av.style.display='none'; av.innerHTML=''; }
+    return;
+  }
+  const o=D.os.find(x=>String(x.numero_os)===String(num));
+  if(o) _categoriaPelaOS(o, 'efc-cat-rec', 'efc-os-serv-aviso');
+}
+
+function _categoriaPelaOS(o, idSelect, idAviso){
+  const sel=document.getElementById(idSelect);
+  const aviso=document.getElementById(idAviso);
+  if(aviso){ aviso.style.display='none'; aviso.innerHTML=''; }
+  if(!sel || !o) return;
+  const tipoEl=document.getElementById('fc-tipo')||document.getElementById('efc-tipo');
+  if(tipoEl && tipoEl.value!=='RECEITA') return;   // categoria de despesa é outra lista
+
+  const itens=_servicosDaOS(o).slice().sort((a,b)=>b.valor-a.valor);
+  const principal=itens[0]?.tipo || o.servico || '';
+  if(!principal) return;
+
+  // Acha a opção correspondente (ignora acentos/caixa)
+  const opt=[...sel.options].find(op=>_nomeNorm(op.value||op.text)===_nomeNorm(principal));
+  if(opt){ sel.value=opt.value||opt.text; }
+  else {
+    // O serviço da OS não existe na lista de categorias: acrescenta na hora
+    const novo=document.createElement('option');
+    novo.textContent=principal; novo.value=principal;
+    sel.insertBefore(novo, sel.firstChild); sel.value=principal;
+  }
+
+  if(aviso && itens.length>1){
+    aviso.style.display='';
+    aviso.innerHTML=`<div class="alert-box alert-info" style="font-size:12px;margin:0">
+      Esta OS tem <b>mais de um serviço</b>. Coloquei a categoria como <b>${esc(principal)}</b> (o de maior valor).
+      Os outros: ${itens.slice(1).map(i=>esc(i.tipo)+' '+fmtBRL(i.valor)).join(' · ')}.
+      Se este recebimento for de outro serviço, é só trocar a categoria acima.</div>`;
+  }
+}
+
 function fluxoAoSelecionarOS(){
   const numOS=document.getElementById('fc-os-id')?.value;
   const tipo=document.getElementById('fc-tipo')?.value;
@@ -3086,6 +3392,7 @@ function fluxoAoSelecionarOS(){
       const cliEl=document.getElementById('fc-cli');
       if(cliEl && !cliEl.value.trim()) cliEl.value=oo.cliente_nome||'';
       _preencherCNPJFluxo(oo.cnpj || _cnpjDoClientePorNome(oo.cliente_nome));
+      _categoriaPelaOS(oo, 'fc-cat-rec', 'fc-os-serv-aviso');
     }
   }
 
@@ -3132,8 +3439,14 @@ function editarLancamento(id){
   const osAtivas = D.os.filter(o=>['EM EXECUÇÃO','A EXECUTAR','FINALIZADO'].includes(o.status));
   const tipo = r.tipo||'RECEITA';
   const cat  = r.categoria||r.tipo_servico||r.tipo_despesa||'';
-  const catsRec  = ['OBRA','ESTANQUEIDADE','INTEGRIDADE','NR 11','NR 12','NR 13','LIMPEZA DE TANQUE','TANQUE AEREO','RESPONSABILIDADE TECNICA','RECEBIMENTO','COMISSÃO','VENDA DE PEÇAS','APORTE (PRÓPRIO)','OUTRO'];
+  const catsRec  = CATEGORIAS_RECEITA.slice();
   const catsDesp = ['FUNCIONÁRIO','SALARIO','IMPOSTO','ART','CONTADOR','ROYALTES','FINANCIAMENTO CARRO','SEGURO','PEÇAS CUSTO','COMPRA DE EQUIPAMENTOS','ALUGUEL DE EQUIPAMENTOS','ALIMENTAÇÃO E DESLOCAMENTO','DESLOCAMENTO','COMPRA DE MATERIAL (INSUMOS)','TERCEIRIZAÇÃO DE MÃO DE OBRA','TARIFAS BANCÁRIAS','RETIRADAS (PROPRIETÁRIO)','DEMAIS GASTOS','SERVENTE DE PEDREIRO','MULTA','FERRAMENTAS','VALE'];
+  // Se este lançamento tem uma categoria antiga que não está mais na lista,
+  // acrescenta ela para não trocar a categoria sozinho ao salvar.
+  if(cat){
+    const lista = tipo==='RECEITA' ? catsRec : catsDesp;
+    if(!lista.some(c=>_nomeNorm(c)===_nomeNorm(cat))) lista.unshift(cat);
+  }
   const formaContaAtual = r.forma_conta||'conta';
   abrirModal(`Editar Lançamento #${id}`,`
   <div class="form-grid">
@@ -3164,10 +3477,11 @@ function editarLancamento(id){
     </div>
     <div class="form-group span2">
       <label>🔧 Vincular à OS (opcional)</label>
-      <select id="efc-os-id">
+      <select id="efc-os-id" onchange="_efcOSMudou()">
         <option value="">— Sem vínculo —</option>
         ${osAtivas.map(o=>`<option value="${o.numero_os}" ${r.os_id==o.numero_os?'selected':''}>#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico)})</option>`).join('')}
       </select>
+      <div id="efc-os-serv-aviso" style="display:none;margin-top:6px"></div>
     </div>
     <div class="form-group span2" id="efc-rec-wrap" style="${tipo==='DESPESA'?'display:none':''}">
       <label>💰 Quitar uma Conta a Receber (opcional)</label>
@@ -4774,7 +5088,11 @@ function render_relatorios(){
     <div class="tab" id="reltab-financeiro" onclick="relTab('financeiro')">💰 Financeiro</div>
     <div class="tab" id="reltab-rentab" onclick="relTab('rentab')">📊 Rentabilidade</div>
     <div class="tab" id="reltab-clientes" onclick="relTab('clientes')">👥 Clientes</div>
+    <div class="tab" id="reltab-servicos" onclick="relTab('servicos')">🔧 Serviços</div>
     <div class="tab" id="reltab-laudos" onclick="relTab('laudos')">${icon('bell',16)} Laudos</div>
+  </div>
+  <div class="rel-pane" id="relpane-servicos" style="display:none">
+    ${_cardFaturamentoPorServico()}
   </div>
   <div class="rel-pane" id="relpane-financeiro" style="display:none">
   <div class="card">
@@ -4839,8 +5157,57 @@ function render_relatorios(){
   _relConcMes = new Date().getMonth()+1;
   renderConciliacao();
 }
+// Faturamento por TIPO DE SERVIÇO — usa a divisão da OS quando existir;
+// OS sem divisão contam 100% no seu tipo único (assim as antigas entram também).
+function _cardFaturamentoPorServico(){
+  const osF = filtrarPorPeriodo(D.os.filter(o=>!o.arquivada), 'data_abertura');
+  const porTipo = {};
+  let totalGeral = 0, comDivisao = 0;
+  osF.forEach(o=>{
+    if(_osTemDivisao(o)) comDivisao++;
+    _servicosDaOS(o).forEach(i=>{
+      const t = i.tipo || 'OUTRO';
+      if(!porTipo[t]) porTipo[t] = { valor:0, os:new Set() };
+      porTipo[t].valor += i.valor;
+      porTipo[t].os.add(o.numero_os);
+      totalGeral += i.valor;
+    });
+  });
+  const linhas = Object.entries(porTipo).sort((a,b)=>b[1].valor-a[1].valor);
+  if(!linhas.length){
+    return `<div class="card"><div class="card-title">🔧 Faturamento por Tipo de Serviço</div>
+      <p class="text-sm text-muted">Nenhuma OS no período selecionado.</p></div>`;
+  }
+  return `<div class="card">
+    <div class="card-title">🔧 Faturamento por Tipo de Serviço <span class="text-xs text-muted" style="font-weight:400">— ${labelPeriodo()}</span></div>
+    <p class="text-xs text-muted" style="margin:-4px 0 10px">Quanto cada tipo de serviço representa. As OS com <b>divisão lançada</b> entram repartidas; as demais contam inteiras no seu tipo único.
+    ${comDivisao?` <span class="verde">${comDivisao} OS com divisão detalhada.</span>`:' <span style="color:#B25000">Nenhuma OS com divisão ainda — abra uma OS e use "Dividir por tipo de serviço".</span>'}</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Tipo de serviço</th><th class="td-num">OS</th><th class="td-num">Valor</th><th class="td-num">% do total</th><th style="width:130px"></th></tr></thead>
+      <tbody>
+        ${linhas.map(([tipo,d])=>{
+          const pct = totalGeral ? (d.valor/totalGeral*100) : 0;
+          return `<tr>
+            <td><b>${esc(tipo)}</b></td>
+            <td class="td-num text-xs">${d.os.size}</td>
+            <td class="td-num" style="font-weight:700">${fmtBRL(d.valor)}</td>
+            <td class="td-num text-xs">${pct.toFixed(1)}%</td>
+            <td><div style="background:var(--cinza-borda);border-radius:4px;height:8px;overflow:hidden">
+              <div style="background:var(--azul2);height:100%;width:${pct.toFixed(1)}%"></div></div></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot><tr class="total-row">
+        <td><b>TOTAL</b></td><td class="td-num text-xs">${osF.length}</td>
+        <td class="td-num" style="font-weight:700">${fmtBRL(totalGeral)}</td>
+        <td class="td-num text-xs">100%</td><td></td>
+      </tr></tfoot>
+    </table></div>
+  </div>`;
+}
+
 function relTab(name){
-  ['reuniao','operacional','conciliacao','financeiro','rentab','clientes','laudos'].forEach(n=>{
+  ['reuniao','operacional','conciliacao','financeiro','rentab','clientes','servicos','laudos'].forEach(n=>{
     const pane=document.getElementById('relpane-'+n);
     const tab=document.getElementById('reltab-'+n);
     if(pane) pane.style.display = n===name?'':'none';
@@ -6779,7 +7146,7 @@ function verFichaCliente(idx){
       <thead><tr><th>OS</th><th>Serviço</th><th>Status</th><th>Abertura</th><th class="td-num">Valor</th><th></th></tr></thead>
       <tbody>${cl.os.map(o=>`<tr>
         <td><b>#${o.numero_os}</b></td>
-        <td><span class="text-xs">${esc(o.servico||'—')}</span></td>
+        <td>${_servicoLabelOS(o)}</td>
         <td>${badge(o.status)}</td>
         <td>${fmtData(o.data_abertura)}</td>
         <td class="td-num">${fmtBRL(o.valor_total)}</td>
