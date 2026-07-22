@@ -1045,21 +1045,43 @@ function _ultimosMeses(ano,mes,n){const arr=[];let y=parseInt(ano),m=parseInt(me
 function _spark(vals,cor){const w=116,h=32,p=3;const max=Math.max(...vals,0),min=Math.min(...vals,0);if(max===min)return '';const rng=(max-min)||1;const pts=vals.map((v,i)=>{const x=p+i*(w-2*p)/((vals.length-1)||1);const y=h-p-((v-min)/rng)*(h-2*p);return x.toFixed(1)+','+y.toFixed(1);});const poly=pts.join(' ');const id='sg'+Math.random().toString(36).slice(2,7);return `<svg class="kpi-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${cor}" stop-opacity=".22"/><stop offset="1" stop-color="${cor}" stop-opacity="0"/></linearGradient></defs><polygon points="${p},${h-p} ${poly} ${w-p},${h-p}" fill="url(#${id})"/><polyline points="${poly}" fill="none" stroke="${cor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;}
 function _kpiCard(o){const cor=o.cor||'#2A6DBF';const valTxt=(typeof o.valor==='number')?(o.fmt||fmtBRL)(o.valor):o.valor;let foot='';if(o.prev!=null){const atual=Number(o.valor)||0,prev=Number(o.prev)||0;if(!(prev===0&&atual===0)){const pct=prev!==0?(atual-prev)/Math.abs(prev)*100:100;const up=atual>=prev;const good=(o.goodWhenUp!==false)?up:!up;foot=`<div class="kpi-trend ${good?'up':'down'}">${up?'▲':'▼'} ${Math.abs(pct).toFixed(1)}% <span class="kpi-trend-sub">vs mês ant.</span></div>`;}}else if(o.sub){foot=`<div class="kpi-delta">${o.sub}</div>`;}return `<div class="kpi kpi-modern"><div class="kpi-top"><div class="kpi-ico" style="background:${cor}22;color:${cor}">${icon(o.icon,22)}</div>${o.spark||''}</div><div class="kpi-label">${o.label}</div><div class="kpi-val ${o.valClass||''}">${valTxt}</div>${foot}</div>`;}
 // Descobre a cidade/UF de uma OS: 1º do orçamento vinculado, 2º do cadastro do cliente
+// Descobre a cidade/UF de uma OS. Procura em várias fontes, da mais confiável
+// para a menos: CNPJ da OS, orçamento vinculado, cadastro do cliente (mesmo
+// que o nome tenha mudado por unificação), e qualquer OS/orçamento do mesmo
+// cliente. Assim, se você preencheu o CNPJ depois e unificou, a cidade aparece.
 function _cidadeDaOS(o){
-  // Do orçamento vinculado
+  const cnpjOS = String(o.cnpj||'').replace(/\D/g,'');
+  const nomeOS = _nomeNorm(o.cliente_nome||'');
+
+  // Monta o conjunto de nomes que são "o mesmo cliente" desta OS, olhando os
+  // grupos de unificação (se o nome da OS está num grupo, todos os nomes do
+  // grupo valem para a busca).
+  const nomesEquivalentes = new Set([nomeOS]);
+  (D.cli_grupos||[]).forEach(g=>{
+    const nomes = _lerMembrosGrupo(g.membros).map(_nomeNorm);
+    if(g.nome_principal) nomes.push(_nomeNorm(g.nome_principal));
+    if(nomes.includes(nomeOS)) nomes.forEach(n=>nomesEquivalentes.add(n));
+  });
+  const ehMesmoCliente = (cnpjX, nomeX)=>{
+    const cx=String(cnpjX||'').replace(/\D/g,'');
+    if(cnpjOS && cx && cnpjOS===cx) return true;      // CNPJ manda
+    return nomesEquivalentes.has(_nomeNorm(nomeX));    // ou nome equivalente
+  };
+
+  // 1) Cadastro de cliente (a fonte que você preenche) — por CNPJ ou nome equivalente
+  const cad=(D.clientes||[]).find(c=>ehMesmoCliente(c.cnpj, c.razao_social) && (c.cidade||c.uf));
+  if(cad) return {cidade:cad.cidade||'', uf:cad.uf||''};
+
+  // 2) Orçamento vinculado diretamente à OS
   if(o.orcamento_id){
     const orc=D.orcamentos.find(x=>x.id===o.orcamento_id);
-    if(orc && (orc.cli_municipio||orc.cli_uf)){
-      return {cidade:orc.cli_municipio||'', uf:orc.cli_uf||''};
-    }
+    if(orc && (orc.cli_municipio||orc.cli_uf)) return {cidade:orc.cli_municipio||'', uf:orc.cli_uf||''};
   }
-  // Do cadastro do cliente (por nome)
-  const nome=String(o.cliente_nome||'').toLowerCase().trim();
-  const cad=(D.clientes||[]).find(c=>String(c.razao_social||'').toLowerCase().trim()===nome);
-  if(cad && (cad.cidade||cad.uf)) return {cidade:cad.cidade||'', uf:cad.uf||''};
-  // Último recurso: procura um orçamento do mesmo cliente que tenha cidade
-  const orcCli=D.orcamentos.find(x=>String(x.cli_razao||'').toLowerCase().trim()===nome && (x.cli_municipio||x.cli_uf));
+
+  // 3) Qualquer orçamento do mesmo cliente (por CNPJ ou nome equivalente) que tenha cidade
+  const orcCli=D.orcamentos.find(x=>ehMesmoCliente(x.cli_cnpj, x.cli_razao) && (x.cli_municipio||x.cli_uf));
   if(orcCli) return {cidade:orcCli.cli_municipio||'', uf:orcCli.cli_uf||''};
+
   return {cidade:'', uf:''};
 }
 
@@ -1067,7 +1089,7 @@ function _cidadeDaOS(o){
 // para o Hugo planejar as rotas de campo.
 function renderOsAbertasParaPlanejamento(){
   const abertas = D.os
-    .filter(o=>['A EXECUTAR','EM EXECUÇÃO'].includes((o.status||'').toUpperCase()))
+    .filter(o=>!o.arquivada && ['A EXECUTAR','EM EXECUÇÃO'].includes((o.status||'').toUpperCase()))
     .map(o=>({...o, _loc:_cidadeDaOS(o)}))
     // Ordena pela data de abertura (mais antiga primeiro — quem espera há mais tempo)
     .sort((a,b)=>String(a.data_abertura||'').localeCompare(String(b.data_abertura||'')));
@@ -1752,9 +1774,10 @@ function render_os(){
   <div class="card">
     <div class="table-wrap">
       <table id="tbl-os"><thead><tr><th>OS</th><th>Cliente</th><th>Serviço</th><th>Status</th><th>Abertura</th><th>Execução</th><th>Laudos</th><th class="td-num">Valor</th><th>Ações</th></tr></thead>
-      <tbody>${filtrarPorPeriodo(D.os,'data_abertura').map(o=>{
+      <tbody>${filtrarPorPeriodo(D.os.filter(o=>!o.arquivada),'data_abertura').map(o=>{
         const laudos=o.laudos_prazos?(typeof o.laudos_prazos==='string'?JSON.parse(o.laudos_prazos):o.laudos_prazos):[];
         const laudosBadge=laudos.length?`<span class="badge badge-azul" title="${esc(laudos.map(l=>l.descricao).join(', '))}">📋 ${laudos.length}</span>`:'';
+        const finalizado=(o.status||'').toUpperCase()==='FINALIZADO';
         return`<tr>
         <td><b>#${o.numero_os}</b></td><td>${esc(o.cliente_nome||'—')}</td>
         <td><span class="text-xs">${esc(o.servico||'—')}</span></td>
@@ -1764,6 +1787,7 @@ function render_os(){
         <td>${laudosBadge}</td>
         <td class="td-num">${fmtBRL(o.valor_total)}</td>
         <td style="white-space:nowrap">
+          ${finalizado?'':`<button class="btn btn-sm btn-success" onclick="finalizarOSRapido(${o.id})" title="Marcar como finalizada">${icon('check',16)}</button>`}
           <button class="btn btn-sm btn-outline" onclick="editarOS(${o.id})">${icon('edit',16)}</button>
           <button class="btn btn-sm btn-primary" onclick="gerarCobrancaOS(${o.id})">💰</button>
           <button class="btn btn-sm btn-outline" onclick="verResultadoOS(${o.id})" title="Resultado da OS">📊</button>
@@ -1773,7 +1797,52 @@ function render_os(){
         </td></tr>`;}).join('')}
       </tbody></table>
     </div>
+  </div>
+  ${_secaoOSArquivadas()}`;
+}
+
+// Seção recolhível com as OS arquivadas
+function _secaoOSArquivadas(){
+  const arq=D.os.filter(o=>o.arquivada).sort((a,b)=>(b.numero_os||0)-(a.numero_os||0));
+  if(!arq.length) return '';
+  return `<div class="card">
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:var(--azul);font-size:14px">🗄️ OS arquivadas (${arq.length})</summary>
+      <p class="text-xs text-muted" style="margin:8px 0">OS com pendências ou negociações que retrocederam. Não aparecem na lista principal nem no dashboard, mas os valores continuam nos relatórios.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>OS</th><th>Cliente</th><th>Serviço</th><th>Status</th><th class="td-num">Valor</th><th>Ações</th></tr></thead>
+        <tbody>${arq.map(o=>`<tr>
+          <td><b>#${o.numero_os}</b></td>
+          <td>${esc(o.cliente_nome||'—')}</td>
+          <td><span class="text-xs">${esc(o.servico||'—')}</span></td>
+          <td>${badge(o.status||'—')}</td>
+          <td class="td-num">${fmtBRL(o.valor_total)}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-sm btn-outline" onclick="desarquivarOS(${o.id})">↩️ Desarquivar</button>
+            <button class="btn btn-sm btn-outline" onclick="editarOS(${o.id})">${icon('edit',16)}</button>
+          </td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </details>
   </div>`;
+}
+
+// Finaliza a OS direto da lista, sem abrir a edição
+async function finalizarOSRapido(id){
+  const o=D.os.find(x=>x.id===id); if(!o) return;
+  if(!confirm(`Marcar a OS #${o.numero_os} (${o.cliente_nome||''}) como FINALIZADA?`)) return;
+  const ok=await sbUpdate('ordens_servico',{status:'FINALIZADO'},'id',id);
+  if(ok){ await carregarTudo(); render_os(); }
+}
+async function arquivarOS(id){
+  const o=D.os.find(x=>x.id===id); if(!o) return;
+  if(!confirm(`Arquivar a OS #${o.numero_os}?\n\nEla sai da lista principal e do dashboard, mas continua nos relatórios. Você pode desarquivar depois.`)) return;
+  const ok=await sbUpdate('ordens_servico',{arquivada:true},'id',id);
+  if(ok){ fecharModal(); await carregarTudo(); render_os(); }
+}
+async function desarquivarOS(id){
+  const ok=await sbUpdate('ordens_servico',{arquivada:false},'id',id);
+  if(ok){ await carregarTudo(); render_os(); }
 }
 
 let _laudoIdx = 0;
@@ -1929,7 +1998,13 @@ function editarOS(id){
     ${laudos.map(l=>`<tr><td>${esc(l.descricao)}</td><td>${fmtData(l.data_entrega)}</td><td>${fmtData(l.data_vencimento)||'—'}</td></tr>`).join('')}
   </tbody></table></div>` : '<p class="text-muted text-sm">Nenhum laudo cadastrado nesta OS.</p>'}
   <button class="btn btn-sm btn-outline mt-8" onclick="abrirModalLaudosOS(${id})">${icon('edit',16)} Gerenciar Laudos</button>
-  ${laudos.length?`<button class="btn btn-sm btn-outline mt-8" onclick="enviarLaudosOSParaControle(${id})">📋 Enviar p/ controle de laudos</button>`:''}`,
+  ${laudos.length?`<button class="btn btn-sm btn-outline mt-8" onclick="enviarLaudosOSParaControle(${id})">📋 Enviar p/ controle de laudos</button>`:''}
+  <hr class="divider">
+  ${o.arquivada
+    ? `<div class="text-xs" style="color:#B25000;margin-bottom:6px">🗄️ Esta OS está arquivada — ela não aparece na lista principal nem no dashboard.</div>
+       <button class="btn btn-sm btn-outline" onclick="desarquivarOS(${id})">↩️ Desarquivar OS</button>`
+    : `<div class="text-xs text-muted" style="margin-bottom:6px">Arquive quando a OS travou ou a negociação retrocedeu. Ela some da lista principal e do dashboard, mas continua guardada e você pode desarquivar quando quiser.</div>
+       <button class="btn btn-sm btn-outline" onclick="arquivarOS(${id})">🗄️ Arquivar OS</button>`}`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarEditOS(${id})">${icon('check',16)} Salvar</button>`);
 }
 
@@ -6441,14 +6516,17 @@ function modalUnificarClientes(){
         ${selo}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
-        ${grupo.map(g=>`<label class="flex flex-center gap-8" style="font-size:13px;cursor:pointer;background:var(--cinza-bg);padding:6px 10px;border-radius:6px">
-          <input type="radio" name="princ-${gi}" value="${esc(g.nome)}" ${g===grupo[0]?'checked':''} style="width:auto">
-          <span><b>${esc(g.nome)}</b>${g.codigo?` <span class="badge badge-azul" style="font-size:9px">${esc(g.codigo)}</span>`:''}${g.cnpj?` <span class="text-xs text-muted">${esc(fmtCNPJStr(g.cnpj))}</span>`:' <span class="text-xs vermelho">sem CNPJ</span>'} — ${g.os.length} OS · ${fmtBRL(g.faturado)}</span>
-        </label>`).join('')}
+        ${grupo.map((g,idx)=>`<div class="flex flex-center gap-8" style="font-size:13px;background:var(--cinza-bg);padding:8px 10px;border-radius:6px">
+          <input type="checkbox" class="sug-check" data-gi="${gi}" data-nome="${esc(g.nome)}" ${porCnpj?'checked':''} onchange="_sugChkMudou(${gi})" style="width:18px;height:18px;flex:none;cursor:pointer" title="Marque se é o mesmo cliente">
+          <label class="flex flex-center gap-6" style="cursor:pointer;flex:1">
+            <input type="radio" name="princ-${gi}" value="${esc(g.nome)}" ${idx===0?'checked':''} style="width:auto" title="Este será o nome principal">
+            <span><b>${esc(g.nome)}</b>${g.codigo?` <span class="badge badge-azul" style="font-size:9px">${esc(g.codigo)}</span>`:''}${g.cnpj?` <span class="text-xs text-muted">${esc(fmtCNPJStr(g.cnpj))}</span>`:' <span class="text-xs vermelho">sem CNPJ</span>'} — ${g.os.length} OS · ${fmtBRL(g.faturado)}</span>
+          </label>
+        </div>`).join('')}
       </div>
-      <p class="text-xs text-muted" style="margin-bottom:8px">Selecione qual nome será o <b>principal</b>.</p>
+      <p class="text-xs text-muted" style="margin-bottom:8px">☑️ Marque <b>quais são o mesmo cliente</b> · 🔘 escolha o nome <b>principal</b> entre os marcados.</p>
       <div class="flex gap-8">
-        <button class="btn btn-sm btn-success" onclick='unificarGrupo(${JSON.stringify(nomes)}, ${gi})'>${icon('check',16)} Unificar</button>
+        <button class="btn btn-sm btn-success" onclick='unificarGrupo(${JSON.stringify(nomes)}, ${gi})'>${icon('check',16)} Unificar marcados</button>
         <button class="btn btn-sm btn-outline" onclick='dispensarSugestao(${JSON.stringify(nomes)})'>${icon('close',16)} Não unificar</button>
       </div>
     </div>`;
@@ -6502,6 +6580,8 @@ function modalUnificarClientes(){
     ${dispensadas}
   `,
   `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`, true);
+  // Deixa os radios coerentes com os checkboxes assim que o modal abre
+  setTimeout(()=>{ (sugestoes||[]).forEach((_,gi)=>_sugChkMudou(gi)); }, 30);
 }
 // Filtra as opções da lista manual conforme a busca
 function _filtrarManual(){
@@ -6514,11 +6594,35 @@ function _filtrarManual(){
   });
 }
 
-// Unifica um grupo das sugestões (pega o principal do radio selecionado)
+// Mantém o radio "principal" coerente: só dá para escolher entre os marcados.
+// Se você desmarca a empresa que era a principal, o principal pula para outra marcada.
+function _sugChkMudou(gi){
+  const checks=[...document.querySelectorAll(`.sug-check[data-gi="${gi}"]`)];
+  const radios=[...document.querySelectorAll(`input[name="princ-${gi}"]`)];
+  checks.forEach((chk,i)=>{
+    const marcado=chk.checked;
+    if(radios[i]){ radios[i].disabled=!marcado; radios[i].closest('label')?.style.setProperty('opacity', marcado?'1':'0.4'); }
+  });
+  // Se o radio marcado ficou desabilitado, passa para o primeiro marcado
+  const atual=radios.find(r=>r.checked);
+  if(!atual || atual.disabled){
+    const primeiroMarcado=checks.findIndex(c=>c.checked);
+    if(primeiroMarcado>=0 && radios[primeiroMarcado]) radios[primeiroMarcado].checked=true;
+  }
+}
+
+// Unifica um grupo das sugestões (só as empresas MARCADAS; principal = radio)
 async function unificarGrupo(nomes, gi){
+  const marcados=[...document.querySelectorAll(`.sug-check[data-gi="${gi}"]:checked`)].map(c=>c.dataset.nome);
+  if(marcados.length<2){
+    alert('Marque pelo menos 2 empresas que são o mesmo cliente.');
+    return;
+  }
   const sel=document.querySelector(`input[name="princ-${gi}"]:checked`);
-  const principal = sel?sel.value:nomes[0];
-  await _salvarGrupoUnificacao(principal, nomes);
+  let principal = sel?sel.value:marcados[0];
+  // Garante que o principal está entre os marcados
+  if(!marcados.some(m=>_nomeNorm(m)===_nomeNorm(principal))) principal=marcados[0];
+  await _salvarGrupoUnificacao(principal, marcados);
 }
 
 // Unifica os selecionados manualmente
