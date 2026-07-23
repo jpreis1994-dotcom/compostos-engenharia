@@ -590,16 +590,29 @@ const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho',
 const MESES_A = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
 // ═══ Tipos de serviço (lista única, usada no formulário da OS e na divisão) ═══
-const TIPOS_SERVICO = ['OBRA','ESTANQUEIDADE','INTEGRIDADE','NR 11','NR 12','NR 13',
+// Tipos de serviço que já vêm no sistema. Você pode cadastrar OUTROS em
+// Configurações → Tabela de Preços dos Serviços, e eles entram nesta lista
+// automaticamente (nas OS, na divisão por serviço e nas categorias do fluxo).
+const TIPOS_SERVICO_BASE = ['OBRA','ESTANQUEIDADE','INTEGRIDADE','NR 11','NR 12','NR 13',
   'LIMPEZA DE TANQUE','TANQUE AEREO','RESPONSABILIDADE TECNICA','LAUDO DE CLASSE','OUTRO'];
+function tiposServico(){
+  const lista = TIPOS_SERVICO_BASE.filter(t=>t!=='OUTRO');
+  (D.tipos_servico||[]).forEach(t=>{
+    const nome = String(t.nome||'').trim().toUpperCase();
+    if(nome && !lista.some(x=>_nomeNorm(x)===_nomeNorm(nome))) lista.push(nome);
+  });
+  return [...lista, 'OUTRO'];   // "OUTRO" sempre por último
+}
 
 // Categorias de RECEITA do fluxo de caixa. Começa com os mesmos tipos de
 // serviço (para a categoria bater com o serviço da OS ao vincular) e depois
 // as categorias financeiras que não são serviço.
-const CATEGORIAS_RECEITA = [
-  ...TIPOS_SERVICO.filter(t=>t!=='OUTRO'),
-  'RECEBIMENTO','COMISSÃO','VENDA DE PEÇAS','APORTE (PRÓPRIO)','OUTRO'
-];
+function categoriasReceita(){
+  return [
+    ...tiposServico().filter(t=>t!=='OUTRO'),
+    'RECEBIMENTO','COMISSÃO','VENDA DE PEÇAS','APORTE (PRÓPRIO)','OUTRO'
+  ];
+}
 
 // Lê a divisão por tipo de serviço de uma OS. Aceita qualquer formato vindo do
 // banco (lista pronta, texto JSON ou JSON com escape duplo) e sempre devolve
@@ -2018,7 +2031,7 @@ let _laudoIdx = 0;
 let _servIdx = 0;
 function _servRowHTML(tipo, valor){
   const i = _servIdx++;
-  const opts = TIPOS_SERVICO.map(t=>`<option${_nomeNorm(t)===_nomeNorm(tipo)?' selected':''}>${esc(t)}</option>`).join('');
+  const opts = tiposServico().map(t=>`<option${_nomeNorm(t)===_nomeNorm(tipo)?' selected':''}>${esc(t)}</option>`).join('');
   return `<div class="item-row" id="serv-row-${i}" style="grid-template-columns:1fr 130px auto;margin-bottom:8px;align-items:end">
     <select id="serv-tipo-${i}" style="width:100%">${opts}</select>
     <input type="number" id="serv-valor-${i}" value="${Number(valor)||0}" step="0.01" style="width:100%" oninput="_totalServicosOS()">
@@ -2215,9 +2228,9 @@ function editarOS(id){
     <div class="form-group span2"><label>Status</label>
       <select id="edit-os-st">${['A EXECUTAR','EM EXECUÇÃO','FINALIZADO','EM CONVERSA'].map(s=>`<option ${o.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
     <div class="form-group span2"><label>Tipo de Serviço</label>
-      <select id="edit-os-serv">${TIPOS_SERVICO.map(s=>`<option ${_nomeNorm(o.servico)===_nomeNorm(s)?'selected':''}>${esc(s)}</option>`).join('')}${
+      <select id="edit-os-serv">${tiposServico().map(s=>`<option ${_nomeNorm(o.servico)===_nomeNorm(s)?'selected':''}>${esc(s)}</option>`).join('')}${
         // se a OS tem um tipo que não está na lista padrão, mantém como opção para não perder
-        (o.servico && !TIPOS_SERVICO.some(s=>_nomeNorm(s)===_nomeNorm(o.servico)))
+        (o.servico && !tiposServico().some(s=>_nomeNorm(s)===_nomeNorm(o.servico)))
           ? `<option selected>${esc(o.servico)}</option>` : ''}</select>
       ${_osTemDivisao(o)?'<p class="text-xs text-muted" style="margin-top:4px">Esta OS tem divisão por tipo de serviço — ela é quem vale nos relatórios.</p>':''}</div>
     <div class="form-group"><label>Data de Execução</label><input type="date" id="edit-os-exec" value="${o.data_execucao||''}"></div>
@@ -2297,7 +2310,7 @@ function abrirModalDivisaoOS(osId){
 }
 function _divLinhaHTML(tipo, valor){
   const i=_divIdx++;
-  const opts=TIPOS_SERVICO.map(t=>`<option${_nomeNorm(t)===_nomeNorm(tipo)?' selected':''}>${esc(t)}</option>`).join('');
+  const opts=tiposServico().map(t=>`<option${_nomeNorm(t)===_nomeNorm(tipo)?' selected':''}>${esc(t)}</option>`).join('');
   return `<div class="item-row" id="div-row-${i}" style="grid-template-columns:1fr 130px auto;margin-bottom:8px;align-items:end">
     <select id="div-tipo-${i}" style="width:100%">${opts}</select>
     <input type="number" id="div-valor-${i}" value="${Number(valor)||0}" step="0.01" style="width:100%" oninput="_divConferir()">
@@ -3174,7 +3187,7 @@ function modalNovoLancamento(){
     </div>
     <div class="form-group" id="fc-cat-wrap">
       <label>Categoria</label>
-      <select id="fc-cat-rec">${CATEGORIAS_RECEITA.map(c=>`<option>${esc(c)}</option>`).join('')}</select>
+      <select id="fc-cat-rec">${categoriasReceita().map(c=>`<option>${esc(c)}</option>`).join('')}</select>
       <select id="fc-cat-desp" style="display:none" onchange="toggleEstoqueWrap()"><option>FUNCIONÁRIO</option><option>SALARIO</option><option>IMPOSTO</option><option>ART</option><option>CONTADOR</option><option>ROYALTES</option><option>FINANCIAMENTO CARRO</option><option>SEGURO</option><option>PEÇAS CUSTO</option><option>COMPRA DE EQUIPAMENTOS</option><option>ALUGUEL DE EQUIPAMENTOS</option><option>ALIMENTAÇÃO E DESLOCAMENTO</option><option>DESLOCAMENTO</option><option>COMPRA DE MATERIAL (INSUMOS)</option><option>TERCEIRIZAÇÃO DE MÃO DE OBRA</option><option>TARIFAS BANCÁRIAS</option><option>RETIRADAS (PROPRIETÁRIO)</option><option>DEMAIS GASTOS</option><option>SERVENTE DE PEDREIRO</option><option>MULTA</option><option>FERRAMENTAS</option><option>VALE</option></select>
     </div>
     <div class="form-group span2">
@@ -3573,7 +3586,7 @@ function editarLancamento(id){
   const osAtivas = D.os.filter(o=>['EM EXECUÇÃO','A EXECUTAR','FINALIZADO'].includes(o.status));
   const tipo = r.tipo||'RECEITA';
   const cat  = r.categoria||r.tipo_servico||r.tipo_despesa||'';
-  const catsRec  = CATEGORIAS_RECEITA.slice();
+  const catsRec  = categoriasReceita();
   const catsDesp = ['FUNCIONÁRIO','SALARIO','IMPOSTO','ART','CONTADOR','ROYALTES','FINANCIAMENTO CARRO','SEGURO','PEÇAS CUSTO','COMPRA DE EQUIPAMENTOS','ALUGUEL DE EQUIPAMENTOS','ALIMENTAÇÃO E DESLOCAMENTO','DESLOCAMENTO','COMPRA DE MATERIAL (INSUMOS)','TERCEIRIZAÇÃO DE MÃO DE OBRA','TARIFAS BANCÁRIAS','RETIRADAS (PROPRIETÁRIO)','DEMAIS GASTOS','SERVENTE DE PEDREIRO','MULTA','FERRAMENTAS','VALE'];
   // Se este lançamento tem uma categoria antiga que não está mais na lista,
   // acrescenta ela para não trocar a categoria sozinho ao salvar.
@@ -5487,19 +5500,50 @@ function _proporDivisaoOS(o){
   const total=Number(o.valor_total||0);
   return { o, divisao, soma, total, origem, bate: Math.abs(soma-total)<0.01 };
 }
+// Sugestões de divisão que você dispensou ("não dividir esta OS").
+// Fica guardado nas configurações, então vale em todos os aparelhos.
+function _divDispensadas(){
+  const s=new Set();
+  Object.keys(D.config||{}).forEach(k=>{
+    if(k.startsWith('div_disp_') && String(D.config[k])==='1') s.add(parseInt(k.replace('div_disp_','')));
+  });
+  return s;
+}
+async function dispensarDivisaoAuto(osId){
+  const o=D.os.find(x=>x.id===osId);
+  if(!confirm(`Não dividir a OS #${o?.numero_os||osId}?\n\nEla sai desta lista de sugestões e continua contando 100% no serviço "${o?.servico||''}".\n\nVocê pode trazer de volta depois.`)) return;
+  const chave='div_disp_'+osId;
+  const existe=(D._cfgRaw||[]).find(c=>c.chave===chave);
+  const ok = existe ? await sbUpdate('configuracoes',{valor:'1'},'chave',chave)
+                    : await sbInsert('configuracoes',{chave, valor:'1'});
+  if(ok){ D.config[chave]='1'; await carregarTudo(); nav('relatorios'); setTimeout(()=>relTab('servicos'),50); }
+}
+async function reverterDispensaDivisao(osId){
+  const chave='div_disp_'+osId;
+  await sbDelete('configuracoes','chave',chave);
+  delete D.config[chave];
+  await carregarTudo(); nav('relatorios'); setTimeout(()=>relTab('servicos'),50);
+}
+
 function _osParaDividir(){
-  const prontas=[], conferir=[];
+  const prontas=[], conferir=[], dispensadas=[];
+  const disp=_divDispensadas();
   (D.os||[]).filter(o=>!o.arquivada && !_osTemDivisao(o)).forEach(o=>{
+    if(disp.has(o.id)){
+      const p=_proporDivisaoOS(o);
+      if(p) dispensadas.push(p);
+      return;
+    }
     const p=_proporDivisaoOS(o);
     if(!p) return;
     (p.bate?prontas:conferir).push(p);
   });
-  return {prontas, conferir};
+  return {prontas, conferir, dispensadas};
 }
 
 function _cardDividirAutomatico(){
-  const {prontas, conferir}=_osParaDividir();
-  if(!prontas.length && !conferir.length) return '';
+  const {prontas, conferir, dispensadas}=_osParaDividir();
+  if(!prontas.length && !conferir.length && !dispensadas.length) return '';
   const linha=(p)=>`<tr>
     <td class="text-xs"><b>#${p.o.numero_os}</b><br>${esc(p.o.cliente_nome||'—')}</td>
     <td class="td-num text-xs">${fmtBRL(p.total)}<br><span class="text-muted">${esc(p.origem)}</span></td>
@@ -5507,11 +5551,16 @@ function _cardDividirAutomatico(){
     <td class="td-num text-xs">${p.bate
       ? '<span class="verde">✓ soma bate</span>'
       : `<span style="color:#B25000">soma ${fmtBRL(p.soma)}<br>difere ${fmtBRL(Math.abs(p.soma-p.total))}</span>`}</td>
-    <td><button class="btn btn-sm ${p.bate?'btn-primary':'btn-outline'}" onclick="_aplicarDivisaoAuto(${p.o.id})">Aplicar</button></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-sm ${p.bate?'btn-primary':'btn-outline'}" onclick="_aplicarDivisaoAuto(${p.o.id})">Aplicar</button>
+      <button class="btn btn-sm btn-outline" onclick="dispensarDivisaoAuto(${p.o.id})" title="Não dividir esta OS">${icon('close',16)}</button>
+    </td>
   </tr>`;
+  const ativas=prontas.length+conferir.length;
   return `<div class="card" style="border-left:4px solid #2A6DBF">
-    <div class="card-title">🔎 OS que podem ser divididas automaticamente (${prontas.length+conferir.length})</div>
-    <p class="text-sm text-muted" style="margin-bottom:10px">Estas OS já têm itens lançados (na Nota de Controle ou no orçamento) com mais de um tipo de serviço. Dá para aproveitar isso e criar a divisão sem digitar nada.</p>
+    <div class="card-title">🔎 OS que podem ser divididas automaticamente (${ativas})</div>
+    ${ativas?`
+    <p class="text-sm text-muted" style="margin-bottom:10px">Estas OS já têm itens lançados (na Nota de Controle ou no orçamento) com mais de um tipo de serviço. Dá para aproveitar isso e criar a divisão sem digitar nada. Se alguma não fizer sentido, use o <b>✕</b> para dispensar.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>OS</th><th class="td-num">Valor · origem</th><th>Divisão sugerida</th><th class="td-num">Conferência</th><th></th></tr></thead>
       <tbody>
@@ -5521,6 +5570,18 @@ function _cardDividirAutomatico(){
     </table></div>
     ${prontas.length?`<button class="btn btn-primary mt-8" onclick="_aplicarTodasDivisoes()">${icon('check',16)} Aplicar as ${prontas.length} que a soma bate</button>`:''}
     ${conferir.length?`<p class="text-xs text-muted" style="margin-top:8px">⚠️ ${conferir.length} OS têm itens cuja soma <b>não fecha</b> com o valor da OS (desconto, item faltando ou valor alterado depois). Elas ficam de fora do botão acima — aplique uma a uma se concordar, ou ajuste a divisão na própria OS.</p>`:''}
+    `:'<p class="text-sm text-muted">✅ Nenhuma sugestão pendente.</p>'}
+    ${dispensadas.length?`
+      <hr class="divider">
+      <details>
+        <summary style="cursor:pointer;font-weight:600;color:var(--azul);font-size:13px">🚫 Dispensadas (${dispensadas.length}) — você escolheu não dividir</summary>
+        <div style="margin-top:8px">
+          ${dispensadas.map(p=>`<div class="flex flex-between flex-center" style="background:var(--cinza-bg);padding:8px 10px;border-radius:6px;margin-bottom:5px;font-size:12px;gap:8px;flex-wrap:wrap">
+            <span><b>OS #${p.o.numero_os}</b> — ${esc(p.o.cliente_nome||'')} <span class="text-muted">(${p.divisao.map(d=>esc(d.tipo)).join(' + ')})</span></span>
+            <button class="btn btn-sm btn-outline" onclick="reverterDispensaDivisao(${p.o.id})">↩️ Voltar a sugerir</button>
+          </div>`).join('')}
+        </div>
+      </details>`:''}
   </div>`;
 }
 async function _aplicarDivisaoAuto(osId){
@@ -6271,12 +6332,23 @@ function render_config(){
       <button class="btn btn-outline btn-sm" onclick="verificarAlertasLaudos()">🔄 Verificar alertas agora</button>
     </div>
     <div class="card">
-      <div class="card-title">📋 Tabela de Preços dos Serviços</div>
+      <div class="card-title">📋 Tipos de Serviço e Preços</div>
+      <p class="text-xs text-muted" style="margin:-4px 0 10px">Os tipos cadastrados aqui aparecem em <b>todo o sistema</b>: nos orçamentos, na criação de OS, na divisão por tipo de serviço e nas categorias de receita do fluxo de caixa.</p>
       <div class="table-wrap" style="margin-bottom:12px">
         <table><thead><tr><th>Serviço</th><th class="td-num">Valor Base</th><th>Unidade</th></tr></thead>
         <tbody>${D.tipos_servico.map(s=>`<tr><td>${esc(s.nome)}</td><td class="td-num">${fmtBRL(s.valor_base||0)}</td><td>${esc(s.unidade||'un')}</td></tr>`).join('')}</tbody></table>
       </div>
       <button class="btn btn-outline btn-sm" onclick="modalNovoServico()">${icon('plus',16)} Novo Tipo de Serviço</button>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--azul2);font-weight:600">Ver todos os tipos disponíveis no sistema (${tiposServico().length})</summary>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+          ${tiposServico().map(t=>{
+            const doBanco=(D.tipos_servico||[]).some(x=>_nomeNorm(x.nome)===_nomeNorm(t));
+            return `<span class="badge badge-${doBanco?'azul':'cinza'}" style="font-size:10px">${esc(t)}${doBanco?' ✎':''}</span>`;
+          }).join('')}
+        </div>
+        <p class="text-xs text-muted" style="margin-top:6px">✎ = cadastrado por você · os demais já vêm no sistema</p>
+      </details>
     </div>
   </div>
   <div class="card">
