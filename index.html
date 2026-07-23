@@ -883,7 +883,9 @@ const _COLUNAS_ESSENCIAIS = {
   clientes_grupos:      ['nome_principal','membros'],
   clientes_ocultos:     ['nome'],
   clientes_dispensados: ['chave'],
-  laudos_emitidos:      ['empresa','vencimento'],
+  laudos_emitidos:      ['empresa','vencimento','os_numero'],
+  ordens_servico:       ['servicos_itens','arquivada'],
+  contas_receber:       ['valor_recebido'],
 };
 function _avisoColunaEssencial(tabela, coluna){
   alert(`⚠️ O banco de dados está sem a coluna "${coluna}" na tabela "${tabela}".\n\n`+
@@ -3126,7 +3128,8 @@ function modalNovoLancamento(){
     <div id="fc-os-serv-aviso" style="display:none;grid-column:1/-1;margin-top:-4px"></div>
     <div id="fc-os-cr-aviso" style="display:none;grid-column:1/-1"></div>
     <div class="form-group span2" id="fc-rec-wrap">
-      <label>💰 Quitar uma Conta a Receber (opcional)</label>
+      <label>💰 Dar baixa numa Conta a Receber (opcional)</label>
+      <div id="fc-rec-falta" style="display:none;margin-bottom:6px"></div>
       <select id="fc-rec-id" onchange="preencherDeReceber()">
         <option value="">— Não vincular —</option>
         ${D.receber.filter(r=>r.status!=='RECEBIDO').map(r=>`<option value="${r.id}">#${r.id} — ${esc(r.cliente_nome||r.cliente||'')} (${fmtBRL(r.valor)})</option>`).join('')}
@@ -3279,14 +3282,15 @@ async function salvarLancamento(){
 
   if(recSel){
     const idRec=parseInt(recSel);
-    const dadosBaixa={status:'RECEBIDO'};
+    const extras={};
     // Se o lançamento tem OS e a conta a receber ainda não tinha, vincula também
     const contaR=D.receber.find(x=>x.id===idRec);
     if(osId && contaR && !contaR.os_id){
       const oVinc=D.os.find(x=>String(x.numero_os)===String(osId));
-      if(oVinc) dadosBaixa.os_id=oVinc.id; // contas_receber usa id interno
+      if(oVinc) extras.os_id=oVinc.id; // contas_receber usa id interno
     }
-    await sbUpdate('contas_receber',dadosBaixa,'id',idRec);
+    // Soma só o valor deste lançamento: se for menos que o total, fica PARCIAL
+    await _aplicarRecebimento(idRec, valor, extras);
   }
   if(pagSel) await sbUpdate('contas_pagar',{status:'PAGO'},'id',parseInt(pagSel));
 
@@ -3369,10 +3373,22 @@ async function darEntradaEstoque(m, data, fluxoId, obs){
 }
 function preencherDeReceber(){
   const r=D.receber.find(x=>x.id===parseInt(document.getElementById('fc-rec-id').value||0));
+  const aviso=document.getElementById('fc-rec-falta');
+  if(aviso){ aviso.style.display='none'; aviso.innerHTML=''; }
   if(r){
     document.getElementById('fc-cli').value=r.cliente_nome||r.cliente||'';
-    document.getElementById('fc-valor').value=r.valor||0;
+    // Preenche com o que AINDA FALTA, não com o total (a conta pode já ter
+    // recebimentos parciais). Você pode alterar para receber menos ainda.
+    const total=Number(r.valor||0), ja=Number(r.valor_recebido||0);
+    const falta=Math.max(0, Math.round((total-ja)*100)/100);
+    document.getElementById('fc-valor').value=falta||total;
     _preencherCNPJFluxo(r.cnpj || _cnpjDoClientePorNome(r.cliente_nome||r.cliente));
+    if(aviso && ja>0.005){
+      aviso.style.display='';
+      aviso.innerHTML=`<div class="alert-box alert-info" style="font-size:12px;margin:0">
+        Esta conta é de <b>${fmtBRL(total)}</b> e já tem <b>${fmtBRL(ja)}</b> recebido — faltam <b>${fmtBRL(falta)}</b>.
+        Se você lançar menos que isso, ela continua como <b>PARCIAL</b>.</div>`;
+    }
   }
 }
 // Preenche o campo CNPJ do fluxo se estiver vazio (não sobrescreve o que o usuário digitou)
@@ -3487,7 +3503,7 @@ async function deletarFluxo(id){
   const f=D.fluxo.find(x=>x.id===id)||{};
   if(!confirm('Excluir este lançamento?'))return;
   await sbDelete('fluxo_caixa','id',id);
-  if(f.conta_receber_id && confirm('Este lançamento quitava uma Conta a Receber. Voltar essa conta para "A VENCER"?')) await sbUpdate('contas_receber',{status:'A VENCER'},'id',f.conta_receber_id);
+  if(f.conta_receber_id && confirm('Este lançamento dava baixa numa Conta a Receber. Descontar este valor do que foi recebido nessa conta?')) await _aplicarRecebimento(f.conta_receber_id, -Number(f.valor||0));
   if(f.conta_pagar_id && confirm('Este lançamento quitava uma Conta a Pagar. Voltar essa conta para "EM ABERTO"?')) await sbUpdate('contas_pagar',{status:'EM ABERTO'},'id',f.conta_pagar_id);
   nav('fluxo');
 }
@@ -3597,20 +3613,23 @@ async function salvarEditLancamento(id){
   const ok = await sbUpdate('fluxo_caixa',dados,'id',id);
   if(!ok) return;
 
-  // Sincroniza o status da conta a receber conforme o vínculo
+  // Sincroniza a conta a receber pelo que MUDOU neste lançamento
+  const valorAntigo = Number(lancAtual.valor||0);
   if(vinculoAntigo && vinculoAntigo!==vinculoNovo){
-    // desvinculou da conta antiga → volta para A VENCER
-    await sbUpdate('contas_receber',{status:'A VENCER'},'id',vinculoAntigo);
+    // desvinculou da conta antiga → devolve o valor que este lançamento tinha dado
+    await _aplicarRecebimento(vinculoAntigo, -valorAntigo);
   }
   if(vinculoNovo){
-    // vinculou a uma conta → marca como RECEBIDA (e vincula OS se faltava)
-    const dadosBaixa={status:'RECEBIDO'};
+    const extras={};
     const contaR=D.receber.find(x=>x.id===vinculoNovo);
     if(osId && contaR && !contaR.os_id){
       const oVinc=D.os.find(x=>String(x.numero_os)===String(osId));
-      if(oVinc) dadosBaixa.os_id=oVinc.id;
+      if(oVinc) extras.os_id=oVinc.id;
     }
-    await sbUpdate('contas_receber',dadosBaixa,'id',vinculoNovo);
+    // Mesma conta: aplica só a DIFERENÇA (senão o valor entraria duas vezes).
+    // Conta nova: entra o valor inteiro.
+    const delta = (vinculoAntigo===vinculoNovo) ? (valor - valorAntigo) : valor;
+    await _aplicarRecebimento(vinculoNovo, delta, extras);
   }
 
   fecharModal();nav('fluxo');
@@ -3619,6 +3638,27 @@ async function salvarEditLancamento(id){
 // ══════════════════════════════════════════════════════════════
 // CONTAS A RECEBER
 // ══════════════════════════════════════════════════════════════
+// Aplica um recebimento numa conta a receber, somando (ou tirando, com
+// valor negativo) do que já foi recebido e ajustando o status sozinho:
+//   recebeu tudo      → RECEBIDO
+//   recebeu uma parte → PARCIAL (guarda quanto)
+//   voltou a zero     → A VENCER
+// É por aqui que TODO lançamento do fluxo dá baixa numa conta, para que
+// um recebimento parcial não marque a conta inteira como recebida.
+async function _aplicarRecebimento(idRec, delta, extras){
+  const r = D.receber.find(x=>x.id===idRec);
+  if(!r) return false;
+  const total = Number(r.valor||0);
+  const ja    = Number(r.valor_recebido||0);
+  let novo = Math.round((ja + Number(delta||0)) * 100) / 100;
+  if(novo < 0) novo = 0;
+  const quitou = novo >= total - 0.005;
+  const status = novo <= 0.005 ? 'A VENCER' : (quitou ? 'RECEBIDO' : 'PARCIAL');
+  const dados = Object.assign({ valor_recebido: novo, status }, extras||{});
+  const ok = await sbUpdate('contas_receber', dados, 'id', idRec);
+  if(ok){ r.valor_recebido = novo; r.status = status; }
+  return ok;
+}
 // Extrai "Parcela X/Y" da observação e retorna um badge visual
 function _badgeParcela(obs){
   const m=String(obs||'').match(/Parcela\s+(\d+)\/(\d+)/i);
@@ -3776,11 +3816,8 @@ async function confirmarRecebido(id){
   if(agora<=0){alert('Informe o valor recebido.');return;}
   const novoRecebido=jaRecebido+agora;
   const quitou=novoRecebido>=total-0.005;
-  // Atualiza o acumulado e o status (RECEBIDO se quitou, senão PARCIAL)
-  await sbUpdate('contas_receber',{
-    valor_recebido:novoRecebido,
-    status: quitou?'RECEBIDO':'PARCIAL'
-  },'id',id);
+  // Usa a mesma regra dos lançamentos do fluxo (soma e ajusta o status sozinho)
+  await _aplicarRecebimento(id, agora);
   // Lança no fluxo só o valor recebido agora (se marcado)
   if(lancar){
     await sbInsert('fluxo_caixa',{
@@ -4438,6 +4475,129 @@ function auditar(){
   return r;
 }
 
+// ══════════════════════════════════════════════════════════════
+// CONFERÊNCIA DAS BAIXAS DE CONTAS A RECEBER
+// Compara o que está marcado em cada cobrança com a SOMA dos lançamentos
+// do fluxo vinculados a ela. Serve para achar contas que foram baixadas
+// como "recebidas" quando na verdade só entrou parte do dinheiro.
+// ══════════════════════════════════════════════════════════════
+function _conferirBaixasReceber(){
+  const podeCorrigir=[], conferir=[];
+  (D.receber||[]).forEach(r=>{
+    const total=Number(r.valor||0);
+    const registrado=Number(r.valor_recebido||0);
+    const status=String(r.status||'').toUpperCase().trim();
+    // Soma dos lançamentos do fluxo vinculados a esta cobrança
+    const lancs=(D.fluxo||[]).filter(f=>f.tipo==='RECEITA' && String(f.conta_receber_id||'')===String(r.id));
+    const soma=Math.round(lancs.reduce((a,f)=>a+Number(f.valor||0),0)*100)/100;
+
+    if(!lancs.length){
+      // Sem lançamento vinculado: pode ter sido baixa manual. NÃO mexer.
+      // Só avisa se estiver marcada como recebida sem nenhum valor registrado.
+      if(status==='RECEBIDO' && registrado<=0.005 && total>0){
+        conferir.push({r, total, registrado, soma, lancs,
+          motivo:'Marcada como RECEBIDA, mas não há lançamento no fluxo vinculado nem valor registrado.'});
+      }
+      return;
+    }
+
+    const statusEsperado = soma>=total-0.005 ? 'RECEBIDO' : (soma>0.005 ? 'PARCIAL' : 'A VENCER');
+    const valorBate  = Math.abs(registrado-soma)<0.005;
+    const statusBate = status===statusEsperado;
+    if(valorBate && statusBate) return; // tudo certo
+
+    if(registrado > soma+0.005){
+      // Registrado é MAIOR que a soma dos lançamentos: pode ter havido um
+      // recebimento manual sem lançar no fluxo. Não dá para corrigir sozinho.
+      conferir.push({r, total, registrado, soma, lancs,
+        motivo:'O valor registrado é maior que a soma dos lançamentos — pode ter havido recebimento manual sem lançar no fluxo.'});
+      return;
+    }
+    podeCorrigir.push({r, total, registrado, soma, lancs, statusEsperado});
+  });
+  return {podeCorrigir, conferir};
+}
+
+function _cardConferirBaixas(){
+  const {podeCorrigir, conferir}=_conferirBaixasReceber();
+  if(!podeCorrigir.length && !conferir.length){
+    return `<div class="card" style="border-left:4px solid #1A8F5A">
+      <div class="card-title">${icon('check',18)} Baixas de Contas a Receber</div>
+      <p class="text-sm text-muted">✅ Todas as cobranças batem com os lançamentos do fluxo. Nada a corrigir.</p>
+    </div>`;
+  }
+  const linha=(d,corrigivel)=>{
+    const falta=Math.max(0, Math.round((d.total-d.soma)*100)/100);
+    return `<tr>
+      <td class="text-xs"><b>#${d.r.id}</b><br>${esc(d.r.cliente_nome||d.r.cliente||'—')}</td>
+      <td class="td-num text-xs">${fmtBRL(d.total)}</td>
+      <td class="td-num text-xs">${badge(d.r.status||'—')}<br><span class="text-muted">registrado ${fmtBRL(d.registrado)}</span></td>
+      <td class="td-num text-xs"><b>${fmtBRL(d.soma)}</b><br><span class="text-muted">${d.lancs.length} lanç.</span></td>
+      ${corrigivel?`<td class="td-num text-xs">${badge(d.statusEsperado)}<br><span class="text-muted">${d.statusEsperado==='PARCIAL'?'faltam '+fmtBRL(falta):'quitada'}</span></td>
+      <td><button class="btn btn-sm btn-primary" onclick="_corrigirBaixaReceber(${d.r.id})">Corrigir</button></td>`
+      :`<td colspan="2" class="text-xs" style="color:#B25000">${esc(d.motivo)}</td>`}
+    </tr>`;
+  };
+  return `
+  ${podeCorrigir.length?`<div class="card" style="border-left:4px solid #E8A020">
+    <div class="card-title">${icon('alert',18)} Baixas a corrigir (${podeCorrigir.length})</div>
+    <p class="text-sm text-muted" style="margin-bottom:10px">Estas cobranças não batem com os lançamentos do fluxo vinculados a elas — normalmente porque foram marcadas como recebidas quando só entrou parte do dinheiro. Corrigir ajusta o <b>valor recebido</b> e o <b>status</b> pela soma real dos lançamentos.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Cobrança</th><th class="td-num">Valor</th><th class="td-num">Como está</th><th class="td-num">Lançado no fluxo</th><th class="td-num">Como deveria ficar</th><th></th></tr></thead>
+      <tbody>${podeCorrigir.map(d=>linha(d,true)).join('')}</tbody>
+    </table></div>
+    <button class="btn btn-primary mt-8" onclick="_corrigirTodasBaixas()">${icon('check',16)} Corrigir todas as ${podeCorrigir.length}</button>
+  </div>`:''}
+  ${conferir.length?`<div class="card" style="border-left:4px solid #7B8FA1">
+    <div class="card-title">${icon('alert',18)} Para você conferir (${conferir.length})</div>
+    <p class="text-sm text-muted" style="margin-bottom:10px">Aqui eu <b>não mexo sozinho</b>: pode ter havido recebimento em dinheiro/manual que não passou pelo fluxo. Confira e ajuste na tela de Contas a Receber se for o caso.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Cobrança</th><th class="td-num">Valor</th><th class="td-num">Como está</th><th class="td-num">Lançado no fluxo</th><th colspan="2">Observação</th></tr></thead>
+      <tbody>${conferir.map(d=>linha(d,false)).join('')}</tbody>
+    </table></div>
+  </div>`:''}`;
+}
+
+async function _corrigirBaixaReceber(idRec){
+  const {podeCorrigir}=_conferirBaixasReceber();
+  const d=podeCorrigir.find(x=>x.r.id===idRec);
+  if(!d){ alert('Esta cobrança já está correta.'); return; }
+  if(!confirm(`Cobrança #${d.r.id} — ${d.r.cliente_nome||d.r.cliente||''}
+
+`+
+    `Valor da cobrança: ${fmtBRL(d.total)}
+`+
+    `Lançado no fluxo:  ${fmtBRL(d.soma)} (${d.lancs.length} lançamento(s))
+
+`+
+    `Vai ficar: ${d.statusEsperado}, com ${fmtBRL(d.soma)} recebido.
+
+Confirmar?`)) return;
+  const ok=await sbUpdate('contas_receber',{valor_recebido:d.soma, status:d.statusEsperado},'id',idRec);
+  if(ok){ await carregarTudo(); render_auditoria(); }
+}
+
+async function _corrigirTodasBaixas(){
+  const {podeCorrigir}=_conferirBaixasReceber();
+  if(!podeCorrigir.length){ alert('Nada a corrigir.'); return; }
+  if(!confirm(`Corrigir ${podeCorrigir.length} cobrança(s)?
+
+`+
+    `Cada uma vai passar a mostrar exatamente o que foi lançado no fluxo de caixa, `+
+    `e o status vira PARCIAL ou RECEBIDO conforme o valor.
+
+`+
+    `Isso NÃO mexe nos lançamentos do fluxo, só ajusta as cobranças.`)) return;
+  let ok=0, erros=0;
+  for(const d of podeCorrigir){
+    const r=await sbUpdate('contas_receber',{valor_recebido:d.soma, status:d.statusEsperado},'id',d.r.id);
+    if(r) ok++; else erros++;
+  }
+  await carregarTudo();
+  render_auditoria();
+  alert(`✅ ${ok} cobrança(s) corrigida(s).`+(erros?`\n⚠️ ${erros} falharam.`:''));
+}
+
 function render_auditoria(){
   const a=auditar();
   const totalProblemas=a.duplicReceber.length+a.duplicFluxo.length+a.fluxoSemOS.length+a.naoVinculado.length+a.provavelPago.length;
@@ -4576,6 +4736,7 @@ function render_auditoria(){
     </div>`:''}
   </div>
   ${totalProblemas===0?`<div class="card"><div class="alert-box alert-success" style="text-align:center;padding:24px">${icon('check',20)} Tudo certo! Nenhuma pendência a revisar.</div></div>`:''}
+  ${_cardConferirBaixas()}
   ${cardProvavelPago}
   ${cardNaoVinc}
   ${cardDuplicReceber}
@@ -4624,14 +4785,19 @@ async function vincularPagamentoAuditoria(fluxoId, contaId){
   const f=D.fluxo.find(x=>x.id===fluxoId);
   const cr=D.receber.find(x=>x.id===contaId);
   if(!f||!cr){ alert('Registro não encontrado. Atualize a página.'); return; }
-  if(!confirm(`Confirmar que a receita de ${fmtBRL(f.valor)} (${esc(f.cliente||'')}) corresponde à cobrança #${cr.id}?\n\nA receita será vinculada e a conta marcada como RECEBIDA.`)) return;
+  const total=Number(cr.valor||0), ja=Number(cr.valor_recebido||0), agora=Number(f.valor||0);
+  const ficaraParcial = (ja+agora) < total-0.005;
+  if(!confirm(`Confirmar que a receita de ${fmtBRL(agora)} (${esc(f.cliente||'')}) corresponde à cobrança #${cr.id} de ${fmtBRL(total)}?\n\n`+
+    (ficaraParcial
+      ? `A conta ficará como PARCIAL: ${fmtBRL(ja+agora)} recebido, faltando ${fmtBRL(total-ja-agora)}.`
+      : `A conta será marcada como RECEBIDA.`))) return;
   const ok1=await sbUpdate('fluxo_caixa',{conta_receber_id:contaId},'id',fluxoId);
-  const dadosBaixa={status:'RECEBIDO'};
+  const extras={};
   if(!cr.os_id && f.os_id){
     const oVinc=D.os.find(x=>String(x.numero_os)===String(f.os_id)||String(x.id)===String(f.os_id));
-    if(oVinc) dadosBaixa.os_id=oVinc.id;
+    if(oVinc) extras.os_id=oVinc.id;
   }
-  const ok2=await sbUpdate('contas_receber',dadosBaixa,'id',contaId);
+  const ok2=await _aplicarRecebimento(contaId, agora, extras);
   if(ok1&&ok2){ await carregarTudo(); render_auditoria(); }
 }
 
