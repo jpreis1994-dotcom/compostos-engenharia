@@ -2012,8 +2012,51 @@ async function desarquivarOS(id){
 }
 
 let _laudoIdx = 0;
+// ══════════════════════════════════════════════════════════════
+// SERVIÇOS DA OS (uma OS pode ter mais de um tipo de serviço)
+// ══════════════════════════════════════════════════════════════
+let _servIdx = 0;
+function _servRowHTML(tipo, valor){
+  const i = _servIdx++;
+  const opts = TIPOS_SERVICO.map(t=>`<option${_nomeNorm(t)===_nomeNorm(tipo)?' selected':''}>${esc(t)}</option>`).join('');
+  return `<div class="item-row" id="serv-row-${i}" style="grid-template-columns:1fr 130px auto;margin-bottom:8px;align-items:end">
+    <select id="serv-tipo-${i}" style="width:100%">${opts}</select>
+    <input type="number" id="serv-valor-${i}" value="${Number(valor)||0}" step="0.01" style="width:100%" oninput="_totalServicosOS()">
+    <button type="button" class="btn btn-sm btn-danger btn-icon" onclick="_removerServRow(${i})" title="Remover este serviço">${icon('close',16)}</button>
+  </div>`;
+}
+function addServRow(){
+  document.getElementById('os-serv-list')?.insertAdjacentHTML('beforeend', _servRowHTML('', 0));
+  _totalServicosOS();
+}
+function _removerServRow(i){
+  const rows = document.querySelectorAll('#os-serv-list .item-row');
+  if(rows.length<=1){ alert('A OS precisa de pelo menos um serviço.'); return; }
+  document.getElementById('serv-row-'+i)?.remove();
+  _totalServicosOS();
+}
+// Lê os serviços digitados no formulário
+function coletarServicosOS(){
+  const itens=[];
+  document.querySelectorAll('#os-serv-list .item-row').forEach(row=>{
+    const i = row.id.replace('serv-row-','');
+    const tipo = document.getElementById('serv-tipo-'+i)?.value || '';
+    const valor = parseFloat(document.getElementById('serv-valor-'+i)?.value) || 0;
+    if(tipo) itens.push({tipo, valor});
+  });
+  return itens;
+}
+// O valor da OS é a soma dos serviços — atualiza o total na tela
+function _totalServicosOS(){
+  const total = coletarServicosOS().reduce((a,i)=>a+i.valor, 0);
+  const el = document.getElementById('os-total-serv');
+  if(el) el.textContent = 'Total: ' + fmtBRL(total);
+  return total;
+}
+
 function modalNovaOS(){
   _laudoIdx = 0;
+  _servIdx = 0;
   const proxNum=(D.os.reduce((m,o)=>Math.max(m,o.numero_os||0),0))+1;
   abrirModal('Nova Ordem de Serviço',`
   <div class="form-grid">
@@ -2026,9 +2069,17 @@ function modalNovaOS(){
         <button type="button" class="btn btn-outline btn-sm" onclick="buscarCNPJOS()">${icon('search',16)} Buscar na Receita</button>
       </div>
     </div>
-    <div class="form-group span2"><label>Tipo de Serviço</label>
-      <select id="os-serv">${TIPOS_SERVICO.map(s=>`<option>${esc(s)}</option>`).join('')}</select></div>
-    <div class="form-group"><label>Valor Total (R$)</label><input type="number" id="os-valor" value="0" step="0.01"></div>
+    <div class="form-group span2">
+      <label>Serviços <span class="text-xs text-muted">(pode adicionar mais de um)</span></label>
+      <div style="display:grid;grid-template-columns:1fr 130px auto;gap:8px;font-size:11px;color:var(--cinza);padding:0 2px;margin-bottom:4px">
+        <span>Tipo de serviço</span><span>Valor (R$)</span><span></span>
+      </div>
+      <div id="os-serv-list">${_servRowHTML('', 0)}</div>
+      <div class="flex flex-between flex-center" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+        <button type="button" class="btn btn-sm btn-outline" onclick="addServRow()">${icon('plus',16)} Adicionar serviço</button>
+        <div id="os-total-serv" style="font-size:14px;font-weight:700;color:var(--azul)">Total: R$ 0,00</div>
+      </div>
+    </div>
     <div class="form-group"><label>Data de Abertura</label><input type="date" id="os-abertura" value="${hoje()}"></div>
     <div class="form-group"><label>Data de Execução em Campo</label><input type="date" id="os-execucao"></div>
     <div class="form-group span2"><label>Observação</label><textarea id="os-obs" rows="2"></textarea></div>
@@ -2117,21 +2168,30 @@ function aplicarFiltroOS(){ lerFiltro(); render_os(); }
 async function salvarOS(){
   const cli=document.getElementById('os-cli').value.trim();
   if(!cli){alert('Informe o cliente.');return;}
+  const servicos=coletarServicosOS().filter(s=>s.tipo);
+  if(!servicos.length){alert('Informe ao menos um serviço.');return;}
+  const valorTotal=Math.round(servicos.reduce((a,s)=>a+s.valor,0)*100)/100;
+  // O tipo "principal" da OS (usado nas telas que mostram um serviço só)
+  // é o de MAIOR valor — assim tudo que já existe continua funcionando.
+  const principal=[...servicos].sort((a,b)=>b.valor-a.valor)[0].tipo;
   const temLaudos = document.getElementById('os-tem-laudos')?.checked;
   const laudos = temLaudos ? coletarLaudos() : [];
   const dados={
     numero_os:parseInt(document.getElementById('os-num').value),
     cliente_nome:cli,
     cnpj:document.getElementById('os-cnpj').value,
-    servico:document.getElementById('os-serv').value,
+    servico:principal,
     status:document.getElementById('os-status').value,
-    valor_total:parseFloat(document.getElementById('os-valor').value)||0,
+    valor_total:valorTotal,
     data_abertura:document.getElementById('os-abertura').value,
     data_execucao:document.getElementById('os-execucao').value||null,
     data_entrega_laudo: laudos.length ? laudos[0].data_entrega : null,
     observacao:document.getElementById('os-obs').value,
     laudos_prazos: laudos.length ? JSON.stringify(laudos) : null
   };
+  // Só guarda a divisão quando há MAIS DE UM serviço. Com um só, a OS
+  // funciona exatamente como antes (o tipo único vale 100%).
+  if(servicos.length>1) dados.servicos_itens=JSON.stringify(servicos);
   const ok=await sbInsert('ordens_servico',dados);
   if(ok){
     // Cria a ficha do cliente (se ainda não existir)
@@ -5317,6 +5377,7 @@ function render_relatorios(){
   </div>
   <div class="rel-pane" id="relpane-servicos" style="display:none">
     ${_cardFaturamentoPorServico()}
+    ${_cardDividirAutomatico()}
   </div>
   <div class="rel-pane" id="relpane-financeiro" style="display:none">
   <div class="card">
@@ -5381,6 +5442,114 @@ function render_relatorios(){
   _relConcMes = new Date().getMonth()+1;
   renderConciliacao();
 }
+// ══════════════════════════════════════════════════════════════
+// DIVIDIR AS OS ANTIGAS AUTOMATICAMENTE
+// Usa o que já está lançado (itens da Nota de Controle ou do orçamento
+// vinculado) para descobrir quanto cada tipo de serviço representa.
+// ══════════════════════════════════════════════════════════════
+// Devolve os itens de uma OS, venham da nota ou do orçamento
+function _itensDaOS(o){
+  let itens=[], origem='';
+  if(o.itens_nota){
+    try { itens = Array.isArray(o.itens_nota)?o.itens_nota:JSON.parse(o.itens_nota||'[]'); } catch(e){ itens=[]; }
+    if(itens.length) origem='itens da nota';
+  }
+  if(!itens.length && o.orcamento_id){
+    const orc=(D.orcamentos||[]).find(x=>x.id===o.orcamento_id);
+    if(orc){
+      let raw=[];
+      try { raw = Array.isArray(orc.itens)?orc.itens:(orc.itens?JSON.parse(orc.itens):[]); } catch(e){ raw=[]; }
+      itens = raw.map(i=>({ qtd:i.quantidade||i.qtd||1, desc:i.descricao||i.nome||'', vunit:i.valor_unit||i.valor_unitario||0 }));
+      if(itens.length) origem='orçamento #'+(orc.numero||orc.id);
+    }
+  }
+  return { itens: itens.map(i=>({
+      qtd:  Number(i.qtd||i.quantidade||1),
+      desc: String(i.desc||i.descricao||''),
+      vunit:Number(i.vunit||i.valor_unit||0)
+    })), origem };
+}
+// Monta a divisão por tipo a partir dos itens (agrupa pelo texto de cada item)
+function _proporDivisaoOS(o){
+  const {itens, origem}=_itensDaOS(o);
+  if(!itens.length) return null;
+  const porTipo={};
+  itens.forEach(it=>{
+    const tipo=_tipoPeloTexto(it.desc) || (o.servico||'OUTRO');
+    porTipo[tipo]=(porTipo[tipo]||0) + (it.qtd*it.vunit);
+  });
+  const divisao=Object.entries(porTipo)
+    .map(([tipo,valor])=>({tipo, valor: Math.round(valor*100)/100}))
+    .filter(d=>d.valor!==0)
+    .sort((a,b)=>b.valor-a.valor);
+  if(divisao.length<2) return null;   // um tipo só já é o comportamento atual
+  const soma=Math.round(divisao.reduce((a,d)=>a+d.valor,0)*100)/100;
+  const total=Number(o.valor_total||0);
+  return { o, divisao, soma, total, origem, bate: Math.abs(soma-total)<0.01 };
+}
+function _osParaDividir(){
+  const prontas=[], conferir=[];
+  (D.os||[]).filter(o=>!o.arquivada && !_osTemDivisao(o)).forEach(o=>{
+    const p=_proporDivisaoOS(o);
+    if(!p) return;
+    (p.bate?prontas:conferir).push(p);
+  });
+  return {prontas, conferir};
+}
+
+function _cardDividirAutomatico(){
+  const {prontas, conferir}=_osParaDividir();
+  if(!prontas.length && !conferir.length) return '';
+  const linha=(p)=>`<tr>
+    <td class="text-xs"><b>#${p.o.numero_os}</b><br>${esc(p.o.cliente_nome||'—')}</td>
+    <td class="td-num text-xs">${fmtBRL(p.total)}<br><span class="text-muted">${esc(p.origem)}</span></td>
+    <td class="text-xs">${p.divisao.map(d=>`<b>${esc(d.tipo)}</b> ${fmtBRL(d.valor)}`).join('<br>')}</td>
+    <td class="td-num text-xs">${p.bate
+      ? '<span class="verde">✓ soma bate</span>'
+      : `<span style="color:#B25000">soma ${fmtBRL(p.soma)}<br>difere ${fmtBRL(Math.abs(p.soma-p.total))}</span>`}</td>
+    <td><button class="btn btn-sm ${p.bate?'btn-primary':'btn-outline'}" onclick="_aplicarDivisaoAuto(${p.o.id})">Aplicar</button></td>
+  </tr>`;
+  return `<div class="card" style="border-left:4px solid #2A6DBF">
+    <div class="card-title">🔎 OS que podem ser divididas automaticamente (${prontas.length+conferir.length})</div>
+    <p class="text-sm text-muted" style="margin-bottom:10px">Estas OS já têm itens lançados (na Nota de Controle ou no orçamento) com mais de um tipo de serviço. Dá para aproveitar isso e criar a divisão sem digitar nada.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>OS</th><th class="td-num">Valor · origem</th><th>Divisão sugerida</th><th class="td-num">Conferência</th><th></th></tr></thead>
+      <tbody>
+        ${prontas.map(linha).join('')}
+        ${conferir.map(linha).join('')}
+      </tbody>
+    </table></div>
+    ${prontas.length?`<button class="btn btn-primary mt-8" onclick="_aplicarTodasDivisoes()">${icon('check',16)} Aplicar as ${prontas.length} que a soma bate</button>`:''}
+    ${conferir.length?`<p class="text-xs text-muted" style="margin-top:8px">⚠️ ${conferir.length} OS têm itens cuja soma <b>não fecha</b> com o valor da OS (desconto, item faltando ou valor alterado depois). Elas ficam de fora do botão acima — aplique uma a uma se concordar, ou ajuste a divisão na própria OS.</p>`:''}
+  </div>`;
+}
+async function _aplicarDivisaoAuto(osId){
+  const o=D.os.find(x=>x.id===osId); if(!o) return;
+  const p=_proporDivisaoOS(o);
+  if(!p){ alert('Não consegui montar a divisão desta OS.'); return; }
+  const txt=p.divisao.map(d=>`   ${d.tipo}: ${fmtBRL(d.valor)}`).join('\n');
+  if(!confirm(`OS #${o.numero_os} — ${o.cliente_nome||''}\n\nDivisão (de ${p.origem}):\n${txt}\n\n`+
+    `Soma: ${fmtBRL(p.soma)} · Valor da OS: ${fmtBRL(p.total)}`+
+    (p.bate?'':'\n\n⚠️ A soma NÃO fecha com o valor da OS.')+`\n\nAplicar?`)) return;
+  const ok=await sbUpdate('ordens_servico',{servicos_itens:JSON.stringify(p.divisao)},'id',osId);
+  if(ok){ o.servicos_itens=JSON.stringify(p.divisao); await carregarTudo(); nav('relatorios'); setTimeout(()=>relTab('servicos'),50); }
+}
+async function _aplicarTodasDivisoes(){
+  const {prontas}=_osParaDividir();
+  if(!prontas.length){ alert('Nada a aplicar.'); return; }
+  if(!confirm(`Aplicar a divisão em ${prontas.length} OS?\n\n`+
+    `Só entram as que a soma dos itens fecha certinho com o valor da OS.\n`+
+    `Nada é apagado — você pode reajustar depois em cada OS.`)) return;
+  let ok=0, erros=0;
+  for(const p of prontas){
+    const r=await sbUpdate('ordens_servico',{servicos_itens:JSON.stringify(p.divisao)},'id',p.o.id);
+    if(r) ok++; else erros++;
+  }
+  await carregarTudo();
+  nav('relatorios'); setTimeout(()=>relTab('servicos'),50);
+  alert(`✅ ${ok} OS divididas.`+(erros?`\n⚠️ ${erros} falharam.`:''));
+}
+
 // Faturamento por TIPO DE SERVIÇO — usa a divisão da OS quando existir;
 // OS sem divisão contam 100% no seu tipo único (assim as antigas entram também).
 function _cardFaturamentoPorServico(){
