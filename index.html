@@ -2527,19 +2527,24 @@ function calcularRateioIndireto(osId, periodo){
     return true;
   };
 
-  // 1) Total de despesas INDIRETAS do período (despesa no fluxo sem OS)
+  // 1) Total de despesas INDIRETAS do período (despesa no fluxo sem OS vinculada).
+  // IMPORTANTE: retiradas do proprietário e aportes pessoais NÃO são custo da
+  // empresa — se entrassem aqui, inflariam o rateio e afundariam o resultado
+  // de todas as OS.
   const totalIndireto=D.fluxo
-    .filter(f=>f.tipo==='DESPESA' && !f.os_id && noPeriodo(f.data_movimento))
+    .filter(f=>f.tipo==='DESPESA' && !f.os_id && noPeriodo(f.data_movimento)
+      && !_ehNaoOperacional(f.categoria||f.tipo_despesa))
     .reduce((a,f)=>a+Number(f.valor||0),0);
 
-  // 2) Faturamento (receita realizada) de CADA OS no período, para achar a proporção
+  // 2) Faturamento (receita realizada) de CADA OS no período, para achar a proporção.
   // Receita de uma OS = receitas do fluxo vinculadas a ela (no período).
   // No fluxo_caixa o vínculo é por numero_os (sem misturar com id interno, evita colisão).
   const faturamentoPorOS={};
   let baseFat=0;
   D.os.forEach(os=>{
     const fatReceita=D.fluxo
-      .filter(f=>f.tipo==='RECEITA' && f.os_id!=null && String(f.os_id)===String(os.numero_os) && noPeriodo(f.data_movimento))
+      .filter(f=>f.tipo==='RECEITA' && f.os_id!=null && String(f.os_id)===String(os.numero_os)
+        && noPeriodo(f.data_movimento) && !_ehNaoOperacional(f.categoria||f.tipo_servico))
       .reduce((a,f)=>a+Number(f.valor||0),0);
     if(fatReceita>0){ faturamentoPorOS[os.id]=fatReceita; baseFat+=fatReceita; }
   });
@@ -2550,6 +2555,35 @@ function calcularRateioIndireto(osId, periodo){
   const indiretoOS=totalIndireto*pctOS;
 
   return {indiretoOS, totalIndireto, pctOS, baseFat, fatOS};
+}
+
+// Rateio considerando TODOS os meses em que a OS faturou.
+// Uma OS recebida em parcelas (ex: julho e agosto) precisa absorver um pedaço
+// das despesas indiretas DE CADA um desses meses, na proporção do que faturou
+// em cada um. Ratear tudo por um mês só ignoraria as outras parcelas.
+function calcularRateioMultiMes(osId){
+  const o=D.os.find(x=>x.id===osId);
+  if(!o) return {indiretoOS:0, totalIndireto:0, meses:[], baseFat:0, fatOS:0};
+  // Meses em que esta OS teve receita (sem contar aportes pessoais)
+  const meses=[...new Set(
+    D.fluxo.filter(f=>f.tipo==='RECEITA' && f.os_id!=null
+        && String(f.os_id)===String(o.numero_os) && f.data_movimento
+        && !_ehNaoOperacional(f.categoria||f.tipo_servico))
+      .map(f=>String(f.data_movimento).slice(0,7))
+  )].sort();
+  if(!meses.length) return {indiretoOS:0, totalIndireto:0, meses:[], baseFat:0, fatOS:0};
+  const detalhe=meses.map(mk=>{
+    const ano=parseInt(mk.slice(0,4)), mes=parseInt(mk.slice(5,7));
+    const r=calcularRateioIndireto(osId, {tipo:'mes', ano, mes});
+    return { mk, ano, mes, ...r };
+  });
+  return {
+    indiretoOS:   detalhe.reduce((a,d)=>a+d.indiretoOS,0),
+    totalIndireto:detalhe.reduce((a,d)=>a+d.totalIndireto,0),
+    fatOS:        detalhe.reduce((a,d)=>a+d.fatOS,0),
+    baseFat:      detalhe.reduce((a,d)=>a+d.baseFat,0),
+    meses: detalhe
+  };
 }
 
 function verResultadoOS(osId, periodoRateio){
@@ -2563,27 +2597,25 @@ function verResultadoOS(osId, periodoRateio){
   const porNum =(v)=> v!=null && String(v)===String(o.numero_os);
 
   const recs=D.receber.filter(r=>porId(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
-  const totRecCR=recs.reduce((a,r)=>{
-    if(r.status==='RECEBIDO') return a+Number(r.valor||0);
-    if(r.status==='PARCIAL') return a+Number(r.valor_recebido||0);
-    return a;
-  },0);
-  const totAReceber=recs.reduce((a,r)=>{
-    if(r.status==='RECEBIDO') return a;
-    if(r.status==='PARCIAL') return a+Math.max(0,Number(r.valor||0)-Number(r.valor_recebido||0));
-    return a+Number(r.valor||0);
-  },0);
+  // Usa o quanto REALMENTE entrou de cada cobrança (não depende do status:
+  // uma cobrança pode ter recebimento parcial e ainda estar como "A VENCER").
+  const totRecCR=recs.reduce((a,r)=>a+_recebidoDaConta(r),0);
+  const totAReceber=recs.reduce((a,r)=>a+_faltaDaConta(r),0);
 
   // Receitas lançadas DIRETO no fluxo de caixa, vinculadas à OS,
-  // que NÃO vieram de uma conta a receber (senão contaria duas vezes)
-  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA' && porNum(f.os_id) && !f.conta_receber_id);
+  // que NÃO vieram de uma conta a receber (senão contaria duas vezes,
+  // pois o valor da cobrança acima já inclui esses lançamentos).
+  // Retiradas/aportes pessoais nunca entram no resultado da OS.
+  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA' && porNum(f.os_id) && !f.conta_receber_id
+    && !_ehNaoOperacional(f.categoria||f.tipo_servico));
   const totRecFluxo=recFluxo.reduce((a,f)=>a+Number(f.valor||0),0);
 
   const totRecebido=totRecCR+totRecFluxo;
 
   const equipe=D.funcionarios_os.filter(f=>porId(f.os_id));
   const totEquipe=equipe.reduce((a,f)=>a+Number(f.valor||0),0);
-  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&porNum(f.os_id));
+  const despFx=D.fluxo.filter(f=>f.tipo==='DESPESA'&&porNum(f.os_id)
+    && !_ehNaoOperacional(f.categoria||f.tipo_despesa));
   const totDespFx=despFx.reduce((a,f)=>a+Number(f.valor||0),0);
   const materiais=D.estoque_mov.filter(m=>m.tipo==='SAIDA'&&porNum(m.os_id));
   const totMateriais=materiais.reduce((a,m)=>a+Number(m.custo_total||0),0);
@@ -2592,12 +2624,25 @@ function verResultadoOS(osId, periodoRateio){
   const resPrev=(totRecebido+totAReceber)-totDesp;
 
   // ── Rateio de despesas indiretas ──
-  // Período padrão: ano da OS (ou ano atual). Pode alternar mês/ano.
-  const dataRef = (o.data_abertura||o.data_execucao||hoje()).slice(0,10);
-  const periodo = periodoRateio || {tipo:'ano', ano:parseInt(dataRef.slice(0,4)), mes:parseInt(dataRef.slice(5,7))};
-  const rateio = calcularRateioIndireto(osId, periodo);
+  // Padrão: considera CADA mês em que a OS faturou, somando a parte das
+  // indiretas de cada um. Assim uma OS recebida em parcelas (julho + agosto)
+  // absorve um pedaço das indiretas dos dois meses, na proporção certa.
+  const receitasDaOS = D.fluxo
+    .filter(f=>f.tipo==='RECEITA' && porNum(f.os_id) && f.data_movimento
+      && !_ehNaoOperacional(f.categoria||f.tipo_servico))
+    .sort((a,b)=>String(b.data_movimento).localeCompare(String(a.data_movimento)));
+  const dataRef = (receitasDaOS.length ? receitasDaOS[0].data_movimento
+                                       : (o.data_abertura||o.data_execucao||hoje())).slice(0,10);
+  const periodo = periodoRateio || {tipo:'auto', ano:parseInt(dataRef.slice(0,4)), mes:parseInt(dataRef.slice(5,7))};
+  const rateio = periodo.tipo==='auto' ? calcularRateioMultiMes(osId)
+                                       : calcularRateioIndireto(osId, periodo);
   const resComRateio = resCaixa - rateio.indiretoOS;
-  const labelPeriodoR = periodo.tipo==='mes' ? `${MESES[periodo.mes]}/${periodo.ano}` : `ano ${periodo.ano}`;
+  const labelPeriodoR = periodo.tipo==='auto'
+    ? (rateio.meses && rateio.meses.length
+        ? (rateio.meses.length===1 ? `${MESES[rateio.meses[0].mes]}/${rateio.meses[0].ano}`
+                                   : `${rateio.meses.length} meses de faturamento`)
+        : 'sem faturamento ainda')
+    : (periodo.tipo==='mes' ? `${MESES[periodo.mes]}/${periodo.ano}` : `ano ${periodo.ano}`);
   abrirModal(`📊 Resultado — OS #${o.numero_os}`,`
     ${alertaBox('info',`<b>${esc(o.cliente_nome||'')}</b> — ${esc(o.servico||'')} &nbsp;•&nbsp; Valor da OS: <b>${fmtBRL(o.valor_total)}</b>`)}
     <div class="grid-4" style="margin-bottom:14px">
@@ -2613,19 +2658,38 @@ function verResultadoOS(osId, periodoRateio){
         <div style="font-size:14px;font-weight:700;color:var(--azul)">⚖️ Resultado com rateio de despesas indiretas</div>
         <div class="flex gap-8" style="align-items:center">
           <span class="text-xs text-muted">Ratear por:</span>
-          <select onchange="verResultadoOS(${osId}, this.value==='mes'?{tipo:'mes',ano:${periodo.ano},mes:${periodo.mes}}:{tipo:'ano',ano:${periodo.ano},mes:${periodo.mes}})" style="padding:4px 8px;font-size:12px">
-            <option value="ano" ${periodo.tipo==='ano'?'selected':''}>Ano (${periodo.ano})</option>
-            <option value="mes" ${periodo.tipo==='mes'?'selected':''}>Mês (${MESES[periodo.mes]}/${periodo.ano})</option>
+          <select onchange="verResultadoOS(${osId}, {tipo:this.value, ano:${periodo.ano}, mes:${periodo.mes}})" style="padding:4px 8px;font-size:12px;border-radius:6px;border:1px solid var(--cinza-borda)">
+            <option value="auto" ${periodo.tipo==='auto'?'selected':''}>Cada mês que faturou (recomendado)</option>
+            <option value="mes" ${periodo.tipo==='mes'?'selected':''}>Só ${MESES[periodo.mes]}/${periodo.ano}</option>
+            <option value="ano" ${periodo.tipo==='ano'?'selected':''}>Ano inteiro (${periodo.ano})</option>
           </select>
         </div>
       </div>
       ${rateio.totalIndireto>0 && rateio.baseFat>0 ? `
         <div class="grid-4" style="gap:10px">
           <div><div class="text-xs text-muted">Indiretas no período</div><div style="font-weight:700">${fmtBRL(rateio.totalIndireto)}</div></div>
-          <div><div class="text-xs text-muted">% desta OS no faturamento</div><div style="font-weight:700">${(rateio.pctOS*100).toFixed(1)}%</div></div>
+          <div><div class="text-xs text-muted">% desta OS no faturamento</div><div style="font-weight:700">${(rateio.baseFat>0?(rateio.fatOS/rateio.baseFat*100):0).toFixed(1)}%</div></div>
           <div><div class="text-xs text-muted">Indireto rateado p/ esta OS</div><div style="font-weight:700;color:var(--vermelho)">− ${fmtBRL(rateio.indiretoOS)}</div></div>
           <div><div class="text-xs text-muted">Resultado COM rateio</div><div style="font-weight:800;color:${resComRateio>=0?'var(--verde)':'var(--vermelho)'}">${fmtBRL(resComRateio)}</div></div>
         </div>
+        ${(periodo.tipo==='auto' && rateio.meses && rateio.meses.length>1)?`
+          <div class="table-wrap" style="margin-top:10px">
+            <table style="font-size:12px">
+              <thead><tr><th>Mês</th><th class="td-num">Faturou nesta OS</th><th class="td-num">Faturamento do mês</th><th class="td-num">%</th><th class="td-num">Indiretas do mês</th><th class="td-num">Coube a esta OS</th></tr></thead>
+              <tbody>${rateio.meses.map(m=>`<tr>
+                <td>${MESES[m.mes]}/${m.ano}</td>
+                <td class="td-num">${fmtBRL(m.fatOS)}</td>
+                <td class="td-num text-muted">${fmtBRL(m.baseFat)}</td>
+                <td class="td-num">${(m.pctOS*100).toFixed(1)}%</td>
+                <td class="td-num text-muted">${fmtBRL(m.totalIndireto)}</td>
+                <td class="td-num vermelho" style="font-weight:700">− ${fmtBRL(m.indiretoOS)}</td>
+              </tr>`).join('')}</tbody>
+              <tfoot><tr style="font-weight:700;border-top:2px solid var(--cinza-borda)">
+                <td>TOTAL</td><td class="td-num">${fmtBRL(rateio.fatOS)}</td><td colspan="3"></td>
+                <td class="td-num vermelho">− ${fmtBRL(rateio.indiretoOS)}</td>
+              </tr></tfoot>
+            </table>
+          </div>`:''}
         <p class="text-xs text-muted" style="margin-top:10px">Despesas indiretas (sem OS vinculada) do <b>${labelPeriodoR}</b> distribuídas entre as OS conforme o faturamento de cada uma. Esta OS representou ${(rateio.pctOS*100).toFixed(1)}% da receita do período.</p>
       ` : `<p class="text-sm text-muted">${rateio.totalIndireto===0 ? `Nenhuma despesa indireta lançada no ${labelPeriodoR}.` : `Esta OS não teve receita registrada no ${labelPeriodoR}, então não recebe rateio neste recorte.`} ${rateio.totalIndireto>0&&rateio.baseFat===0?'(Nenhuma OS teve faturamento no período.)':''}</p>`}
     </div>
@@ -2934,18 +2998,11 @@ function imprimirResultadoOS(osId){
   const porNum=(v)=> v!=null && String(v)===String(o.numero_os);
 
   const recs=D.receber.filter(r=>porId(r.os_id)).sort((a,b)=>vd(a).localeCompare(vd(b)));
-  const totRecCR=recs.reduce((a,r)=>{
-    if(r.status==='RECEBIDO') return a+Number(r.valor||0);
-    if(r.status==='PARCIAL') return a+Number(r.valor_recebido||0);
-    return a;
-  },0);
-  const totAReceber=recs.reduce((a,r)=>{
-    if(r.status==='RECEBIDO') return a;
-    if(r.status==='PARCIAL') return a+Math.max(0,Number(r.valor||0)-Number(r.valor_recebido||0));
-    return a+Number(r.valor||0);
-  },0);
+  const totRecCR=recs.reduce((a,r)=>a+_recebidoDaConta(r),0);
+  const totAReceber=recs.reduce((a,r)=>a+_faltaDaConta(r),0);
   // Receitas do fluxo vinculadas à OS que não vieram de conta a receber (evita dupla contagem)
-  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA'&&porNum(f.os_id)&&!f.conta_receber_id);
+  const recFluxo=D.fluxo.filter(f=>f.tipo==='RECEITA'&&porNum(f.os_id)&&!f.conta_receber_id
+    && !_ehNaoOperacional(f.categoria||f.tipo_servico));
   const totRecFluxo=recFluxo.reduce((a,f)=>a+Number(f.valor||0),0);
   const totRecebido=totRecCR+totRecFluxo;
 
@@ -3718,6 +3775,28 @@ async function salvarEditLancamento(id){
 //   voltou a zero     → A VENCER
 // É por aqui que TODO lançamento do fluxo dá baixa numa conta, para que
 // um recebimento parcial não marque a conta inteira como recebida.
+// Quanto REALMENTE já entrou de uma cobrança.
+// Olha o valor registrado E a soma dos lançamentos do fluxo vinculados a ela,
+// usando o maior dos dois — assim não perde recebimento de cobranças antigas
+// cujo valor não chegou a ser registrado. NÃO depende do status, porque uma
+// cobrança pode ter dinheiro recebido e ainda estar marcada como "A VENCER".
+function _recebidoDaConta(r){
+  if(!r) return 0;
+  const total = Number(r.valor||0);
+  const registrado = Number(r.valor_recebido||0);
+  const somaFluxo = (D.fluxo||[])
+    .filter(f=>f.tipo==='RECEITA' && String(f.conta_receber_id||'')===String(r.id))
+    .reduce((a,f)=>a+Number(f.valor||0),0);
+  let v = Math.max(registrado, somaFluxo);
+  // Baixa antiga marcada como recebida sem detalhar o valor
+  if(v<=0.005 && String(r.status||'').toUpperCase()==='RECEBIDO') v = total;
+  return Math.round(v*100)/100;
+}
+// Quanto ainda falta receber de uma cobrança
+function _faltaDaConta(r){
+  return Math.max(0, Math.round((Number(r.valor||0) - _recebidoDaConta(r))*100)/100);
+}
+
 async function _aplicarRecebimento(idRec, delta, extras){
   const r = D.receber.find(x=>x.id===idRec);
   if(!r) return false;
@@ -3792,7 +3871,7 @@ function render_receber(){
         <td>${esc(r.cliente_nome||r.cliente||'—')}${_badgeParcela(r.observacao)}</td>
         <td>${esc(r.forma_pagamento||'—')}</td>
         <td>${badge(r.status)}${D.fluxo.some(f=>f.conta_receber_id===r.id)?' <span title="Lançado no Fluxo de Caixa">💰</span>':''}</td>
-        <td class="td-num font-600">${fmtBRL(r.valor)}${(r.status==='PARCIAL'&&Number(r.valor_recebido))?`<br><span class="text-xs" style="color:#7B5500">recebido ${fmtBRL(r.valor_recebido)} · falta ${fmtBRL(Math.max(0,Number(r.valor)-Number(r.valor_recebido)))}</span>`:''}</td>
+        <td class="td-num font-600">${fmtBRL(r.valor)}${(_recebidoDaConta(r)>0.005 && _faltaDaConta(r)>0.005)?`<br><span class="text-xs" style="color:#7B5500">recebido ${fmtBRL(_recebidoDaConta(r))} · falta ${fmtBRL(_faltaDaConta(r))}</span>`:''}</td>
         <td style="white-space:nowrap">
           ${r.status!=='RECEBIDO'?`<button class="btn btn-sm btn-success" onclick="marcarRecebido(${r.id})" title="${r.status==='PARCIAL'?'Receber o restante':'Registrar recebimento'}">${icon('check',16)}</button>`:''}
           <button class="btn btn-sm btn-outline btn-icon" onclick="editarReceber(${r.id})" title="Editar">${icon('edit',16)}</button>
@@ -3955,9 +4034,14 @@ async function salvarEditReceber(id){
   const osId=document.getElementById('ecr-os')?.value || null;
   if(!cli||!val){alert('Informe cliente e valor.');return;}
   let status=document.getElementById('ecr-status').value;
-  // Coerência automática: se recebeu tudo → RECEBIDO; se recebeu parte → PARCIAL
-  if(recebido>0 && recebido<val-0.005 && status==='RECEBIDO') status='PARCIAL';
-  if(recebido>=val-0.005 && val>0 && status==='PARCIAL') status='RECEBIDO';
+  // Coerência automática: o status SEMPRE segue o valor recebido.
+  // (antes, uma conta "A VENCER" com valor recebido continuava A VENCER,
+  //  e aí o recebimento não aparecia no resultado da OS)
+  if(recebido>0.005){
+    status = recebido >= val-0.005 ? 'RECEBIDO' : 'PARCIAL';
+  } else if(status==='PARCIAL'){
+    status='A VENCER';   // PARCIAL sem valor não faz sentido
+  }
   const r=D.receber.find(x=>x.id===id)||{};
   const dados={
     cliente_nome:cli,
