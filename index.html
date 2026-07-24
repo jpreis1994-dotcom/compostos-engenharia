@@ -291,6 +291,14 @@ tr:hover td{ background:#F3F8FF; }
   border-radius:8px; padding:0;
 }
 .banner-alertas-fechar:active{ background:#E0E6ED; }
+.banner-alertas-acoes{ display:flex; align-items:center; gap:6px; flex:none; }
+.btn-lembrar-todos{
+  background:#fff; color:var(--azul); border:1px solid var(--cinza-borda);
+  border-radius:7px; padding:7px 12px; font-size:12px; font-weight:600; cursor:pointer;
+  display:inline-flex; align-items:center; gap:5px; white-space:nowrap; min-height:34px;
+}
+.btn-lembrar-todos:hover{ background:var(--cinza-bg); }
+.btn-lembrar-todos:active{ background:#E0E6ED; }
 .alerta-item{
   border-radius:8px; padding:13px 18px; margin-bottom:8px;
   display:flex; align-items:center; justify-content:space-between;
@@ -324,6 +332,10 @@ tr:hover td{ background:#F3F8FF; }
   /* O menu lateral fica escondido no celular: o aviso usa a tela toda */
   #banner-alertas{ left:0; top:54px; padding:10px 12px; max-height:70vh; }
   .banner-alertas-titulo{ font-size:13px; line-height:1.35; }
+  /* No celular o título e as ações empilham, e o botão fica largo p/ o dedo */
+  .banner-alertas-topo{ flex-wrap:wrap; }
+  .banner-alertas-acoes{ width:100%; justify-content:space-between; }
+  .btn-lembrar-todos{ flex:1; justify-content:center; min-height:40px; font-size:12.5px; }
   /* Cabem lado a lado no computador; no celular ficam empilhados e largos,
      com altura boa para o dedo acertar */
   .alerta-item{ padding:11px 12px; gap:10px; }
@@ -5697,6 +5709,191 @@ async function _aplicarTodasDivisoes(){
 
 // Faturamento por TIPO DE SERVIÇO — usa a divisão da OS quando existir;
 // OS sem divisão contam 100% no seu tipo único (assim as antigas entram também).
+// Lista as OS que usam um determinado tipo de serviço (respeitando o filtro
+// de período da tela). Serve para você achar e corrigir lançamentos errados.
+// ══════════════════════════════════════════════════════════════
+// GERENCIAR OS TIPOS DE SERVIÇO USADOS NAS OS
+// Renomear aqui muda em TODAS as OS de uma vez. Se o novo nome já existir,
+// os dois viram um só — é assim que se limpa "Teste de estanqueidade" e
+// "TESTE DE ESTANQUEIDADE" convivendo na mesma lista.
+// ══════════════════════════════════════════════════════════════
+// Levanta todos os tipos EM USO, com quantas OS e quanto valor cada um tem
+function _tiposEmUso(){
+  const mapa={};
+  const add=(tipo, valor, osId, ondeDivisao)=>{
+    const t=String(tipo||'').trim(); if(!t) return;
+    const k=_nomeNorm(t);
+    if(!mapa[k]) mapa[k]={nome:t, variantes:new Set(), os:new Set(), valor:0, emDivisao:0};
+    mapa[k].variantes.add(t);
+    mapa[k].os.add(osId);
+    mapa[k].valor+=Number(valor||0);
+    if(ondeDivisao) mapa[k].emDivisao++;
+  };
+  (D.os||[]).forEach(o=>{
+    if(_osTemDivisao(o)) _lerServicosItens(o.servicos_itens).forEach(i=>add(i.tipo, i.valor, o.id, true));
+    else add(o.servico, o.valor_total, o.id, false);
+  });
+  // tipos cadastrados em Configurações que ainda não foram usados
+  (D.tipos_servico||[]).forEach(t=>{
+    const k=_nomeNorm(t.nome||'');
+    if(k && !mapa[k]) mapa[k]={nome:String(t.nome).trim(), variantes:new Set([String(t.nome).trim()]), os:new Set(), valor:0, emDivisao:0, soCadastro:true};
+  });
+  return Object.values(mapa).sort((a,b)=>b.valor-a.valor || a.nome.localeCompare(b.nome));
+}
+
+function modalGerenciarTipos(){
+  const tipos=_tiposEmUso();
+  abrirModal('Tipos de Serviço usados nas OS', `
+    ${alertaBox('info','Renomear um tipo altera <b>todas as OS</b> que o usam. Se o novo nome já existir, os dois se juntam num só — é assim que você limpa variações do mesmo serviço.')}
+    <div class="flex flex-between flex-center" style="margin:10px 0">
+      <input type="text" id="gt-busca" placeholder="Buscar tipo..." oninput="_filtrarTipos()" style="flex:1;max-width:260px">
+      <button class="btn btn-sm btn-primary" onclick="_novoTipoServico()">${icon('plus',16)} Novo tipo</button>
+    </div>
+    <div class="table-wrap" style="max-height:52vh;overflow-y:auto">
+      <table id="tbl-tipos">
+        <thead><tr><th>Tipo de serviço</th><th class="td-num">OS</th><th class="td-num">Valor</th><th></th></tr></thead>
+        <tbody>${tipos.map(t=>{
+          const varias=t.variantes.size>1;
+          return `<tr data-busca="${esc(t.nome.toLowerCase())}">
+            <td class="text-xs"><b>${esc(t.nome)}</b>
+              ${varias?`<br><span style="color:#B25000">⚠️ escrito de ${t.variantes.size} formas: ${[...t.variantes].map(esc).join(' · ')}</span>`:''}
+              ${t.soCadastro?'<br><span class="text-muted">cadastrado, ainda sem uso</span>':''}</td>
+            <td class="td-num text-xs">${t.os.size||'—'}</td>
+            <td class="td-num text-xs">${t.valor?fmtBRL(t.valor):'—'}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-sm btn-outline" onclick="verOSdoTipo('${esc(t.nome.replace(/'/g,"\\'"))}')" title="Ver as OS">${icon('eye',16)}</button>
+              <button class="btn btn-sm btn-outline" onclick="_renomearTipo('${esc(t.nome.replace(/'/g,"\\'"))}')" title="Renomear em todas as OS">${icon('edit',16)}</button>
+              <button class="btn btn-sm btn-danger btn-icon" onclick="_excluirTipo('${esc(t.nome.replace(/'/g,"\\'"))}')" title="Excluir">${icon('close',16)}</button>
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>`,
+    `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`, true);
+}
+function _filtrarTipos(){
+  const t=(document.getElementById('gt-busca')?.value||'').toLowerCase().trim();
+  document.querySelectorAll('#tbl-tipos tbody tr').forEach(tr=>{
+    tr.style.display=(!t||(tr.dataset.busca||'').includes(t))?'':'none';
+  });
+}
+
+// Renomeia um tipo em TODAS as OS (campo único e divisões) e no cadastro
+async function _renomearTipo(antigo){
+  const atual=String(antigo||'');
+  const novo=prompt(`Renomear o tipo de serviço.\n\nDe:   ${atual}\nPara:`, atual);
+  if(novo===null) return;
+  const nv=String(novo).trim();
+  if(!nv){ alert('O nome não pode ficar vazio.'); return; }
+  if(_nomeNorm(nv)===_nomeNorm(atual) && nv===atual) return;
+
+  // O que será alterado
+  const osUnico=(D.os||[]).filter(o=>!_osTemDivisao(o) && _nomeNorm(o.servico)===_nomeNorm(atual));
+  const osDiv=(D.os||[]).filter(o=>_osTemDivisao(o) &&
+    _lerServicosItens(o.servicos_itens).some(i=>_nomeNorm(i.tipo)===_nomeNorm(atual)));
+  const cad=(D.tipos_servico||[]).filter(t=>_nomeNorm(t.nome)===_nomeNorm(atual));
+  const juntaCom=_tiposEmUso().find(t=>_nomeNorm(t.nome)===_nomeNorm(nv) && _nomeNorm(t.nome)!==_nomeNorm(atual));
+
+  if(!confirm(`Renomear "${atual}" para "${nv}"?\n\n`+
+    `Será alterado em:\n`+
+    `  • ${osUnico.length} OS com este tipo único\n`+
+    `  • ${osDiv.length} OS com divisão por serviço\n`+
+    `  • ${cad.length} cadastro(s) na tabela de preços\n`+
+    (juntaCom?`\n⚠️ "${nv}" já existe — os dois vão virar UM SÓ.\n`:'')+
+    `\nIsso não muda valores, só o nome do serviço.`)) return;
+
+  let erros=0;
+  for(const o of osUnico){
+    const ok=await sbUpdate('ordens_servico',{servico:nv},'id',o.id);
+    if(ok) o.servico=nv; else erros++;
+  }
+  for(const o of osDiv){
+    const itens=_lerServicosItens(o.servicos_itens)
+      .map(i=>({tipo:_nomeNorm(i.tipo)===_nomeNorm(atual)?nv:i.tipo, valor:Number(i.valor)||0}));
+    // se a renomeação criou dois itens do mesmo tipo, junta os valores
+    const fundido={};
+    itens.forEach(i=>{ const k=_nomeNorm(i.tipo); if(!fundido[k]) fundido[k]={tipo:i.tipo,valor:0}; fundido[k].valor+=i.valor; });
+    const finais=Object.values(fundido);
+    const dados={servicos_itens:JSON.stringify(finais)};
+    // mantém o "tipo principal" da OS coerente (o de maior valor)
+    const principal=[...finais].sort((a,b)=>b.valor-a.valor)[0];
+    if(principal) dados.servico=principal.tipo;
+    const ok=await sbUpdate('ordens_servico',dados,'id',o.id);
+    if(ok){ o.servicos_itens=dados.servicos_itens; if(dados.servico) o.servico=dados.servico; } else erros++;
+  }
+  for(const t of cad){
+    if(juntaCom){ await sbDelete('tipos_servico','id',t.id); }   // já existe outro com esse nome
+    else { const ok=await sbUpdate('tipos_servico',{nome:nv},'id',t.id); if(!ok) erros++; }
+  }
+  await carregarTudo();
+  modalGerenciarTipos();
+  alert(erros?`⚠️ Renomeado, mas ${erros} registro(s) falharam.`:`✅ "${atual}" agora é "${nv}" em todo o sistema.`);
+}
+
+async function _novoTipoServico(){
+  const nome=prompt('Nome do novo tipo de serviço:');
+  if(nome===null) return;
+  const nv=String(nome).trim().toUpperCase();
+  if(!nv){ alert('Informe um nome.'); return; }
+  if(_tiposEmUso().some(t=>_nomeNorm(t.nome)===_nomeNorm(nv))){ alert('Esse tipo já existe.'); return; }
+  const ok=await sbInsert('tipos_servico',{nome:nv});
+  if(ok){ await carregarTudo(); modalGerenciarTipos(); }
+}
+
+async function _excluirTipo(nome){
+  const t=_tiposEmUso().find(x=>_nomeNorm(x.nome)===_nomeNorm(nome));
+  if(!t) return;
+  if(t.os.size>0){
+    alert(`Não dá para excluir "${t.nome}": ${t.os.size} OS usam este tipo.\n\n`+
+      `Renomeie-o para outro tipo (os dois se juntam) ou corrija as OS primeiro.\n`+
+      `Use o botão 👁 para ver quais são.`);
+    return;
+  }
+  if(!confirm(`Excluir o tipo "${t.nome}" do cadastro?\n\nNenhuma OS usa ele, então nada é perdido.`)) return;
+  const cad=(D.tipos_servico||[]).filter(x=>_nomeNorm(x.nome)===_nomeNorm(t.nome));
+  for(const c of cad) await sbDelete('tipos_servico','id',c.id);
+  await carregarTudo();
+  modalGerenciarTipos();
+}
+
+function verOSdoTipo(tipo){
+  const alvo=String(tipo||'');
+  const osF = filtrarPorPeriodo(D.os.filter(o=>!o.arquivada), 'data_abertura');
+  const achadas=[];
+  osF.forEach(o=>{
+    const itens=_servicosDaOS(o);
+    const bate=itens.filter(i=>_nomeNorm(i.tipo)===_nomeNorm(alvo));
+    if(bate.length){
+      achadas.push({
+        o,
+        valor: bate.reduce((a,i)=>a+i.valor,0),
+        dividida: _osTemDivisao(o),
+        outros: itens.filter(i=>_nomeNorm(i.tipo)!==_nomeNorm(alvo)).map(i=>i.tipo)
+      });
+    }
+  });
+  achadas.sort((a,b)=>b.valor-a.valor);
+  const total=achadas.reduce((a,x)=>a+x.valor,0);
+  abrirModal(`OS com o serviço "${esc(alvo)}"`, `
+    ${alertaBox('info',`<b>${achadas.length} OS</b> · total ${fmtBRL(total)} neste tipo.<br>
+      Clique em <b>Abrir OS</b> para corrigir o tipo ou lançar a divisão por serviço.`)}
+    <div class="table-wrap" style="max-height:55vh;overflow-y:auto;margin-top:10px">
+      <table>
+        <thead><tr><th>OS</th><th>Cliente</th><th class="td-num">Valor neste tipo</th><th>Situação</th><th></th></tr></thead>
+        <tbody>${achadas.map(x=>`<tr>
+          <td class="text-xs"><b>#${x.o.numero_os}</b><br><span class="text-muted">${fmtData(x.o.data_abertura)}</span></td>
+          <td class="text-xs">${esc(x.o.cliente_nome||'—')}</td>
+          <td class="td-num text-xs"><b>${fmtBRL(x.valor)}</b>${x.dividida?`<br><span class="text-muted">de ${fmtBRL(x.o.valor_total)}</span>`:''}</td>
+          <td class="text-xs">${x.dividida
+            ? `<span class="badge badge-verde" style="font-size:9px">dividida</span>${x.outros.length?`<br><span class="text-muted">+ ${x.outros.map(esc).join(', ')}</span>`:''}`
+            : '<span class="badge badge-cinza" style="font-size:9px">tipo único</span>'}</td>
+          <td><button class="btn btn-sm btn-outline" onclick="fecharModal();editarOS(${x.o.id})">Abrir OS</button></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`,
+    `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`, true);
+}
+
 function _cardFaturamentoPorServico(){
   const osF = filtrarPorPeriodo(D.os.filter(o=>!o.arquivada), 'data_abertura');
   const porTipo = {};
@@ -5717,16 +5914,19 @@ function _cardFaturamentoPorServico(){
       <p class="text-sm text-muted">Nenhuma OS no período selecionado.</p></div>`;
   }
   return `<div class="card">
-    <div class="card-title">🔧 Faturamento por Tipo de Serviço <span class="text-xs text-muted" style="font-weight:400">— ${labelPeriodo()}</span></div>
+    <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:8px">
+      <div class="card-title" style="margin:0">🔧 Faturamento por Tipo de Serviço <span class="text-xs text-muted" style="font-weight:400">— ${labelPeriodo()}</span></div>
+      <button class="btn btn-sm btn-outline" onclick="modalGerenciarTipos()">${icon('edit',16)} Gerenciar tipos</button>
+    </div>
     <p class="text-xs text-muted" style="margin:-4px 0 10px">Quanto cada tipo de serviço representa. As OS com <b>divisão lançada</b> entram repartidas; as demais contam inteiras no seu tipo único.
     ${comDivisao?` <span class="verde">${comDivisao} OS com divisão detalhada.</span>`:' <span style="color:#B25000">Nenhuma OS com divisão ainda — abra uma OS e use "Dividir por tipo de serviço".</span>'}</p>
     <div class="table-wrap"><table>
-      <thead><tr><th>Tipo de serviço</th><th class="td-num">OS</th><th class="td-num">Valor</th><th class="td-num">% do total</th><th style="width:130px"></th></tr></thead>
+      <thead><tr><th>Tipo de serviço <span class="text-xs" style="font-weight:400;text-transform:none;color:var(--azul2)">(clique p/ ver as OS)</span></th><th class="td-num">OS</th><th class="td-num">Valor</th><th class="td-num">% do total</th><th style="width:130px"></th></tr></thead>
       <tbody>
         ${linhas.map(([tipo,d])=>{
           const pct = totalGeral ? (d.valor/totalGeral*100) : 0;
-          return `<tr>
-            <td><b>${esc(tipo)}</b></td>
+          return `<tr style="cursor:pointer" onclick="verOSdoTipo('${esc(String(tipo).replace(/'/g,"\\'"))}')" title="Ver as OS com este serviço">
+            <td><b style="color:var(--azul2);text-decoration:underline dotted">${esc(tipo)}</b></td>
             <td class="td-num text-xs">${d.os.size}</td>
             <td class="td-num" style="font-weight:700">${fmtBRL(d.valor)}</td>
             <td class="td-num text-xs">${pct.toFixed(1)}%</td>
@@ -6423,6 +6623,7 @@ function render_config(){
         <tbody>${D.tipos_servico.map(s=>`<tr><td>${esc(s.nome)}</td><td class="td-num">${fmtBRL(s.valor_base||0)}</td><td>${esc(s.unidade||'un')}</td></tr>`).join('')}</tbody></table>
       </div>
       <button class="btn btn-outline btn-sm" onclick="modalNovoServico()">${icon('plus',16)} Novo Tipo de Serviço</button>
+      <button class="btn btn-outline btn-sm" onclick="modalGerenciarTipos()">${icon('edit',16)} Gerenciar tipos usados nas OS</button>
       <details style="margin-top:10px">
         <summary style="cursor:pointer;font-size:12px;color:var(--azul2);font-weight:600">Ver todos os tipos disponíveis no sistema (${tiposServico().length})</summary>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
@@ -6695,8 +6896,11 @@ function exibirBannerAlertas(alertas){
       <div class="banner-alertas-titulo">
         ⚠️ ${alertas.length} laudo(s) com vencimento nos próximos 30 dias
       </div>
-      <button class="banner-alertas-fechar" aria-label="Fechar avisos"
-        onclick="document.getElementById('banner-alertas').style.display='none'">${icon('close',20)}</button>
+      <div class="banner-alertas-acoes">
+        ${alertas.length>1?`<button class="btn-lembrar-todos" onclick="alertaLembrarTodos()" title="Adiar todos estes avisos">${icon('bell',16)} Lembrar todos mais tarde</button>`:''}
+        <button class="banner-alertas-fechar" aria-label="Fechar avisos"
+          onclick="document.getElementById('banner-alertas').style.display='none'">${icon('close',20)}</button>
+      </div>
     </div>
     ${itens}`;
   document.body.appendChild(banner);
@@ -6709,12 +6913,25 @@ function exibirBannerAlertas(alertas){
   });
 }
 
+// Adia TODOS os avisos de uma vez. Vale só até fechar o app (igual ao
+// "lembrar mais tarde" individual): ao abrir de novo, os avisos voltam.
+function alertaLembrarTodos(){
+  const banner = document.getElementById('banner-alertas');
+  if(!banner) return;
+  const keys = [...banner.querySelectorAll('[data-alerta-key]')].map(el=>el.dataset.alertaKey);
+  if(!keys.length) return;
+  keys.forEach(setLembrarDepois);
+  banner.remove();
+  if(typeof checkAlertas==='function') checkAlertas();
+}
+
 function alertaContatoFeito(key){
   setContatoFeito(key);
   document.getElementById('alerta-item-'+key)?.remove();
   const banner = document.getElementById('banner-alertas');
   if(banner && banner.querySelectorAll('[id^="alerta-item-"]').length === 0)
     banner.remove();
+  if(typeof checkAlertas==='function') checkAlertas();
 }
 function alertaLembrarDepois(key){
   setLembrarDepois(key);
@@ -6722,6 +6939,7 @@ function alertaLembrarDepois(key){
   const banner = document.getElementById('banner-alertas');
   if(banner && banner.querySelectorAll('[id^="alerta-item-"]').length === 0)
     banner.remove();
+  if(typeof checkAlertas==='function') checkAlertas();
 }
 
 // Stubs vazios — mantidos para não quebrar chamadas residuais
