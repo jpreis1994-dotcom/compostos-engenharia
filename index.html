@@ -1230,24 +1230,57 @@ function _seletorView(key){
     <option value="pizza" ${modo==='pizza'?'selected':''}>🥧 Pizza</option>
   </select>`;
 }
+// Monta o HTML do gráfico (chamado de dentro de _tabelaDespesas/_tabelaReceitas,
+// ANTES do HTML ir pro DOM). O <canvas> sempre fica dentro de um container com
+// altura FIXA em CSS — sem isso, o Chart.js aplica uma proporção padrão que
+// deixa o gráfico com tamanho imprevisível. Pizza usa uma legenda em HTML
+// normal ao lado (mais legível que a legenda interna do Chart.js, que
+// espremia texto minúsculo tentando caber dentro do canvas).
+function _corpoGraficoRanking(viewKey, modo, top){
+  if(modo==='pizza'){
+    return `<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:center;padding:4px 0 8px">
+      <div style="position:relative;height:170px;width:170px;flex-shrink:0">
+        <canvas id="chart-${viewKey}"></canvas>
+      </div>
+      <div id="legend-${viewKey}" style="flex:1 1 160px;min-width:140px"></div>
+    </div>`;
+  }
+  const alturaBarra = Math.max(170, top.length*32);
+  return `<div style="position:relative;height:${alturaBarra}px;width:100%;padding:4px 0">
+    <canvas id="chart-${viewKey}"></canvas>
+  </div>`;
+}
 // Instancia no <canvas> os gráficos pedidos pelos cards (chamado depois que o
 // HTML do dashboard já está no DOM — precisa que o elemento exista).
 function _instanciarChartsRanking(){
-  _chartQueue.forEach(({canvasId, linhas, cor, tipo})=>{
+  _chartQueue.forEach(({canvasId, viewKey, linhas, cor, tipo})=>{
     const el=document.getElementById(canvasId);
     if(!el) return;
     const top=linhas.slice(0,8), resto=linhas.slice(8);
     const somaResto=resto.reduce((a,[,d])=>a+d.valor,0);
-    const labels=top.map(([n])=>n.length>22?n.slice(0,22)+'…':n);
+    const labels=top.map(([n])=>n.length>20?n.slice(0,20)+'…':n);
     const valores=top.map(([,d])=>d.valor);
     if(resto.length){ labels.push('Outros'); valores.push(somaResto); }
     if(tipo==='pizza'){
-      new Chart(el,{type:'doughnut',data:{labels,datasets:[{data:valores,backgroundColor:_PALETA_CORES.slice(0,labels.length),borderWidth:0}]},
-        options:{responsive:true,cutout:'50%',plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},
-          tooltip:{callbacks:{label:c=>c.label+': '+fmtBRL(c.raw)}}}}});
+      const cores=_PALETA_CORES.slice(0,labels.length);
+      new Chart(el,{type:'doughnut',data:{labels,datasets:[{data:valores,backgroundColor:cores,borderWidth:2,borderColor:'#fff'}]},
+        options:{responsive:true,maintainAspectRatio:false,cutout:'55%',
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+fmtBRL(c.raw)}}}}});
+      const legendEl=document.getElementById('legend-'+viewKey);
+      const totalPizza=valores.reduce((a,v)=>a+v,0);
+      if(legendEl){
+        legendEl.innerHTML = labels.map((lab,i)=>{
+          const pct = totalPizza ? (valores[i]/totalPizza*100) : 0;
+          return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:7px">
+            <span style="width:10px;height:10px;border-radius:3px;background:${cores[i]};flex-shrink:0"></span>
+            <span class="text-xs" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(lab)}">${esc(lab)}</span>
+            <span class="text-xs" style="font-weight:700;white-space:nowrap">${pct.toFixed(1)}%</span>
+          </div>`;
+        }).join('');
+      }
     } else {
       new Chart(el,{type:'bar',data:{labels,datasets:[{data:valores,backgroundColor:cor,borderRadius:4}]},
-        options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
+        options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},
           tooltip:{callbacks:{label:c=>fmtBRL(c.raw)}}},scales:{x:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
     }
   });
@@ -1299,7 +1332,7 @@ function _tabelaDespesas(titulo, dica, fluxo, chaveFn, rotuloCol, viewKey){
       </tbody>
       <tfoot><tr class="total-row"><td><b>TOTAL</b></td><td></td>
         <td class="td-num" style="font-weight:700">${fmtBRL(total)}</td><td colspan="2"></td></tr></tfoot>
-    </table></div>` : `<canvas id="chart-${viewKey}" height="${modo==='pizza'?230:Math.max(160,top.length*28)}"></canvas>`;
+    </table></div>` : _corpoGraficoRanking(viewKey, modo, top);
   if(modo!=='linhas'){
     _chartQueue.push({viewKey, canvasId:`chart-${viewKey}`, linhas, cor:'#D64045', tipo:modo});
   }
@@ -1431,7 +1464,7 @@ function _tabelaReceitas(titulo, dica, fluxo, chaveFn, rotuloCol, viewKey, notaR
       </tbody>
       <tfoot><tr class="total-row"><td><b>TOTAL</b></td><td></td>
         <td class="td-num" style="font-weight:700">${fmtBRL(total)}</td><td colspan="2"></td></tr></tfoot>
-    </table></div>` : `<canvas id="chart-${viewKey}" height="${modo==='pizza'?230:Math.max(160,top.length*28)}"></canvas>`;
+    </table></div>` : _corpoGraficoRanking(viewKey, modo, top);
   if(modo!=='linhas'){
     _chartQueue.push({viewKey, canvasId:`chart-${viewKey}`, linhas, cor:'#1A8F5A', tipo:modo});
   }
