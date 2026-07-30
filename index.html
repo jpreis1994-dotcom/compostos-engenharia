@@ -655,6 +655,16 @@ function _servicosDaOS(o){
 // A OS tem divisão lançada (mais de um tipo)?
 function _osTemDivisao(o){ return _lerServicosItens(o.servicos_itens).length>0; }
 
+// Tipo de serviço dominante de uma OS — usado para classificar automaticamente
+// lançamentos de fluxo gerados a partir da OS (recebimento, cobrança), em vez
+// de usar rótulos genéricos como "RECEBIMENTO" ou "OS #123".
+function _servicoDominanteOS(o){
+  if(!o || o.id==null) return '';
+  const itens=_servicosDaOS(o);
+  if(!itens.length) return o.servico||'';
+  return itens.slice().sort((a,b)=>b.valor-a.valor)[0].tipo || o.servico || '';
+}
+
 // Como o tipo de serviço aparece na LINHA da lista de OS.
 // Com divisão: mostra cada tipo com o seu valor. Sem divisão: o tipo único.
 function _servicoLabelOS(o){
@@ -1202,6 +1212,48 @@ function renderOsAbertasParaPlanejamento(){
 }
 
 // ══════════════════════════════════════════════════════════════
+// ALTERNÂNCIA DE VISUALIZAÇÃO — Linhas / Barra / Pizza
+// Aplica-se aos cards de ranking do Dashboard (despesa por tipo, por
+// fornecedor, receita por tipo de serviço). O modo escolhido persiste
+// entre atualizações do filtro (mês/ano), pois fica fora da função de
+// render — só muda quando o usuário troca no seletor.
+// ══════════════════════════════════════════════════════════════
+let _dashViewMode = { despTipo:'linhas', despForn:'linhas', recServ:'linhas' };
+let _chartQueue = [];
+const _PALETA_CORES = ['#1A3C5E','#2A6DBF','#5B9BD5','#1A8F5A','#7FBF7F','#D64045','#E8899C','#E8A020','#B8860B','#7B8FA1'];
+function _mudarViewCard(key, modo){ _dashViewMode[key]=modo; render_dashboard(); }
+function _seletorView(key){
+  const modo = _dashViewMode[key]||'linhas';
+  return `<select onchange="_mudarViewCard('${key}',this.value)" style="font-size:12px;padding:4px 6px;height:auto;width:auto">
+    <option value="linhas" ${modo==='linhas'?'selected':''}>📋 Linhas</option>
+    <option value="barra" ${modo==='barra'?'selected':''}>📊 Barra</option>
+    <option value="pizza" ${modo==='pizza'?'selected':''}>🥧 Pizza</option>
+  </select>`;
+}
+// Instancia no <canvas> os gráficos pedidos pelos cards (chamado depois que o
+// HTML do dashboard já está no DOM — precisa que o elemento exista).
+function _instanciarChartsRanking(){
+  _chartQueue.forEach(({canvasId, linhas, cor, tipo})=>{
+    const el=document.getElementById(canvasId);
+    if(!el) return;
+    const top=linhas.slice(0,8), resto=linhas.slice(8);
+    const somaResto=resto.reduce((a,[,d])=>a+d.valor,0);
+    const labels=top.map(([n])=>n.length>22?n.slice(0,22)+'…':n);
+    const valores=top.map(([,d])=>d.valor);
+    if(resto.length){ labels.push('Outros'); valores.push(somaResto); }
+    if(tipo==='pizza'){
+      new Chart(el,{type:'doughnut',data:{labels,datasets:[{data:valores,backgroundColor:_PALETA_CORES.slice(0,labels.length),borderWidth:0}]},
+        options:{responsive:true,cutout:'50%',plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:10}}},
+          tooltip:{callbacks:{label:c=>c.label+': '+fmtBRL(c.raw)}}}}});
+    } else {
+      new Chart(el,{type:'bar',data:{labels,datasets:[{data:valores,backgroundColor:cor,borderRadius:4}]},
+        options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
+          tooltip:{callbacks:{label:c=>fmtBRL(c.raw)}}},scales:{x:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
 // PRINCIPAIS DESPESAS (por tipo e por fornecedor)
 // Recebe o fluxo JÁ filtrado pelo período e SEM os lançamentos pessoais.
 // ══════════════════════════════════════════════════════════════
@@ -1217,18 +1269,17 @@ function _rankingDespesas(fluxo, chaveFn){
   const total=linhas.reduce((a,[,d])=>a+d.valor,0);
   return {linhas, total};
 }
-function _tabelaDespesas(titulo, dica, fluxo, chaveFn, rotuloCol){
+function _tabelaDespesas(titulo, dica, fluxo, chaveFn, rotuloCol, viewKey){
   const {linhas, total} = _rankingDespesas(fluxo, chaveFn);
   if(!linhas.length){
     return `<div class="card"><div class="card-title">${titulo}</div>
       <p class="text-sm text-muted">Nenhuma despesa no período selecionado.</p></div>`;
   }
+  const modo = _dashViewMode[viewKey]||'linhas';
   const top=linhas.slice(0,8);
   const resto=linhas.slice(8);
   const somaResto=resto.reduce((a,[,d])=>a+d.valor,0);
-  return `<div class="card">
-    <div class="card-title">${titulo}</div>
-    <p class="text-xs text-muted" style="margin:-4px 0 8px">${dica}</p>
+  const corpo = modo==='linhas' ? `
     <div class="table-wrap"><table>
       <thead><tr><th>${rotuloCol}</th><th class="td-num">Lanç.</th><th class="td-num">Valor</th><th class="td-num">%</th><th style="width:90px"></th></tr></thead>
       <tbody>
@@ -1248,13 +1299,23 @@ function _tabelaDespesas(titulo, dica, fluxo, chaveFn, rotuloCol){
       </tbody>
       <tfoot><tr class="total-row"><td><b>TOTAL</b></td><td></td>
         <td class="td-num" style="font-weight:700">${fmtBRL(total)}</td><td colspan="2"></td></tr></tfoot>
-    </table></div>
+    </table></div>` : `<canvas id="chart-${viewKey}" height="${modo==='pizza'?230:Math.max(160,top.length*28)}"></canvas>`;
+  if(modo!=='linhas'){
+    _chartQueue.push({viewKey, canvasId:`chart-${viewKey}`, linhas, cor:'#D64045', tipo:modo});
+  }
+  return `<div class="card">
+    <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:8px">
+      <div class="card-title" style="margin:0">${titulo}</div>
+      ${_seletorView(viewKey)}
+    </div>
+    <p class="text-xs text-muted" style="margin:-4px 0 8px">${dica}</p>
+    ${corpo}
   </div>`;
 }
 function _cardDespesasPorTipo(fluxo){
   return _tabelaDespesas('💸 Principais Despesas por Tipo',
     'Onde o dinheiro está saindo. Não inclui retiradas nem aportes pessoais.',
-    fluxo, r=>r.categoria||r.tipo_despesa, 'Tipo de despesa');
+    fluxo, r=>r.categoria||r.tipo_despesa, 'Tipo de despesa', 'despTipo');
 }
 function _cardDespesasPorFornecedor(fluxo){
   return _tabelaDespesas('🏢 Principais Despesas por Fornecedor',
@@ -1262,7 +1323,7 @@ function _cardDespesasPorFornecedor(fluxo){
     fluxo, r=>{
       const p=(typeof _fluxoPartes==='function') ? _fluxoPartes(r) : {forn:r.fornecedor||''};
       return p.forn || r.fornecedor || '';
-    }, 'Fornecedor');
+    }, 'Fornecedor', 'despForn');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1282,18 +1343,17 @@ function _rankingReceitas(fluxo, chaveFn){
   const total=linhas.reduce((a,[,d])=>a+d.valor,0);
   return {linhas, total};
 }
-function _tabelaReceitas(titulo, dica, fluxo, chaveFn, rotuloCol){
+function _tabelaReceitas(titulo, dica, fluxo, chaveFn, rotuloCol, viewKey){
   const {linhas, total} = _rankingReceitas(fluxo, chaveFn);
   if(!linhas.length){
     return `<div class="card"><div class="card-title">${titulo}</div>
       <p class="text-sm text-muted">Nenhuma receita no período selecionado.</p></div>`;
   }
+  const modo = _dashViewMode[viewKey]||'linhas';
   const top=linhas.slice(0,8);
   const resto=linhas.slice(8);
   const somaResto=resto.reduce((a,[,d])=>a+d.valor,0);
-  return `<div class="card">
-    <div class="card-title">${titulo}</div>
-    <p class="text-xs text-muted" style="margin:-4px 0 8px">${dica}</p>
+  const corpo = modo==='linhas' ? `
     <div class="table-wrap"><table>
       <thead><tr><th>${rotuloCol}</th><th class="td-num">Lanç.</th><th class="td-num">Valor</th><th class="td-num">%</th><th style="width:90px"></th></tr></thead>
       <tbody>
@@ -1313,19 +1373,41 @@ function _tabelaReceitas(titulo, dica, fluxo, chaveFn, rotuloCol){
       </tbody>
       <tfoot><tr class="total-row"><td><b>TOTAL</b></td><td></td>
         <td class="td-num" style="font-weight:700">${fmtBRL(total)}</td><td colspan="2"></td></tr></tfoot>
-    </table></div>
+    </table></div>` : `<canvas id="chart-${viewKey}" height="${modo==='pizza'?230:Math.max(160,top.length*28)}"></canvas>`;
+  if(modo!=='linhas'){
+    _chartQueue.push({viewKey, canvasId:`chart-${viewKey}`, linhas, cor:'#1A8F5A', tipo:modo});
+  }
+  return `<div class="card">
+    <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:8px">
+      <div class="card-title" style="margin:0">${titulo}</div>
+      ${_seletorView(viewKey)}
+    </div>
+    <p class="text-xs text-muted" style="margin:-4px 0 8px">${dica}</p>
+    ${corpo}
   </div>`;
+}
+// Rótulos que NÃO são tipo de serviço — são categorias financeiras genéricas
+// usadas quando o sistema lança automaticamente um recebimento sem saber (ou
+// sem conseguir apurar) o serviço real por trás. Não devem aparecer misturados
+// com tipos de serviço de verdade num ranking "por tipo".
+function _ehReceitaGenerica(cat){
+  const c=String(cat||'').toUpperCase().trim();
+  return c==='RECEBIMENTO' || c==='COMISSÃO' || c==='APORTE (PRÓPRIO)' || /^OS #/.test(c) || !c;
 }
 function _cardReceitaPorTipoServico(fluxo){
   return _tabelaReceitas('📈 Receita por Tipo de Serviço',
-    'De onde vem o faturamento — classificação direta do lançamento, sem depender de vínculo com OS.',
-    fluxo, r=>r.categoria||r.tipo_servico, 'Tipo de serviço');
+    'De onde vem o faturamento — classificação direta do lançamento. "(sem tipo definido)" são recebimentos lançados sem um serviço associado.',
+    fluxo, r=>{
+      const cat=r.categoria||r.tipo_servico||'';
+      return _ehReceitaGenerica(cat) ? '(sem tipo definido)' : cat;
+    }, 'Tipo de serviço', 'recServ');
 }
 
 function render_dashboard(){
   // IMPORTANTE: o dashboard mostra só o movimento OPERACIONAL da empresa.
   // Retiradas do proprietário e aportes de dinheiro pessoal ficam de fora de
   // todos os números e gráficos, senão eles distorcem o resultado do negócio.
+  _chartQueue = [];
   const soOperacional = arr => arr.filter(f=>!_ehNaoOperacional(f.categoria||f.tipo_servico||f.tipo_despesa));
 
   const fluxoF  = soOperacional(filtrarPorPeriodo(D.fluxo, 'data_movimento'));
@@ -1428,6 +1510,11 @@ function render_dashboard(){
     const el=document.getElementById('c-chart-cli');
     if(el) el.parentElement.innerHTML='<div class="card-title">📈 Top Clientes por Receita</div><p class="text-muted text-sm" style="text-align:center;padding:30px 10px">Ainda não há receitas registradas para montar o ranking.</p>';
   }
+
+  // Gráficos de barra/pizza dos cards de ranking (despesa por tipo, por
+  // fornecedor, receita por tipo de serviço) — só quando o usuário escolheu
+  // um modo diferente de "linhas" para aquele card específico.
+  _instanciarChartsRanking();
 }
 
 function renderAlertaAtraso(rec){
@@ -2546,7 +2633,7 @@ async function salvarCobrancaOS(osId){
   const status=document.getElementById('cob-status').value;
   const {data:novaRec,error:errRec}=await sb.from('contas_receber').insert([{os_id:osId,cliente_nome:cliente,valor:val,vencimento:venc,forma_pagamento:document.getElementById('cob-forma').value,status,observacao:document.getElementById('cob-obs').value}]).select().single();
   if(errRec){alert('Erro ao salvar: '+errRec.message);return;}
-  if(status==='RECEBIDO') await sbInsert('fluxo_caixa',{data_movimento:venc,cliente:cliente,tipo:'RECEITA',categoria:`OS #${numOS}`,valor:val,mes:parseInt(venc.slice(5,7)),ano:parseInt(venc.slice(0,4)),conta_receber_id:novaRec?novaRec.id:null});
+  if(status==='RECEBIDO') await sbInsert('fluxo_caixa',{data_movimento:venc,cliente:cliente,tipo:'RECEITA',categoria:_servicoDominanteOS(_o)||`OS #${numOS}`,valor:val,mes:parseInt(venc.slice(5,7)),ano:parseInt(venc.slice(0,4)),conta_receber_id:novaRec?novaRec.id:null,os_id:numOS||null});
   await gcalReceber({cliente_nome:cliente,valor:val,vencimento:venc});
   fecharModal();alert('✅ Cobrança gerada!');
 }
@@ -4042,10 +4129,12 @@ async function confirmarRecebido(id){
   await _aplicarRecebimento(id, agora);
   // Lança no fluxo só o valor recebido agora (se marcado)
   if(lancar){
+    const osVinc = r.os_id!=null ? D.os.find(o=>String(o.id)===String(r.os_id)) : null;
+    const categoria = osVinc ? (_servicoDominanteOS(osVinc)||'RECEBIMENTO') : 'RECEBIMENTO';
     await sbInsert('fluxo_caixa',{
-      data_movimento:data, cliente, tipo:'RECEITA', categoria:'RECEBIMENTO',
+      data_movimento:data, cliente, tipo:'RECEITA', categoria,
       valor:agora, mes:parseInt(data.slice(5,7)), ano:parseInt(data.slice(0,4)),
-      conta_receber_id:id, cnpj:r.cnpj||'',
+      conta_receber_id:id, cnpj:r.cnpj||'', os_id: osVinc?osVinc.numero_os:null,
       forma_conta: document.getElementById('rec-forma-conta')?.value || 'conta',
       observacao: quitou?'':'Recebimento parcial'
     });
@@ -5528,7 +5617,10 @@ async function confirmarImportLaudos(){
 
 function render_relatorios(){
   const byServ={};
-  D.fluxo.filter(r=>r.tipo==='RECEITA'&&(r.categoria||r.tipo_servico)).forEach(r=>{const k=r.categoria||r.tipo_servico;if(!byServ[k])byServ[k]={rec:0,n:0};byServ[k].rec+=Number(r.valor);byServ[k].n++;});
+  D.fluxo.filter(r=>r.tipo==='RECEITA'&&(r.categoria||r.tipo_servico)).forEach(r=>{
+    const catBruta=r.categoria||r.tipo_servico;
+    const k=_ehReceitaGenerica(catBruta)?'(sem tipo definido)':catBruta;
+    if(!byServ[k])byServ[k]={rec:0,n:0};byServ[k].rec+=Number(r.valor);byServ[k].n++;});
   const servRows=Object.entries(byServ).sort((a,b)=>b[1].rec-a[1].rec);
   const c=document.getElementById('content');
   c.innerHTML=`
@@ -6267,7 +6359,8 @@ function renderResultadoOperacional(){
   // ── Serviços por resultado (receita − despesa vinculada, por categoria de receita) ──
   const porServico = {};
   receitas.forEach(f=>{
-    const k = f.categoria || f.tipo_servico || 'Sem categoria';
+    const catBruta = f.categoria || f.tipo_servico || 'Sem categoria';
+    const k = _ehReceitaGenerica(catBruta) ? '(sem tipo definido)' : catBruta;
     if(!porServico[k]) porServico[k]={rec:0,n:0};
     porServico[k].rec += Number(f.valor||0);
     porServico[k].n++;
