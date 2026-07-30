@@ -1266,65 +1266,60 @@ function _cardDespesasPorFornecedor(fluxo){
 }
 
 // ══════════════════════════════════════════════════════════════
-// RELAÇÃO: DESPESAS x TIPO DE SERVIÇO
-// Cruza os tipos de despesa com os tipos de serviço das OS vinculadas.
-// Despesas sem OS vinculada (rateio/indiretas) entram numa linha à parte
-// e não fazem parte da matriz — combinado com o JP em 30/07/2026.
+// RECEITA POR TIPO DE SERVIÇO
+// Classificação direta do lançamento (categoria/tipo_servico da RECEITA)
+// — não depende de vínculo com OS, por isso é confiável.
 // ══════════════════════════════════════════════════════════════
-function _servicoPrincipalOS(o){
-  const itens=_servicosDaOS(o);
-  if(itens.length<=1) return (itens[0]&&itens[0].tipo) || o.servico || 'OUTRO';
-  const dom=itens.slice().sort((a,b)=>b.valor-a.valor)[0];
-  return dom.tipo + ' (+'+(itens.length-1)+')';
-}
-function _matrizDespesaServico(fluxo){
-  const porNumOS={};
-  D.os.forEach(o=>{ porNumOS[String(o.numero_os)]=o; });
-  const matriz={}, totServ={}, totDesp={};
-  let semOS=0, nSemOS=0;
-  fluxo.filter(r=>r.tipo==='DESPESA').forEach(r=>{
-    const cat=(r.categoria||r.tipo_despesa||'(sem categoria)').trim() || '(sem categoria)';
-    const val=Number(r.valor||0);
-    const o = r.os_id!=null ? porNumOS[String(r.os_id)] : null;
-    if(!o){ semOS+=val; nSemOS++; return; }
-    const serv=_servicoPrincipalOS(o);
-    if(!matriz[serv]) matriz[serv]={};
-    matriz[serv][cat]=(matriz[serv][cat]||0)+val;
-    totServ[serv]=(totServ[serv]||0)+val;
-    totDesp[cat]=(totDesp[cat]||0)+val;
+function _rankingReceitas(fluxo, chaveFn){
+  const acc={};
+  fluxo.filter(r=>r.tipo==='RECEITA').forEach(r=>{
+    const k=(chaveFn(r)||'').trim() || '(sem informação)';
+    if(!acc[k]) acc[k]={valor:0, n:0};
+    acc[k].valor += Number(r.valor||0);
+    acc[k].n++;
   });
-  const servicos=Object.entries(totServ).sort((a,b)=>b[1]-a[1]).slice(0,6).map(e=>e[0]);
-  const despesas=Object.entries(totDesp).sort((a,b)=>b[1]-a[1]).slice(0,6).map(e=>e[0]);
-  return {matriz, servicos, despesas, totServ, semOS, nSemOS};
+  const linhas=Object.entries(acc).sort((a,b)=>b[1].valor-a[1].valor);
+  const total=linhas.reduce((a,[,d])=>a+d.valor,0);
+  return {linhas, total};
 }
-function _cardMatrizDespesaServico(fluxo){
-  const {matriz, servicos, despesas, totServ, semOS, nSemOS} = _matrizDespesaServico(fluxo);
-  if(!servicos.length && !semOS){
-    return `<div class="card"><div class="card-title">🔗 Despesas por Tipo de Serviço</div>
-      <p class="text-sm text-muted">Nenhuma despesa vinculada a OS no período selecionado.</p></div>`;
+function _tabelaReceitas(titulo, dica, fluxo, chaveFn, rotuloCol){
+  const {linhas, total} = _rankingReceitas(fluxo, chaveFn);
+  if(!linhas.length){
+    return `<div class="card"><div class="card-title">${titulo}</div>
+      <p class="text-sm text-muted">Nenhuma receita no período selecionado.</p></div>`;
   }
-  let max=0;
-  servicos.forEach(s=>despesas.forEach(d=>{ const v=(matriz[s]&&matriz[s][d])||0; if(v>max) max=v; }));
-  const corCel = v=>{
-    if(!v) return '';
-    const pct = max? v/max : 0;
-    return `background:rgba(214,64,69,${(0.10+pct*0.55).toFixed(2)})`;
-  };
+  const top=linhas.slice(0,8);
+  const resto=linhas.slice(8);
+  const somaResto=resto.reduce((a,[,d])=>a+d.valor,0);
   return `<div class="card">
-    <div class="card-title">🔗 Despesas por Tipo de Serviço</div>
-    <p class="text-xs text-muted" style="margin:-4px 0 8px">Quais tipos de despesa pesam mais em cada tipo de serviço — só despesas vinculadas a uma OS.</p>
+    <div class="card-title">${titulo}</div>
+    <p class="text-xs text-muted" style="margin:-4px 0 8px">${dica}</p>
     <div class="table-wrap"><table>
-      <thead><tr><th>Serviço \\ Despesa</th>${despesas.map(d=>`<th class="td-num text-xs">${esc(d)}</th>`).join('')}<th class="td-num" style="font-weight:700">Total</th></tr></thead>
+      <thead><tr><th>${rotuloCol}</th><th class="td-num">Lanç.</th><th class="td-num">Valor</th><th class="td-num">%</th><th style="width:90px"></th></tr></thead>
       <tbody>
-        ${servicos.map(s=>`<tr>
-          <td class="text-xs"><b>${esc(s)}</b></td>
-          ${despesas.map(d=>{ const v=(matriz[s]&&matriz[s][d])||0; return `<td class="td-num text-xs" style="${corCel(v)}">${v?fmtBRL(v):'—'}</td>`; }).join('')}
-          <td class="td-num" style="font-weight:700">${fmtBRL(totServ[s]||0)}</td>
-        </tr>`).join('')}
+        ${top.map(([nome,d])=>{
+          const pct = total ? d.valor/total*100 : 0;
+          return `<tr>
+            <td class="text-xs"><b>${esc(nome)}</b></td>
+            <td class="td-num text-xs">${d.n}</td>
+            <td class="td-num verde" style="font-weight:700">${fmtBRL(d.valor)}</td>
+            <td class="td-num text-xs">${pct.toFixed(1)}%</td>
+            <td><div style="background:var(--cinza-borda);border-radius:4px;height:7px;overflow:hidden">
+              <div style="background:#1A8F5A;height:100%;width:${pct.toFixed(1)}%"></div></div></td>
+          </tr>`;
+        }).join('')}
+        ${resto.length?`<tr><td class="text-xs text-muted">+ outros ${resto.length}</td><td></td>
+          <td class="td-num text-xs text-muted">${fmtBRL(somaResto)}</td><td colspan="2"></td></tr>`:''}
       </tbody>
+      <tfoot><tr class="total-row"><td><b>TOTAL</b></td><td></td>
+        <td class="td-num" style="font-weight:700">${fmtBRL(total)}</td><td colspan="2"></td></tr></tfoot>
     </table></div>
-    ${nSemOS?`<p class="text-xs text-muted" style="margin-top:8px">🔸 Despesas indiretas / gerais (rateio, sem OS vinculada): <b>${fmtBRL(semOS)}</b> em ${nSemOS} lançamento(s) — não entram na tabela acima.</p>`:''}
   </div>`;
+}
+function _cardReceitaPorTipoServico(fluxo){
+  return _tabelaReceitas('📈 Receita por Tipo de Serviço',
+    'De onde vem o faturamento — classificação direta do lançamento, sem depender de vínculo com OS.',
+    fluxo, r=>r.categoria||r.tipo_servico, 'Tipo de serviço');
 }
 
 function render_dashboard(){
@@ -1398,9 +1393,9 @@ function render_dashboard(){
   </div>
   <div class="grid-2">
     ${_cardDespesasPorTipo(fluxoF)}
-    ${_cardDespesasPorFornecedor(fluxoF)}
+    ${_cardReceitaPorTipoServico(fluxoF)}
   </div>
-  ${_cardMatrizDespesaServico(fluxoF)}`;
+  ${_cardDespesasPorFornecedor(fluxoF)}`;
 
   // Gráfico meses — mostra todos os meses do ano filtrado (só operacional)
   const fluxoGraf = soOperacional(FILTRO.ano ? D.fluxo.filter(r=>(r.data_movimento||'').startsWith(FILTRO.ano)) : D.fluxo);
@@ -5547,10 +5542,7 @@ function render_relatorios(){
     <div class="tab" id="reltab-servicos" onclick="relTab('servicos')">🔧 Serviços</div>
     <div class="tab" id="reltab-laudos" onclick="relTab('laudos')">${icon('bell',16)} Laudos</div>
   </div>
-  <div class="rel-pane" id="relpane-servicos" style="display:none">
-    ${_cardFaturamentoPorServico()}
-    ${_cardDividirAutomatico()}
-  </div>
+  <div class="rel-pane" id="relpane-servicos" style="display:none"></div>
   <div class="rel-pane" id="relpane-financeiro" style="display:none">
   <div class="card">
     <div class="card-title">📊 Resumo Financeiro por Mês</div>
@@ -5610,6 +5602,7 @@ function render_relatorios(){
   _relOpAno = new Date().getFullYear();
   _relOpMes = new Date().getMonth()+1;
   renderResultadoOperacional();
+  renderServicosPane();
   _relConcAno = new Date().getFullYear();
   _relConcMes = new Date().getMonth()+1;
   renderConciliacao();
@@ -5957,6 +5950,23 @@ function verOSdoTipo(tipo){
     `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`, true);
 }
 
+// Painel "Serviços" da aba Relatórios — tem seletor de mês/ano próprio
+// (com opção "Todos"), reaproveitando o FILTRO global do sistema.
+function aplicarFiltroServicos(){ lerFiltro(); renderServicosPane(); }
+function renderServicosPane(){
+  const pane=document.getElementById('relpane-servicos');
+  if(!pane) return;
+  pane.innerHTML = `
+  <div class="filters" style="margin-bottom:16px">
+    ${seletorMesAno([], 'aplicarFiltroServicos()')}
+    <div style="font-size:13px;font-weight:600;color:var(--azul);align-self:center;margin-left:4px">
+      📅 Exibindo: <span style="color:var(--azul2)">${labelPeriodo()}</span>
+    </div>
+    <button class="btn btn-sm btn-outline" onclick="FILTRO={mes:'',ano:''};renderServicosPane()" style="margin-left:auto">✕ Limpar filtro</button>
+  </div>
+  ${_cardFaturamentoPorServico()}
+  ${_cardDividirAutomatico()}`;
+}
 function _cardFaturamentoPorServico(){
   const osF = filtrarPorPeriodo(D.os.filter(o=>!o.arquivada), 'data_abertura');
   const porTipo = {};
