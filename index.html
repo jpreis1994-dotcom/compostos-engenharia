@@ -1328,9 +1328,63 @@ function _cardDespesasPorFornecedor(fluxo){
 
 // ══════════════════════════════════════════════════════════════
 // RECEITA POR TIPO DE SERVIÇO
-// Classificação direta do lançamento (categoria/tipo_servico da RECEITA)
-// — não depende de vínculo com OS, por isso é confiável.
+// Tenta usar a categoria do lançamento quando ela já é um tipo de serviço de
+// verdade. Quando é genérica (RECEBIMENTO, "OS #123", etc.) ou vazia, busca a
+// OS vinculada — direto pelo os_id do fluxo, ou pela conta a receber que o
+// lançamento baixou — e distribui o valor entre os tipos de serviço dessa OS,
+// na mesma proporção da divisão lançada (ou 100% no tipo único, se não há
+// divisão). Lançamentos sem NENHUMA OS vinculada ficam de fora do ranking —
+// combinado com o JP em 30/07/2026: não faz sentido "inventar" um tipo.
 // ══════════════════════════════════════════════════════════════
+// Rótulos que NÃO são tipo de serviço — são categorias financeiras genéricas
+// usadas quando o sistema lança automaticamente um recebimento sem saber (ou
+// sem conseguir apurar) o serviço real por trás.
+function _ehReceitaGenerica(cat){
+  const c=String(cat||'').toUpperCase().trim();
+  return c==='RECEBIMENTO' || c==='COMISSÃO' || c==='APORTE (PRÓPRIO)' || /^OS #/.test(c) || !c;
+}
+// Acha a OS por trás de um lançamento de RECEITA: direto pelo os_id do fluxo
+// (número da OS), ou pela conta a receber que ele baixou (id interno da OS).
+function _osDoLancamentoReceita(r){
+  let os = r.os_id!=null ? D.os.find(o=>String(o.numero_os)===String(r.os_id)) : null;
+  if(!os && r.conta_receber_id!=null){
+    const cr = D.receber.find(c=>String(c.id)===String(r.conta_receber_id));
+    if(cr && cr.os_id!=null) os = D.os.find(o=>String(o.id)===String(cr.os_id));
+  }
+  return os||null;
+}
+// Retorna como o valor deste lançamento deve ser distribuído entre tipos de
+// serviço: [{tipo, valor}, ...]. Lista vazia = sem vínculo, fica de fora.
+function _contribuicoesServicoLancamento(r){
+  const catBruta = r.categoria || r.tipo_servico || '';
+  const valorTotal = Number(r.valor||0);
+  if(catBruta && !_ehReceitaGenerica(catBruta)) return [{tipo:catBruta, valor:valorTotal}];
+  const os = _osDoLancamentoReceita(r);
+  if(!os) return [];
+  const itens = _servicosDaOS(os);
+  if(itens.length<=1) return [{tipo:(itens[0]&&itens[0].tipo)||os.servico||'OUTRO', valor:valorTotal}];
+  const somaItens = itens.reduce((a,i)=>a+Number(i.valor||0),0);
+  if(!somaItens) return [{tipo:os.servico||'OUTRO', valor:valorTotal}];
+  return itens.map(i=>({ tipo:i.tipo, valor: valorTotal*(Number(i.valor||0)/somaItens) }));
+}
+// Monta o ranking por tipo de serviço já resolvido pela OS. Também devolve o
+// total e a quantidade de lançamentos sem vínculo algum (ficam de fora).
+function _rankingReceitaPorServico(fluxo){
+  const acc={};
+  let semVinculo=0, nSemVinculo=0;
+  fluxo.filter(r=>r.tipo==='RECEITA').forEach(r=>{
+    const contribs=_contribuicoesServicoLancamento(r);
+    if(!contribs.length){ semVinculo+=Number(r.valor||0); nSemVinculo++; return; }
+    contribs.forEach(c=>{
+      const k=(c.tipo||'').trim()||'OUTRO';
+      if(!acc[k]) acc[k]={valor:0, n:0};
+      acc[k].valor+=c.valor; acc[k].n++;
+    });
+  });
+  const linhas=Object.entries(acc).sort((a,b)=>b[1].valor-a[1].valor);
+  const total=linhas.reduce((a,[,d])=>a+d.valor,0);
+  return {linhas, total, semVinculo, nSemVinculo};
+}
 function _rankingReceitas(fluxo, chaveFn){
   const acc={};
   fluxo.filter(r=>r.tipo==='RECEITA').forEach(r=>{
@@ -1343,11 +1397,15 @@ function _rankingReceitas(fluxo, chaveFn){
   const total=linhas.reduce((a,[,d])=>a+d.valor,0);
   return {linhas, total};
 }
-function _tabelaReceitas(titulo, dica, fluxo, chaveFn, rotuloCol, viewKey){
-  const {linhas, total} = _rankingReceitas(fluxo, chaveFn);
+// chaveFn pode ser uma função (fluxo, chaveFn) OU um ranking já pronto
+// ({linhas,total}, como o de _rankingReceitaPorServico) — nesse caso 'fluxo'
+// é ignorado. notaRodape é um HTML opcional exibido dentro do card.
+function _tabelaReceitas(titulo, dica, fluxo, chaveFn, rotuloCol, viewKey, notaRodape){
+  const {linhas, total} = (typeof chaveFn==='function') ? _rankingReceitas(fluxo, chaveFn) : chaveFn;
   if(!linhas.length){
     return `<div class="card"><div class="card-title">${titulo}</div>
-      <p class="text-sm text-muted">Nenhuma receita no período selecionado.</p></div>`;
+      <p class="text-sm text-muted">Nenhuma receita classificada no período selecionado.</p>
+      ${notaRodape||''}</div>`;
   }
   const modo = _dashViewMode[viewKey]||'linhas';
   const top=linhas.slice(0,8);
@@ -1384,23 +1442,17 @@ function _tabelaReceitas(titulo, dica, fluxo, chaveFn, rotuloCol, viewKey){
     </div>
     <p class="text-xs text-muted" style="margin:-4px 0 8px">${dica}</p>
     ${corpo}
+    ${notaRodape||''}
   </div>`;
 }
-// Rótulos que NÃO são tipo de serviço — são categorias financeiras genéricas
-// usadas quando o sistema lança automaticamente um recebimento sem saber (ou
-// sem conseguir apurar) o serviço real por trás. Não devem aparecer misturados
-// com tipos de serviço de verdade num ranking "por tipo".
-function _ehReceitaGenerica(cat){
-  const c=String(cat||'').toUpperCase().trim();
-  return c==='RECEBIMENTO' || c==='COMISSÃO' || c==='APORTE (PRÓPRIO)' || /^OS #/.test(c) || !c;
-}
 function _cardReceitaPorTipoServico(fluxo){
+  const ranking = _rankingReceitaPorServico(fluxo);
+  const nota = ranking.nSemVinculo
+    ? `<p class="text-xs text-muted" style="margin-top:8px">🔸 ${ranking.nSemVinculo} lançamento(s) sem OS vinculada (${fmtBRL(ranking.semVinculo)}) não entram nesta tabela — não dá pra saber o tipo de serviço.</p>`
+    : '';
   return _tabelaReceitas('📈 Receita por Tipo de Serviço',
-    'De onde vem o faturamento — classificação direta do lançamento. "(sem tipo definido)" são recebimentos lançados sem um serviço associado.',
-    fluxo, r=>{
-      const cat=r.categoria||r.tipo_servico||'';
-      return _ehReceitaGenerica(cat) ? '(sem tipo definido)' : cat;
-    }, 'Tipo de serviço', 'recServ');
+    'De onde vem o faturamento, por tipo de serviço da OS vinculada (dividido proporcionalmente quando a OS tem mais de um serviço lançado).',
+    fluxo, ranking, 'Tipo de serviço', 'recServ', nota);
 }
 
 function render_dashboard(){
@@ -5616,12 +5668,7 @@ async function confirmarImportLaudos(){
 
 
 function render_relatorios(){
-  const byServ={};
-  D.fluxo.filter(r=>r.tipo==='RECEITA'&&(r.categoria||r.tipo_servico)).forEach(r=>{
-    const catBruta=r.categoria||r.tipo_servico;
-    const k=_ehReceitaGenerica(catBruta)?'(sem tipo definido)':catBruta;
-    if(!byServ[k])byServ[k]={rec:0,n:0};byServ[k].rec+=Number(r.valor);byServ[k].n++;});
-  const servRows=Object.entries(byServ).sort((a,b)=>b[1].rec-a[1].rec);
+  const servRows=_rankingReceitaPorServico(D.fluxo).linhas;
   const c=document.getElementById('content');
   c.innerHTML=`
   <div class="tabs" style="margin-bottom:4px">
@@ -5655,7 +5702,7 @@ function render_relatorios(){
       <div class="card-title">📈 Receita por Tipo de Serviço</div>
       <div class="table-wrap">
         <table><thead><tr><th>Serviço</th><th class="td-num">Receita</th><th class="td-num">Qtd</th><th class="td-num">Ticket Médio</th></tr></thead>
-        <tbody>${servRows.map(([s,v])=>`<tr><td>${esc(s)}</td><td class="td-num">${fmtBRL(v.rec)}</td><td class="td-num">${v.n}</td><td class="td-num">${fmtBRL(v.rec/v.n)}</td></tr>`).join('')}</tbody></table>
+        <tbody>${servRows.map(([s,v])=>`<tr><td>${esc(s)}</td><td class="td-num">${fmtBRL(v.valor)}</td><td class="td-num">${v.n}</td><td class="td-num">${fmtBRL(v.valor/v.n)}</td></tr>`).join('')}</tbody></table>
       </div>
     </div>
     <div class="card">
@@ -6356,16 +6403,9 @@ function renderResultadoOperacional(){
   const resultado = totRec - totDesp;
   const margem = totRec ? (resultado/totRec*100) : 0;
 
-  // ── Serviços por resultado (receita − despesa vinculada, por categoria de receita) ──
-  const porServico = {};
-  receitas.forEach(f=>{
-    const catBruta = f.categoria || f.tipo_servico || 'Sem categoria';
-    const k = _ehReceitaGenerica(catBruta) ? '(sem tipo definido)' : catBruta;
-    if(!porServico[k]) porServico[k]={rec:0,n:0};
-    porServico[k].rec += Number(f.valor||0);
-    porServico[k].n++;
-  });
-  const servicosRows = Object.entries(porServico).sort((a,b)=>b[1].rec-a[1].rec);
+  // ── Serviços por resultado (receita por tipo de serviço, resolvido pela OS vinculada) ──
+  const _rankServ = _rankingReceitaPorServico(receitas);
+  const servicosRows = _rankServ.linhas;
 
   // ── Despesas por categoria ──
   const porDesp = {};
@@ -6447,10 +6487,11 @@ function renderResultadoOperacional(){
   <div class="grid-2">
     <div class="card">
       <div class="card-title">🏆 Serviços com melhor resultado</div>
-      <p class="text-xs text-muted" style="margin:-4px 0 12px">Quanto cada serviço trouxe de receita no período.</p>
+      <p class="text-xs text-muted" style="margin:-4px 0 12px">Quanto cada serviço trouxe de receita no período, pela OS vinculada a cada lançamento.</p>
       ${servicosRows.length?servicosRows.map(([s,v],i)=>
-        _barraRanking(`${i===0?'🥇 ':i===1?'🥈 ':i===2?'🥉 ':''}${esc(s)}`, v.rec, totRec, i===0?'linear-gradient(90deg,#1A8F5A,#2FBF7F)':'#1A8F5A', v.n+'x')
-      ).join(''):'<p class="text-sm text-muted">Nenhuma receita no período.</p>'}
+        _barraRanking(`${i===0?'🥇 ':i===1?'🥈 ':i===2?'🥉 ':''}${esc(s)}`, v.valor, _rankServ.total, i===0?'linear-gradient(90deg,#1A8F5A,#2FBF7F)':'#1A8F5A', v.n+'x')
+      ).join(''):'<p class="text-sm text-muted">Nenhuma receita classificada no período.</p>'}
+      ${_rankServ.nSemVinculo?`<p class="text-xs text-muted" style="margin-top:8px">🔸 ${_rankServ.nSemVinculo} lançamento(s) sem OS vinculada (${fmtBRL(_rankServ.semVinculo)}) não entram acima.</p>`:''}
     </div>
     <div class="card">
       <div class="card-title">👥 Clientes que mais contribuíram</div>
