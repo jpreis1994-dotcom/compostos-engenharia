@@ -1265,6 +1265,68 @@ function _cardDespesasPorFornecedor(fluxo){
     }, 'Fornecedor');
 }
 
+// ══════════════════════════════════════════════════════════════
+// RELAÇÃO: DESPESAS x TIPO DE SERVIÇO
+// Cruza os tipos de despesa com os tipos de serviço das OS vinculadas.
+// Despesas sem OS vinculada (rateio/indiretas) entram numa linha à parte
+// e não fazem parte da matriz — combinado com o JP em 30/07/2026.
+// ══════════════════════════════════════════════════════════════
+function _servicoPrincipalOS(o){
+  const itens=_servicosDaOS(o);
+  if(itens.length<=1) return (itens[0]&&itens[0].tipo) || o.servico || 'OUTRO';
+  const dom=itens.slice().sort((a,b)=>b.valor-a.valor)[0];
+  return dom.tipo + ' (+'+(itens.length-1)+')';
+}
+function _matrizDespesaServico(fluxo){
+  const porNumOS={};
+  D.os.forEach(o=>{ porNumOS[String(o.numero_os)]=o; });
+  const matriz={}, totServ={}, totDesp={};
+  let semOS=0, nSemOS=0;
+  fluxo.filter(r=>r.tipo==='DESPESA').forEach(r=>{
+    const cat=(r.categoria||r.tipo_despesa||'(sem categoria)').trim() || '(sem categoria)';
+    const val=Number(r.valor||0);
+    const o = r.os_id!=null ? porNumOS[String(r.os_id)] : null;
+    if(!o){ semOS+=val; nSemOS++; return; }
+    const serv=_servicoPrincipalOS(o);
+    if(!matriz[serv]) matriz[serv]={};
+    matriz[serv][cat]=(matriz[serv][cat]||0)+val;
+    totServ[serv]=(totServ[serv]||0)+val;
+    totDesp[cat]=(totDesp[cat]||0)+val;
+  });
+  const servicos=Object.entries(totServ).sort((a,b)=>b[1]-a[1]).slice(0,6).map(e=>e[0]);
+  const despesas=Object.entries(totDesp).sort((a,b)=>b[1]-a[1]).slice(0,6).map(e=>e[0]);
+  return {matriz, servicos, despesas, totServ, semOS, nSemOS};
+}
+function _cardMatrizDespesaServico(fluxo){
+  const {matriz, servicos, despesas, totServ, semOS, nSemOS} = _matrizDespesaServico(fluxo);
+  if(!servicos.length && !semOS){
+    return `<div class="card"><div class="card-title">🔗 Despesas por Tipo de Serviço</div>
+      <p class="text-sm text-muted">Nenhuma despesa vinculada a OS no período selecionado.</p></div>`;
+  }
+  let max=0;
+  servicos.forEach(s=>despesas.forEach(d=>{ const v=(matriz[s]&&matriz[s][d])||0; if(v>max) max=v; }));
+  const corCel = v=>{
+    if(!v) return '';
+    const pct = max? v/max : 0;
+    return `background:rgba(214,64,69,${(0.10+pct*0.55).toFixed(2)})`;
+  };
+  return `<div class="card">
+    <div class="card-title">🔗 Despesas por Tipo de Serviço</div>
+    <p class="text-xs text-muted" style="margin:-4px 0 8px">Quais tipos de despesa pesam mais em cada tipo de serviço — só despesas vinculadas a uma OS.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Serviço \\ Despesa</th>${despesas.map(d=>`<th class="td-num text-xs">${esc(d)}</th>`).join('')}<th class="td-num" style="font-weight:700">Total</th></tr></thead>
+      <tbody>
+        ${servicos.map(s=>`<tr>
+          <td class="text-xs"><b>${esc(s)}</b></td>
+          ${despesas.map(d=>{ const v=(matriz[s]&&matriz[s][d])||0; return `<td class="td-num text-xs" style="${corCel(v)}">${v?fmtBRL(v):'—'}</td>`; }).join('')}
+          <td class="td-num" style="font-weight:700">${fmtBRL(totServ[s]||0)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+    ${nSemOS?`<p class="text-xs text-muted" style="margin-top:8px">🔸 Despesas indiretas / gerais (rateio, sem OS vinculada): <b>${fmtBRL(semOS)}</b> em ${nSemOS} lançamento(s) — não entram na tabela acima.</p>`:''}
+  </div>`;
+}
+
 function render_dashboard(){
   // IMPORTANTE: o dashboard mostra só o movimento OPERACIONAL da empresa.
   // Retiradas do proprietário e aportes de dinheiro pessoal ficam de fora de
@@ -1337,7 +1399,8 @@ function render_dashboard(){
   <div class="grid-2">
     ${_cardDespesasPorTipo(fluxoF)}
     ${_cardDespesasPorFornecedor(fluxoF)}
-  </div>`;
+  </div>
+  ${_cardMatrizDespesaServico(fluxoF)}`;
 
   // Gráfico meses — mostra todos os meses do ano filtrado (só operacional)
   const fluxoGraf = soOperacional(FILTRO.ano ? D.fluxo.filter(r=>(r.data_movimento||'').startsWith(FILTRO.ano)) : D.fluxo);
@@ -6163,16 +6226,25 @@ function _barraRanking(nome, valor, total, cor, extra){
 }
 let _relOpAno, _relOpMes;
 function relOpMudar(){
-  _relOpAno = parseInt(document.getElementById('relop-ano').value);
-  _relOpMes = parseInt(document.getElementById('relop-mes').value);
+  const vAno=document.getElementById('relop-ano').value;
+  const vMes=document.getElementById('relop-mes').value;
+  _relOpAno = vAno? parseInt(vAno) : '';   // '' = Todos os anos
+  _relOpMes = vMes? parseInt(vMes) : '';   // '' = Todos os meses
   renderResultadoOperacional();
 }
 function renderResultadoOperacional(){
   const pane=document.getElementById('relpane-operacional');
   if(!pane) return;
   const ano=_relOpAno, mes=_relOpMes;
-  const mesStr=String(mes).padStart(2,'0');
-  const noMes = d => { const s=String(d||'').slice(0,10); return s.slice(0,4)===String(ano) && s.slice(5,7)===mesStr; };
+  const mesStr = mes? String(mes).padStart(2,'0') : '';
+  const noMes = d => {
+    const s=String(d||'').slice(0,10);
+    if(!s) return false;
+    const okAno = !ano || s.slice(0,4)===String(ano);
+    const okMes = !mesStr || s.slice(5,7)===mesStr;
+    return okAno && okMes;
+  };
+  const rotuloPeriodo = !ano && !mes ? 'Todo o período' : !mes ? `Todos os meses / ${ano}` : !ano ? `${MESES[mes]} (todos os anos)` : `${MESES[mes]} / ${ano}`;
 
   // ── Receitas e despesas do fluxo no mês ──
   const receitas = D.fluxo.filter(f=>f.tipo==='RECEITA' && noMes(f.data_movimento));
@@ -6223,20 +6295,22 @@ function renderResultadoOperacional(){
   const nRecebimentos = receitas.length;
 
   const anos = [...new Set(D.fluxo.map(f=>String(f.data_movimento||'').slice(0,4)).filter(Boolean))].sort().reverse();
-  if(!anos.includes(String(ano))) anos.unshift(String(ano));
+  if(ano && !anos.includes(String(ano))) anos.unshift(String(ano));
 
   pane.innerHTML = `
   <div class="card" style="background:linear-gradient(135deg,#1A3C5E,#2A6DBF);color:white">
     <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:10px">
       <div>
         <div style="font-size:12px;opacity:.85">Resultado Operacional</div>
-        <div style="font-size:20px;font-weight:700">${MESES[mes]} / ${ano}</div>
+        <div style="font-size:20px;font-weight:700">${rotuloPeriodo}</div>
       </div>
       <div class="flex gap-8">
         <select id="relop-mes" onchange="relOpMudar()" style="padding:6px 10px;border-radius:6px;border:none">
+          <option value="" ${!mes?'selected':''}>Todos os meses</option>
           ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mes?'selected':''}>${MESES[m]}</option>`).join('')}
         </select>
         <select id="relop-ano" onchange="relOpMudar()" style="padding:6px 10px;border-radius:6px;border:none">
+          <option value="" ${!ano?'selected':''}>Todos os anos</option>
           ${anos.map(a=>`<option value="${a}" ${String(a)===String(ano)?'selected':''}>${a}</option>`).join('')}
         </select>
         <button class="btn btn-sm" style="background:white;color:var(--azul)" onclick="imprimirResultadoOperacional()">${icon('print',16)} Imprimir</button>
@@ -6246,12 +6320,12 @@ function renderResultadoOperacional(){
 
   <div class="grid-4" style="margin-bottom:14px">
     <div class="kpi kpi-modern" style="border-left:4px solid #1A8F5A">
-      <div class="kpi-label">Recebido no mês</div>
+      <div class="kpi-label">Recebido no período</div>
       <div class="kpi-val verde">${fmtBRL(totRec)}</div>
       <div class="kpi-delta">${nRecebimentos} recebimento(s)</div>
     </div>
     <div class="kpi kpi-modern" style="border-left:4px solid #D64045">
-      <div class="kpi-label">Despesas no mês</div>
+      <div class="kpi-label">Despesas no período</div>
       <div class="kpi-val vermelho">${fmtBRL(totDesp)}</div>
       <div class="kpi-delta">${despesas.length} lançamento(s)</div>
     </div>
@@ -6261,7 +6335,7 @@ function renderResultadoOperacional(){
       <div class="kpi-delta">margem ${margem.toFixed(1)}%</div>
     </div>
     <div class="kpi kpi-modern" style="border-left:4px solid #2A6DBF">
-      <div class="kpi-label">OS abertas no mês</div>
+      <div class="kpi-label">OS abertas no período</div>
       <div class="kpi-val">${osAbertas.length}</div>
       <div class="kpi-delta">${fmtBRL(valorOSAbertas)} em serviços</div>
     </div>
@@ -6270,7 +6344,7 @@ function renderResultadoOperacional(){
   <div class="grid-2">
     <div class="card">
       <div class="card-title">🏆 Serviços com melhor resultado</div>
-      <p class="text-xs text-muted" style="margin:-4px 0 12px">Quanto cada serviço trouxe de receita no mês.</p>
+      <p class="text-xs text-muted" style="margin:-4px 0 12px">Quanto cada serviço trouxe de receita no período.</p>
       ${servicosRows.length?servicosRows.map(([s,v],i)=>
         _barraRanking(`${i===0?'🥇 ':i===1?'🥈 ':i===2?'🥉 ':''}${esc(s)}`, v.rec, totRec, i===0?'linear-gradient(90deg,#1A8F5A,#2FBF7F)':'#1A8F5A', v.n+'x')
       ).join(''):'<p class="text-sm text-muted">Nenhuma receita no período.</p>'}
@@ -6287,13 +6361,13 @@ function renderResultadoOperacional(){
   <div class="grid-2">
     <div class="card">
       <div class="card-title">💸 Despesas por categoria</div>
-      <p class="text-xs text-muted" style="margin:-4px 0 12px">Para onde o dinheiro foi no mês.</p>
+      <p class="text-xs text-muted" style="margin:-4px 0 12px">Para onde o dinheiro foi no período.</p>
       ${despRows.length?despRows.map(([s,v])=>
         _barraRanking(esc(s), v, totDesp, '#D64045')
       ).join(''):'<p class="text-sm text-muted">Nenhuma despesa no período.</p>'}
     </div>
     <div class="card">
-      <div class="card-title">🔧 OS abertas no mês</div>
+      <div class="card-title">🔧 OS abertas no período</div>
       <p class="text-xs text-muted" style="margin:-4px 0 8px">Ordens de serviço abertas no período e seu valor total — independente de já ter sido recebido.</p>
       ${osAbertas.length?`<div class="table-wrap"><table>
         <thead><tr><th>OS</th><th>Cliente</th><th>Status</th><th class="td-num">Valor</th></tr></thead>
@@ -6315,7 +6389,11 @@ function imprimirResultadoOperacional(){
   if(!pane) return;
   const win=window.open('','_blank');
   if(!win){ alert('Permita pop-ups para imprimir.'); return; }
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Resultado Operacional — ${MESES[_relOpMes]}/${_relOpAno}</title>
+  const rotuloImp = !_relOpAno && !_relOpMes ? 'Todo o período'
+    : !_relOpMes ? `Todos os meses de ${_relOpAno}`
+    : !_relOpAno ? `${MESES[_relOpMes]} (todos os anos)`
+    : `${MESES[_relOpMes]} de ${_relOpAno}`;
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Resultado Operacional — ${rotuloImp}</title>
   <style>
     *{font-family:Arial,sans-serif;box-sizing:border-box}
     body{margin:0;padding:24px;color:#111;font-size:12px}
@@ -6330,7 +6408,7 @@ function imprimirResultadoOperacional(){
     @media print{.noprint{display:none}}
   </style></head><body>
   <h1>H. Veloso Soares Compostos Engenharia & Manutenção</h1>
-  <div class="sub">Resultado Operacional — ${MESES[_relOpMes]} de ${_relOpAno} · gerado em ${fmtData(hoje())}</div>
+  <div class="sub">Resultado Operacional — ${rotuloImp} · gerado em ${fmtData(hoje())}</div>
   ${pane.innerHTML.replace(/<select[\s\S]*?<\/select>/g,'').replace(/<button[\s\S]*?<\/button>/g,'')}
   <div class="noprint" style="text-align:center;margin-top:16px">
     <button onclick="window.print()" style="background:#1A3C5E;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer">🖨️ Imprimir / Salvar PDF</button>
