@@ -3755,6 +3755,17 @@ function preencherDeReceber(){
     const falta=Math.max(0, Math.round((total-ja)*100)/100);
     document.getElementById('fc-valor').value=falta||total;
     _preencherCNPJFluxo(r.cnpj || _cnpjDoClientePorNome(r.cliente_nome||r.cliente));
+    // Sincroniza a OS e a categoria com a OS vinculada a ESTA conta a receber.
+    // Sem isso, quem escolhe a conta a receber direto (sem mexer no seletor de
+    // OS) ficava com a categoria genérica em vez do tipo de serviço da OS.
+    if(r.os_id!=null){
+      const os=D.os.find(o=>String(o.id)===String(r.os_id));
+      if(os){
+        const osSel=document.getElementById('fc-os-id');
+        if(osSel && !osSel.value) osSel.value=os.numero_os;
+        _categoriaPelaOS(os, 'fc-cat-rec', 'fc-os-serv-aviso');
+      }
+    }
     if(aviso && ja>0.005){
       aviso.style.display='';
       aviso.innerHTML=`<div class="alert-box alert-info" style="font-size:12px;margin:0">
@@ -3791,6 +3802,19 @@ function _efcOSMudou(){
   }
   const o=D.os.find(x=>String(x.numero_os)===String(num));
   if(o) _categoriaPelaOS(o, 'efc-cat-rec', 'efc-os-serv-aviso');
+}
+// Ao trocar a conta a receber vinculada no modal de edição, sincroniza a OS
+// e a categoria com a OS dessa conta — mesmo buraco do Novo Lançamento.
+function _efcRecMudou(){
+  const idSel=document.getElementById('efc-rec-id')?.value;
+  if(!idSel) return;
+  const r=D.receber.find(x=>x.id===parseInt(idSel));
+  if(!r || r.os_id==null) return;
+  const os=D.os.find(o=>String(o.id)===String(r.os_id));
+  if(!os) return;
+  const osSel=document.getElementById('efc-os-id');
+  if(osSel && !osSel.value) osSel.value=os.numero_os;
+  _categoriaPelaOS(os, 'efc-cat-rec', 'efc-os-serv-aviso');
 }
 
 function _categoriaPelaOS(o, idSelect, idAviso){
@@ -3931,7 +3955,7 @@ function editarLancamento(id){
     </div>
     <div class="form-group span2" id="efc-rec-wrap" style="${tipo==='DESPESA'?'display:none':''}">
       <label>💰 Quitar uma Conta a Receber (opcional)</label>
-      <select id="efc-rec-id">
+      <select id="efc-rec-id" onchange="_efcRecMudou()">
         <option value="">— Não vincular —</option>
         ${D.receber.filter(x=>x.status!=='RECEBIDO'||x.id===r.conta_receber_id).map(x=>`<option value="${x.id}" ${r.conta_receber_id==x.id?'selected':''}>#${x.id} — ${esc(x.cliente_nome||x.cliente||'')} (${fmtBRL(x.valor)})${x.status==='RECEBIDO'?' ✓':''}</option>`).join('')}
       </select>
