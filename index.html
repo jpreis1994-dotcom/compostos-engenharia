@@ -1376,6 +1376,22 @@ function _ehReceitaGenerica(cat){
   const c=String(cat||'').toUpperCase().trim();
   return c==='RECEBIMENTO' || c==='COMISSÃO' || c==='APORTE (PRÓPRIO)' || /^OS #/.test(c) || !c;
 }
+// Este lançamento é RESULTADO de uma divisão/correção que o próprio sistema
+// já aplicou (a observação carrega essa marca)? Usado pra nunca oferecer
+// "dividir" de novo em cima de algo que já é um pedaço de uma divisão —
+// dividir um pedaço já dividido de novo pela % da OS inteira dá conta errada.
+function _jaFoiDivididoAntes(f){
+  return /Dividido autom|Dividido manual|Corrigido autom/i.test(f.observacao||'');
+}
+// Chave de agrupamento de "mesmo evento de pagamento": usa a conta a receber
+// quando existe (mais confiável); na falta dela, cai pra os_id+data+cliente
+// (funciona pra identificar pedaços de uma mesma divisão feita sem conta a
+// receber vinculada).
+function _chaveEventoReceita(f){
+  if(f.conta_receber_id!=null) return 'cr:'+f.conta_receber_id;
+  if(f.os_id!=null) return 'ev:'+f.os_id+'|'+(f.data_movimento||'')+'|'+(f.cliente||'');
+  return null;
+}
 // Acha a OS por trás de um lançamento de RECEITA: direto pelo os_id do fluxo
 // (número da OS), ou pela conta a receber que ele baixou (id interno da OS).
 function _osDoLancamentoReceita(r){
@@ -3842,14 +3858,22 @@ function _categoriaPelaOS(o, idSelect, idAviso){
   // na Auditoria — cravar o tipo de maior valor aqui "prenderia" o
   // lançamento nele pra sempre, escondendo a divisão real.
   if(itens.length>1){
-    const optRec=[...sel.options].find(op=>_nomeNorm(op.value||op.text)==='RECEBIMENTO');
+    const optRec=[...sel.options].find(op=>_nomeNorm(op.value||op.text)===_nomeNorm('RECEBIMENTO'));
     if(optRec) sel.value=optRec.value||optRec.text;
     if(aviso){
+      const somaItens=itens.reduce((a,i)=>a+Number(i.valor||0),0)||1;
       aviso.style.display='';
       aviso.innerHTML=`<div class="alert-box alert-info" style="font-size:12px;margin:0">
-        Esta OS tem <b>mais de um serviço</b>: ${itens.map(i=>esc(i.tipo)+' '+fmtBRL(i.valor)).join(' · ')}.
-        Deixei a categoria como <b>RECEBIMENTO</b> — o sistema divide o valor proporcionalmente entre eles nos relatórios, automaticamente.
-        Se este recebimento específico for de só UM desses serviços, escolha ele na lista acima.</div>`;
+        <div style="font-weight:700;margin-bottom:6px">🔀 Esta OS tem mais de um serviço — o valor é dividido automaticamente:</div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:6px">
+          ${itens.map(i=>`<tr>
+            <td style="padding:2px 6px 2px 0">${esc(i.tipo)}</td>
+            <td style="padding:2px 0;text-align:right;white-space:nowrap">${fmtBRL(i.valor)}</td>
+            <td style="padding:2px 0 2px 8px;text-align:right;white-space:nowrap;color:var(--cinza)">${(i.valor/somaItens*100).toFixed(0)}%</td>
+          </tr>`).join('')}
+        </table>
+        <div style="color:var(--cinza)">Categoria acima ficou como <b>RECEBIMENTO</b> só pra sinalizar "dividir automático". Se este recebimento específico for de só UM desses serviços, escolha ele na lista de Categoria.</div>
+      </div>`;
     }
     return;
   }
@@ -4760,6 +4784,12 @@ function _chaveAuditoria(tipo, ids){
 function _foiIgnorado(chave){
   return (D.auditoria_ok||[]).some(x=>x.chave===chave);
 }
+// Botão "OK" reutilizável pelos cards de auditoria (marca como
+// verificado/ignorado, some da lista). Precisa ser global porque tanto
+// render_auditoria quanto _cardConferirBaixas usam ele.
+function btnOK(tipo,ids){
+  return `<button class="btn btn-sm btn-outline" onclick='marcarAuditoriaOK("${tipo}",${JSON.stringify([].concat(ids))})' title="Marcar como verificado — não aparece mais aqui">${icon('check',14)} OK</button>`;
+}
 
 // Traduz uma chave técnica de auditoria em texto legível (pra lista de "marcados OK")
 function _descreverChaveAuditoria(chave){
@@ -4777,7 +4807,9 @@ function _descreverChaveAuditoria(chave){
     fluxoSemOS:'Receita no fluxo sem OS',
     osSemRec:'OS sem recebimento',
     catServico:'Recebimento sem tipo de serviço da OS',
-    catUnica:'Recebimento possivelmente não dividido'
+    catUnica:'Recebimento com tipo divergente da OS',
+    fragServico:'Grupo de lançamentos fragmentados demais',
+    baixaReceber:'Baixa de conta a receber a conferir'
   };
   const rotulo = nomeRotulos[tipo] || tipo;
   let det = [];
@@ -4799,7 +4831,7 @@ function _descreverChaveAuditoria(chave){
 }
 
 function auditar(){
-  const r={duplicReceber:[], duplicFluxo:[], osSemReceb:[], fluxoSemOS:[], receberSemOS:[], naoVinculado:[], provavelPago:[], catServico:[], catUnica:[]};
+  const r={duplicReceber:[], duplicFluxo:[], osSemReceb:[], fluxoSemOS:[], receberSemOS:[], naoVinculado:[], provavelPago:[], catServico:[], catUnica:[], fragServico:[]};
   const norm=s=>String(s||'').toLowerCase().trim().replace(/\s+/g,' ');
   const normCNPJ=s=>String(s||'').replace(/\D/g,''); // só dígitos
   // Compara duas "partes" (conta, receita, OS) representando o mesmo cliente.
@@ -4937,37 +4969,77 @@ function auditar(){
     r.catServico.push({fluxo:f, os});
   });
 
-  // 9) RECEITA com categoria JÁ específica (não genérica), vinculada a uma OS
-  // que TEM divisão — mas sem sinal de que os OUTROS tipos da divisão também
-  // foram lançados pra este mesmo evento (mesma conta a receber). Provável
-  // que este lançamento foi gravado ANTES da correção de 31/07/2026, quando
-  // o sistema cravava o tipo de maior valor em vez de dividir. Como TAMBÉM
-  // pode ser uma escolha deliberada sua, isto é uma REVISÃO — não corrige
-  // sozinho, e não entra no "Corrigir todos" da outra categoria.
-  const porContaReceberR9={};
+  // 9) RECEITA cuja categoria DIVERGE do que a OS vinculada diz — três casos:
+  //   a) OS SEM divisão (serviço único): a categoria não bate com o serviço
+  //      da OS. Sem ambiguidade — ou bate, ou tá errado.
+  //   b) OS COM divisão: a categoria bate com um dos tipos, mas sem sinal de
+  //      que os OUTROS tipos também foram lançados — provável que não foi
+  //      dividido ainda.
+  //   c) OS COM divisão: a categoria é um tipo de serviço válido, mas não é
+  //      NENHUM dos itens DESTA OS — bem suspeito (ex: o campo ficou com um
+  //      valor errado/de outra OS).
+  // COMISSÃO/APORTE/VENDA DE PEÇAS/OUTRO não entram aqui — não são tipo de
+  // serviço, são escolha deliberada. Como (a) e (c) também podem, em teoria,
+  // ser intencionais, isto é uma REVISÃO — não corrige sozinho.
+  const _todosTiposServico=tiposServico();
+  const porEventoR9={};
   D.fluxo.forEach(f=>{
-    if(f.tipo==='RECEITA' && f.conta_receber_id!=null)
-      (porContaReceberR9[f.conta_receber_id]=porContaReceberR9[f.conta_receber_id]||[]).push(f);
+    if(f.tipo!=='RECEITA') return;
+    const chave=_chaveEventoReceita(f);
+    if(chave) (porEventoR9[chave]=porEventoR9[chave]||[]).push(f);
   });
   D.fluxo.forEach(f=>{
     if(f.tipo!=='RECEITA') return;
     const cat=(f.categoria||f.tipo_servico||'').trim();
     if(!cat || _ehReceitaGenerica(cat)) return; // já coberto na categoria 8
+    if(_jaFoiDivididoAntes(f)) return; // já é resultado de uma divisão — não reoferece
     const os=_osDoLancamentoReceita(f);
     if(!os) return;
+    const ehTipoServico=_todosTiposServico.some(t=>_nomeNorm(t)===_nomeNorm(cat));
+    if(!ehTipoServico) return; // não é tipo de serviço (ex: COMISSÃO) — escolha deliberada, não mexe
+
     const itens=_servicosDaOS(os);
-    if(itens.length<=1) return; // OS sem divisão — nada a revisar
-    if(!itens.some(i=>_nomeNorm(i.tipo)===_nomeNorm(cat))) return; // categoria não é tipo desta OS (ex: COMISSÃO)
-    if(f.conta_receber_id!=null){
-      const irmas=(porContaReceberR9[f.conta_receber_id]||[]).filter(x=>x.id!==f.id);
+    if(itens.length<=1){
+      // OS sem divisão: só um jeito de estar certo — bater com o serviço único.
+      const unico=(itens[0]&&itens[0].tipo)||os.servico||'';
+      if(unico && _nomeNorm(unico)===_nomeNorm(cat)) return; // bate — tudo certo
+      if(_foiIgnorado(_chaveAuditoria('catUnica',[f.id]))) return;
+      r.catUnica.push({fluxo:f, os});
+      return;
+    }
+
+    const bateComEstaOS=itens.some(i=>_nomeNorm(i.tipo)===_nomeNorm(cat));
+    if(bateComEstaOS){
+      const chave=_chaveEventoReceita(f);
+      const irmas=chave?(porEventoR9[chave]||[]).filter(x=>x.id!==f.id):[];
       const jaTemOutroTipo=irmas.some(x=>{
         const c2=(x.categoria||x.tipo_servico||'').trim();
         return c2 && _nomeNorm(c2)!==_nomeNorm(cat) && itens.some(i=>_nomeNorm(i.tipo)===_nomeNorm(c2));
       });
       if(jaTemOutroTipo) return; // já tem linha(s) irmã(s) com outro tipo — parece já dividido
     }
+    // Se não bate com nenhum item desta OS, é tipo de serviço válido mas
+    // errado pra esta OS especificamente — flag direto (sem checar irmãs).
     if(_foiIgnorado(_chaveAuditoria('catUnica',[f.id]))) return;
     r.catUnica.push({fluxo:f, os});
+  });
+
+  // 10) Grupos de RECEITA fragmentados DEMAIS pra um mesmo evento: mais
+  // linhas do que a OS tem tipos de serviço. Acontece se um pedaço já
+  // dividido foi dividido de novo por engano (bug corrigido em 31/07/2026).
+  // "Consolidar" soma tudo (a soma total nunca muda, só a forma como foi
+  // repartida) e refaz a divisão limpa, uma linha por tipo.
+  Object.entries(porEventoR9).forEach(([chave, rows])=>{
+    if(rows.length<2) return;
+    const os=_osDoLancamentoReceita(rows[0]);
+    if(!os) return;
+    const itens=_servicosDaOS(os);
+    if(itens.length<=1) return;
+    if(rows.length<=itens.length) return; // não tem linha a mais — não parece fragmentado
+    const idsOrdenados=rows.map(x=>x.id).sort((a,b)=>a-b);
+    if(_foiIgnorado(_chaveAuditoria('fragServico', idsOrdenados))) return;
+    const somaTotal=Math.round(rows.reduce((a,x)=>a+Number(x.valor||0),0)*100)/100;
+    r.fragServico.push({rows, os, itens, somaTotal});
   });
 
   return r;
@@ -4982,6 +5054,7 @@ function auditar(){
 function _conferirBaixasReceber(){
   const podeCorrigir=[], conferir=[];
   (D.receber||[]).forEach(r=>{
+    if(_foiIgnorado(_chaveAuditoria('baixaReceber',[r.id]))) return;
     const total=Number(r.valor||0);
     const registrado=Number(r.valor_recebido||0);
     const status=String(r.status||'').toUpperCase().trim();
@@ -5032,8 +5105,9 @@ function _cardConferirBaixas(){
       <td class="td-num text-xs">${badge(d.r.status||'—')}<br><span class="text-muted">registrado ${fmtBRL(d.registrado)}</span></td>
       <td class="td-num text-xs"><b>${fmtBRL(d.soma)}</b><br><span class="text-muted">${d.lancs.length} lanç.</span></td>
       ${corrigivel?`<td class="td-num text-xs">${badge(d.statusEsperado)}<br><span class="text-muted">${d.statusEsperado==='PARCIAL'?'faltam '+fmtBRL(falta):'quitada'}</span></td>
-      <td><button class="btn btn-sm btn-primary" onclick="_corrigirBaixaReceber(${d.r.id})">Corrigir</button></td>`
-      :`<td colspan="2" class="text-xs" style="color:#B25000">${esc(d.motivo)}</td>`}
+      <td style="white-space:nowrap"><button class="btn btn-sm btn-primary" onclick="_corrigirBaixaReceber(${d.r.id})">Corrigir</button> ${btnOK('baixaReceber',[d.r.id])}</td>`
+      :`<td class="text-xs" style="color:#B25000">${esc(d.motivo)}</td>
+      <td style="white-space:nowrap">${btnOK('baixaReceber',[d.r.id])}</td>`}
     </tr>`;
   };
   return `
@@ -5098,11 +5172,10 @@ async function _corrigirTodasBaixas(){
 
 function render_auditoria(){
   const a=auditar();
-  const totalProblemas=a.duplicReceber.length+a.duplicFluxo.length+a.fluxoSemOS.length+a.naoVinculado.length+a.provavelPago.length+a.catServico.length+a.catUnica.length;
+  const totalProblemas=a.duplicReceber.length+a.duplicFluxo.length+a.fluxoSemOS.length+a.naoVinculado.length+a.provavelPago.length+a.catServico.length+a.catUnica.length+a.fragServico.length;
   const nIgnorados=(D.auditoria_ok||[]).length;
   const c=document.getElementById('content');
-  // Botão "marcar OK" reutilizável
-  const btnOK=(tipo,ids)=>`<button class="btn btn-sm btn-outline" onclick='marcarAuditoriaOK("${tipo}",${JSON.stringify([].concat(ids))})' title="Marcar como verificado — não aparece mais aqui">${icon('check',14)} OK</button>`;
+  // btnOK agora é global (definida perto de _foiIgnorado) — usada aqui e em _cardConferirBaixas
 
   const cardProvavelPago=a.provavelPago.length?`
     <div class="card" style="border-left:4px solid #1A8F5A">
@@ -5231,9 +5304,9 @@ function render_auditoria(){
 
   const cardCatUnica=a.catUnica.length?`
     <div class="card" style="border-left:4px solid #B8860B">
-      <div class="card-title">${icon('alert',18)} Recebimentos possivelmente não divididos (${a.catUnica.length})</div>
-      <p class="text-sm text-muted" style="margin:8px 0 10px">Estes já têm um tipo de serviço específico gravado, mas a OS vinculada tem <b>mais de um serviço</b> e não achei sinal de que os outros tipos também foram lançados. Pode ser que este lançamento tenha sido gravado antes da correção (e devesse estar dividido), <b>ou pode ser mesmo intencional</b> — se este recebimento específico foi só desse serviço, marque OK. Revise um por um.</p>
-      <div class="table-wrap"><table><thead><tr><th>Lançamento</th><th>OS (divisão)</th><th class="td-num">Valor atual</th><th>Se dividir, vira</th><th>Ação</th></tr></thead><tbody>
+      <div class="card-title">${icon('alert',18)} Recebimentos com tipo divergente da OS (${a.catUnica.length})</div>
+      <p class="text-sm text-muted" style="margin:8px 0 10px">A categoria gravada não bate com o que a OS diz. Três motivos possíveis: (1) a OS tem um serviço só e a categoria é outra; (2) a OS tem vários serviços, a categoria bate com um deles, mas sem sinal de que os outros também foram lançados; ou (3) a categoria é um tipo de serviço válido, mas <b>não é nenhum dos serviços desta OS</b> — geralmente sinal de valor errado. Pode ser intencional (marque OK) ou não (corrija). Revise um por um.</p>
+      <div class="table-wrap"><table><thead><tr><th>Lançamento</th><th>OS vinculada</th><th class="td-num">Valor atual</th><th>Deveria ficar</th><th>Ação</th></tr></thead><tbody>
         ${a.catUnica.map(({fluxo:f,os:o})=>{
           const div=_dividirValorPelaOS(Number(f.valor||0), o);
           return `<tr>
@@ -5242,12 +5315,36 @@ function render_auditoria(){
             <td class="td-num">${fmtBRL(f.valor)}</td>
             <td class="text-xs">${div.map(c=>`${esc(c.tipo)}: ${fmtBRL(c.valor)}`).join('<br>')}</td>
             <td style="white-space:nowrap">
-              <button class="btn btn-sm btn-success" onclick="forcarDivisaoLancamento(${f.id})" title="Substituir por linhas divididas proporcionalmente">${icon('check',16)} Dividir mesmo assim</button>
+              <button class="btn btn-sm btn-success" onclick="forcarDivisaoLancamento(${f.id})" title="Substituir pela classificação correta">${icon('check',16)} ${div.length>1?'Dividir':'Corrigir'}</button>
               ${btnOK('catUnica',[f.id])}
             </td>
           </tr>`;
         }).join('')}
       </tbody></table></div>
+    </div>`:'';
+
+  const cardFragServico=a.fragServico.length?`
+    <div class="card" style="border-left:4px solid #D64045">
+      <div class="card-title">${icon('alert',18)} Lançamentos fragmentados demais (${a.fragServico.length} grupo(s))</div>
+      <p class="text-sm text-muted" style="margin:8px 0 10px">Isto acontece quando um pedaço que já tinha sido dividido foi dividido de novo por engano (bug que corrigi em 31/07/2026 — já não acontece mais daqui pra frente). O valor total de cada grupo está correto, só repartido em linhas demais. <b>Consolidar</b> junta tudo e refaz a divisão limpa, uma linha por tipo de serviço — o total não muda.</p>
+      ${a.fragServico.map(({rows,os,itens,somaTotal},idx)=>{
+        const idsOrdenados=rows.map(x=>x.id).sort((x,y)=>x-y);
+        const limpo=_dividirValorPelaOS(somaTotal, os);
+        return `<div style="margin-bottom:14px;padding-bottom:14px;${idx<a.fragServico.length-1?'border-bottom:1px solid var(--cinza-borda)':''}">
+          <div class="flex flex-between flex-center" style="flex-wrap:wrap;gap:8px;margin-bottom:6px">
+            <div class="text-sm"><b>OS #${os.numero_os}</b> — ${esc(os.cliente_nome||'')} — ${rows.length} lançamentos, total ${fmtBRL(somaTotal)}</div>
+            <button class="btn btn-sm btn-primary" onclick="consolidarFragmentos('${idsOrdenados.join(',')}')">${icon('check',16)} Consolidar</button>
+            ${btnOK('fragServico',idsOrdenados)}
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Como está hoje (${rows.length} linhas)</th><th>Vai ficar (${limpo.length} linhas)</th></tr></thead>
+            <tbody><tr>
+              <td class="text-xs">${rows.map(x=>`#${x.id} — ${esc(x.categoria||x.tipo_servico||'')}: ${fmtBRL(x.valor)}`).join('<br>')}</td>
+              <td class="text-xs">${limpo.map(c=>`${esc(c.tipo)}: ${fmtBRL(c.valor)}`).join('<br>')}</td>
+            </tr></tbody>
+          </table></div>
+        </div>`;
+      }).join('')}
     </div>`:'';
 
   c.innerHTML=`
@@ -5287,6 +5384,7 @@ function render_auditoria(){
   ${cardFluxoSemOS}
   ${cardCatServico}
   ${cardCatUnica}
+  ${cardFragServico}
   ${a.receberSemOS.length?`<div class="card" style="border-left:4px solid #7B8FA1">
     <div class="card-title">Contas a Receber sem OS vinculada (${a.receberSemOS.length})</div>
     <p class="text-sm text-muted" style="margin-bottom:10px">Estas cobranças não estão ligadas a nenhuma OS. Vincule pela tela de Contas a Receber, ou marque OK se não precisar de vínculo.</p>
@@ -5360,6 +5458,41 @@ async function forcarDivisaoLancamento(fluxoId){
   }
   const okDel = await sbDelete('fluxo_caixa','id',f.id);
   if(!okDel) alert('As linhas novas foram criadas, mas não consegui apagar o lançamento original #'+f.id+'. Apague ele manualmente pra não contar o valor duas vezes.');
+  await carregarTudo();
+  render_auditoria();
+}
+
+// Junta um grupo de lançamentos fragmentado demais (mais linhas do que a OS
+// tem tipos de serviço) e refaz a divisão limpa a partir da SOMA total —
+// o total nunca muda, dividir errado só espalha o mesmo valor em mais
+// linhas. Apaga todas as linhas do grupo e cria as novas, uma por tipo.
+async function consolidarFragmentos(idsCSV){
+  const ids=idsCSV.split(',').map(s=>parseInt(s));
+  const rows=D.fluxo.filter(x=>ids.includes(x.id));
+  if(rows.length<2){ alert('Não achei os lançamentos deste grupo — a lista pode ter mudado, atualize a página.'); return; }
+  const os=_osDoLancamentoReceita(rows[0]);
+  if(!os){ alert('Não achei a OS vinculada a este grupo.'); return; }
+  const somaTotal=Math.round(rows.reduce((a,x)=>a+Number(x.valor||0),0)*100)/100;
+  const limpo=_dividirValorPelaOS(somaTotal, os);
+  if(!confirm(`Consolidar ${rows.length} lançamentos (total ${fmtBRL(somaTotal)}) em ${limpo.length} linha(s)?\n${limpo.map(c=>'• '+c.tipo+': '+fmtBRL(c.valor)).join('\n')}\n\nIsso apaga as ${rows.length} linhas atuais e cria as novas no lugar.`)) return;
+  const base=rows[0];
+  for(const c of limpo){
+    const okIns = await sbInsert('fluxo_caixa',{
+      data_movimento:base.data_movimento, cliente:base.cliente, tipo:'RECEITA',
+      categoria:c.tipo, valor:Math.round(c.valor*100)/100,
+      mes:base.mes, ano:base.ano,
+      conta_receber_id:base.conta_receber_id||null, cnpj:base.cnpj||'',
+      os_id:base.os_id||null, forma_conta:base.forma_conta||'conta',
+      observacao:'Dividido automaticamente (consolidado de '+rows.length+' fragmentos)'
+    });
+    if(!okIns){ alert('Parou no meio — uma das linhas novas não foi criada. Confira o Fluxo de Caixa antes de tentar de novo (as linhas antigas ainda estão lá, não foram apagadas).'); return; }
+  }
+  let falhasDel=0;
+  for(const r of rows){
+    const okDel = await sbDelete('fluxo_caixa','id',r.id);
+    if(!okDel) falhasDel++;
+  }
+  if(falhasDel) alert('As linhas novas foram criadas, mas '+falhasDel+' das linhas antigas não foram apagadas. Apague elas manualmente no Fluxo de Caixa pra não contar o valor duas vezes.');
   await carregarTudo();
   render_auditoria();
 }
