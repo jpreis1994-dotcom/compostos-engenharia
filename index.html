@@ -5443,8 +5443,19 @@ async function forcarDivisaoLancamento(fluxoId){
   const os=_osDoLancamentoReceita(f);
   if(!os){ alert('Não achei a OS vinculada a este lançamento.'); return; }
   const contribs=_dividirValorPelaOS(Number(f.valor||0), os);
-  if(contribs.length<=1){ alert('Esta OS não tem mais de um serviço — nada a dividir.'); return; }
-  if(!confirm(`Substituir o lançamento #${f.id} (hoje: "${f.categoria||f.tipo_servico||''}", ${fmtBRL(f.valor)}) por estas linhas?\n${contribs.map(c=>'• '+c.tipo+': '+fmtBRL(c.valor)).join('\n')}\n\nIsso apaga o lançamento original.`)) return;
+  if(!contribs.length){ alert('Não consegui calcular a divisão desta OS.'); return; }
+  const catAtual=(f.categoria||f.tipo_servico||'').trim();
+  // Só 1 linha E já é exatamente a categoria certa: aí sim não há nada a
+  // fazer. Só 1 linha com categoria DIFERENTE (OS de serviço único, mas
+  // categoria errada) ainda precisa da correção — não é "sem divisão".
+  if(contribs.length===1 && _nomeNorm(contribs[0].tipo)===_nomeNorm(catAtual)){
+    alert('A categoria já está certa — nada a corrigir.');
+    return;
+  }
+  const msg = contribs.length>1
+    ? `Dividir o lançamento #${f.id} (hoje: "${catAtual}", ${fmtBRL(f.valor)}) em ${contribs.length} linhas:\n${contribs.map(c=>'• '+c.tipo+': '+fmtBRL(c.valor)).join('\n')}\n\nIsso apaga o lançamento original.`
+    : `Corrigir a categoria do lançamento #${f.id} de "${catAtual}" para "${contribs[0].tipo}"?`;
+  if(!confirm(msg)) return;
   for(const c of contribs){
     const okIns = await sbInsert('fluxo_caixa',{
       data_movimento:f.data_movimento, cliente:f.cliente, tipo:'RECEITA',
@@ -5452,7 +5463,7 @@ async function forcarDivisaoLancamento(fluxoId){
       mes:f.mes, ano:f.ano,
       conta_receber_id:f.conta_receber_id||null, cnpj:f.cnpj||'',
       os_id:f.os_id||null, forma_conta:f.forma_conta||'conta',
-      observacao:(f.observacao?f.observacao+' — ':'')+'Dividido manualmente pela OS #'+os.numero_os
+      observacao:(f.observacao?f.observacao+' — ':'')+(contribs.length>1?'Dividido':'Corrigido')+' manualmente pela OS #'+os.numero_os
     });
     if(!okIns){ alert('Parou no meio — uma das linhas novas não foi criada. Confira o Fluxo de Caixa (o lançamento original ainda está lá).'); return; }
   }
