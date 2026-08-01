@@ -96,7 +96,7 @@ nav a:hover .ico-svg{transform:scale(1.1)}
 #content{flex:1;overflow-y:auto;padding:24px}
 .card{background:white;border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid var(--cinza-borda);padding:20px 24px;margin-bottom:16px}
 .card-title{font-size:13px;font-weight:600;color:var(--azul);margin-bottom:14px;display:flex;align-items:center;gap:6px}
-.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
 .kpi{background:white;border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid var(--cinza-borda);padding:16px 20px;transition:box-shadow .2s}
 .kpi:hover{box-shadow:0 4px 14px rgba(0,0,0,0.10)}
 .kpi-label{font-size:11px;color:var(--cinza);text-transform:uppercase;margin-bottom:6px;font-weight:500;letter-spacing:.04em}
@@ -1718,19 +1718,22 @@ function gerarFechamentoMensal(){
   const thSR='style="text-align:right;padding:6px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.02em;color:#7B8FA1;border-bottom:2px solid #E0E6ED"';
   const tdS='style="padding:6px 4px;border-bottom:1px solid #F0F2F5;font-size:12.5px"';
   const tdSR='style="padding:6px 4px;border-bottom:1px solid #F0F2F5;font-size:12.5px;text-align:right"';
-  // Barra de progresso em HTML/CSS puro — ao contrário de capturar o canvas
-  // do Chart.js como imagem (instável ao imprimir/salvar PDF em vários
-  // navegadores), isto sempre aparece, porque é só HTML normal.
+  // Barra de progresso em SVG — div com background-color NÃO imprime por
+  // padrão na maioria dos navegadores (a opção "imprimir cores/imagens de
+  // fundo" costuma vir desligada). SVG é tratado como conteúdo de verdade
+  // (igual texto ou <img>), não como "fundo" — por isso sempre imprime.
   const pBarra=(nome,valor,total,cor)=>{
     const pct = total>0 ? (valor/total*100) : 0;
+    const w = Math.max(20, pct*10);
     return `<div style="margin-bottom:9px">
       <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px;gap:8px">
         <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(nome)}</span>
         <span style="white-space:nowrap;font-weight:700">${fmtBRL(valor)} <span style="font-weight:400;color:#9AA5B1">${pct.toFixed(1)}%</span></span>
       </div>
-      <div style="background:#F0F2F5;border-radius:6px;height:10px;overflow:hidden">
-        <div style="width:${Math.max(2,pct)}%;height:100%;border-radius:6px;background:${cor}"></div>
-      </div>
+      <svg width="100%" height="10" viewBox="0 0 1000 10" preserveAspectRatio="none" style="display:block">
+        <rect x="0" y="0" width="1000" height="10" rx="5" fill="#EEF1F5"/>
+        <rect x="0" y="0" width="${w}" height="10" rx="5" fill="${cor}"/>
+      </svg>
     </div>`;
   };
 
@@ -1752,7 +1755,10 @@ function gerarFechamentoMensal(){
     const maxMes=Math.max(1, ...mks.map(m=>Math.max(byMes[m].r,byMes[m].d)));
     const linhaMes=(rotulo,v,cor)=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
       <div style="width:58px;font-size:10.5px;color:${cor};text-align:right;flex-shrink:0;font-weight:600">${rotulo}</div>
-      <div style="flex:1;background:#F0F2F5;border-radius:4px;height:13px;overflow:hidden"><div style="width:${Math.max(1,v/maxMes*100)}%;height:100%;background:${cor}"></div></div>
+      <svg width="100%" height="13" viewBox="0 0 1000 13" preserveAspectRatio="none" style="display:block;flex:1;min-width:0">
+        <rect x="0" y="0" width="1000" height="13" rx="4" fill="#EEF1F5"/>
+        <rect x="0" y="0" width="${Math.max(10,v/maxMes*1000)}" height="13" rx="4" fill="${cor}"/>
+      </svg>
       <div style="width:78px;font-size:11px;text-align:right;font-weight:700;flex-shrink:0">${fmtBRL(v)}</div>
     </div>`;
     const graficoMesHTML = mks.length ? mks.map(m=>`<div style="margin-bottom:10px">
@@ -1821,7 +1827,7 @@ function gerarFechamentoMensal(){
     </div>`;
     corpo += `<div class="rs-section"><div class="rs-section-title">🔧 Ordens de Serviço Ativas<span class="rs-count">${osAtivas.length}</span></div>
       <table style="margin-top:8px"><thead><tr><th ${thS}>OS</th><th ${thS}>Cliente</th><th ${thS}>Serviço</th><th ${thS}>Status</th><th ${thSR}>Valor</th></tr></thead>
-      <tbody>${osAtivas.length?osAtivas.map(o=>`<tr><td ${tdS}>#${o.numero_os}</td><td ${tdS}>${esc(o.cliente_nome||'—')}</td><td ${tdS}>${esc(o.servico||'—')}</td><td ${tdS}><span class="rs-badge" style="background:${o.status==='EM EXECUÇÃO'?'#E8F5E9;color:#1A8F5A':'#FFF8E1;color:#B8860B'}">${esc(o.status||'—')}</span></td><td ${tdSR}>${fmtBRL(o.valor_total)}</td></tr>`).join(''):`<tr><td colspan="5" style="padding:10px;color:#9AA5B1;font-size:12.5px">Nenhuma OS ativa.</td></tr>`}</tbody></table>
+      <tbody>${osAtivas.length?osAtivas.map(o=>`<tr><td ${tdS}>#${o.numero_os}</td><td ${tdS}>${esc(o.cliente_nome||'—')}</td><td ${tdS}>${esc(o.servico||'—')}</td><td ${tdS}><span class="rs-badge" style="border:1px solid ${o.status==='EM EXECUÇÃO'?'#1A8F5A':'#B8860B'};background:${o.status==='EM EXECUÇÃO'?'#E8F5E9;color:#1A8F5A':'#FFF8E1;color:#B8860B'}">${esc(o.status||'—')}</span></td><td ${tdSR}>${fmtBRL(o.valor_total)}</td></tr>`).join(''):`<tr><td colspan="5" style="padding:10px;color:#9AA5B1;font-size:12.5px">Nenhuma OS ativa.</td></tr>`}</tbody></table>
     </div>`;
   }
 
@@ -7013,16 +7019,29 @@ function renderConciliacao(){
 // RELATÓRIO — RESULTADO OPERACIONAL DO MÊS
 // ══════════════════════════════════════════════════════════════
 // Barra de ranking visual: nome + valor + barra proporcional ao total
+// Barra de ranking em SVG. Dois motivos pra não usar div+background-color:
+// 1) a impressão (Salvar como PDF) só mostra background-color se a pessoa
+//    marcar "gráficos de segundo plano" nas opções — geralmente vem
+//    desmarcado, então a barra some no PDF mesmo aparecendo normal na tela.
+// 2) esta função é reaproveitada direto (via innerHTML) na janela de
+//    impressão, que não tem as variáveis CSS do app (var(--cinza-bg) viraria
+//    inválido lá). SVG resolve os dois problemas: é conteúdo de verdade
+//    (sempre imprime) e usa cores fixas (não depende de variável nenhuma).
 function _barraRanking(nome, valor, total, cor, extra){
   const pct = total>0 ? (valor/total*100) : 0;
+  // Aceita cor sólida ou uma string de gradiente antiga — SVG fill não
+  // entende gradiente CSS, então extrai a primeira cor hexadecimal dela.
+  const corSolida = (cor && cor.includes('gradient')) ? ((cor.match(/#[0-9A-Fa-f]{3,6}/)||[])[0] || '#1A3C5E') : (cor||'#1A3C5E');
+  const w = Math.max(20, pct*10);
   return `<div style="margin-bottom:10px">
     <div class="flex flex-between" style="font-size:13px;margin-bottom:3px;gap:8px">
       <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${nome}</span>
       <span style="white-space:nowrap"><b>${fmtBRL(valor)}</b> <span class="text-xs text-muted">${pct.toFixed(1)}%${extra?' · '+extra:''}</span></span>
     </div>
-    <div style="background:var(--cinza-bg);border-radius:6px;height:10px;overflow:hidden">
-      <div style="width:${Math.max(2,pct)}%;height:100%;border-radius:6px;background:${cor};transition:width .4s"></div>
-    </div>
+    <svg width="100%" height="10" viewBox="0 0 1000 10" preserveAspectRatio="none" style="display:block">
+      <rect x="0" y="0" width="1000" height="10" rx="5" fill="#F5F6FA"/>
+      <rect x="0" y="0" width="${w}" height="10" rx="5" fill="${corSolida}"/>
+    </svg>
   </div>`;
 }
 let _relOpAno, _relOpMes;
@@ -7292,7 +7311,7 @@ function montarResumoSemanal(){
   </div>
 
   ${secao('🔧 Ordens de Serviço — A Executar e Em Execução', osAtivas.length,
-    osAtivas.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>OS</th><th ${th}>Cliente</th><th ${th}>Serviço</th><th ${th}>Status</th><th ${thR}>Valor</th></tr></thead><tbody>${osAtivas.map(o=>`<tr><td ${td}>#${o.numero_os}</td><td ${td}>${esc(o.cliente_nome||'—')}</td><td ${td}>${esc(o.servico||'—')}</td><td ${td}><span class="rs-badge" style="background:${o.status==='EM EXECUÇÃO'?'#E8F5E9;color:#1A8F5A':'#FFF8E1;color:#B8860B'}">${esc(o.status||'—')}</span></td><td ${tdR}>${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table>${totLine('Total em OS ativas',totOS,'#1A3C5E')}`
+    osAtivas.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>OS</th><th ${th}>Cliente</th><th ${th}>Serviço</th><th ${th}>Status</th><th ${thR}>Valor</th></tr></thead><tbody>${osAtivas.map(o=>`<tr><td ${td}>#${o.numero_os}</td><td ${td}>${esc(o.cliente_nome||'—')}</td><td ${td}>${esc(o.servico||'—')}</td><td ${td}><span class="rs-badge" style="border:1px solid ${o.status==='EM EXECUÇÃO'?'#1A8F5A':'#B8860B'};background:${o.status==='EM EXECUÇÃO'?'#E8F5E9;color:#1A8F5A':'#FFF8E1;color:#B8860B'}">${esc(o.status||'—')}</span></td><td ${tdR}>${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table>${totLine('Total em OS ativas',totOS,'#1A3C5E')}`
     :vazio('Nenhuma OS a executar ou em execução.'))}
 
   ${secao('💰 Contas a Receber', recVenc.length+recAV.length,
