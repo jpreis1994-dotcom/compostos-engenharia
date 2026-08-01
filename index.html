@@ -68,6 +68,18 @@ nav a .ico{font-size:15px;width:20px;text-align:center}
 .ico-svg{flex-shrink:0;vertical-align:middle;display:inline-block}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;flex-shrink:0}
 .dot-azul{background:#2A6DBF}.dot-amarelo{background:#E8A020}.dot-vermelho{background:#D64045}.dot-verde{background:#1A8F5A}
+/* Resumo Semanal — usadas tanto na prévia dentro do app quanto na janela de impressão (que tem sua própria cópia) */
+.rs-status{background:#F5F6FA;border:1px solid #E0E6ED;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.rs-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.rs-summary-box{background:#fff;border:1px solid #E0E6ED;border-radius:10px;padding:14px 16px}
+.rs-summary-label{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#7B8FA1;font-weight:600}
+.rs-summary-value{font-size:21px;font-weight:700;margin-top:4px;line-height:1.2}
+.rs-summary-sub{font-size:11px;color:#9AA5B1;margin-top:3px}
+.rs-section{background:#fff;border:1px solid #E0E6ED;border-radius:10px;padding:16px 18px;margin-bottom:14px}
+.rs-section-title{font-size:14px;font-weight:700;color:#1A3C5E;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center}
+.rs-count{font-size:11px;font-weight:700;color:#7B8FA1;background:#F0F2F5;border-radius:20px;padding:2px 9px}
+.rs-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700}
+@media (max-width:640px){.rs-summary-grid{grid-template-columns:repeat(2,1fr)}}
 nav a .ico-svg{opacity:.85;transition:transform .15s,opacity .15s}
 nav a:hover .ico-svg,nav a.active .ico-svg{opacity:1}
 nav a:hover .ico-svg{transform:scale(1.1)}
@@ -1513,6 +1525,23 @@ function _cardReceitaPorTipoServico(fluxo){
     fluxo, ranking, 'Tipo de serviço', 'recServ', nota);
 }
 
+// ══════════════════════════════════════════════════════════════
+// VISÕES DA DASHBOARD — Financeira / Operacional / Completa
+// Preferência do usuário, persistida no navegador (localStorage). Reduz a
+// quantidade de cards mostrados de uma vez, sem apagar nenhum dado.
+// ══════════════════════════════════════════════════════════════
+let _dashView = (function(){ try{ return localStorage.getItem('dashView')||'completa'; }catch(e){ return 'completa'; } })();
+function _mudarDashView(v){
+  _dashView = v;
+  try{ localStorage.setItem('dashView', v); }catch(e){ /* navegador sem localStorage — só não persiste */ }
+  render_dashboard();
+}
+function _seletorDashView(){
+  const views=[['financeira','💰 Financeira'],['operacional','🔧 Operacional'],['completa','📋 Completa']];
+  return `<div style="display:inline-flex;gap:4px;background:var(--cinza-bg);padding:4px;border-radius:10px">
+    ${views.map(([v,label])=>`<button onclick="_mudarDashView('${v}')" style="padding:7px 14px;border-radius:7px;border:none;font-size:12.5px;font-weight:700;cursor:pointer;background:${_dashView===v?'var(--azul)':'transparent'};color:${_dashView===v?'#fff':'var(--cinza)'}">${label}</button>`).join('')}
+  </div>`;
+}
 function render_dashboard(){
   // IMPORTANTE: o dashboard mostra só o movimento OPERACIONAL da empresa.
   // Retiradas do proprietário e aportes de dinheiro pessoal ficam de fora de
@@ -1547,78 +1576,116 @@ function render_dashboard(){
   const spRes = _m6.map((x,i)=>spRec[i]-spDesp[i]);
 
   const c = document.getElementById('content');
-  c.innerHTML = `
-  <div class="filters" style="margin-bottom:16px">
+
+  const blocoTopo = `
+  <div class="filters" style="margin-bottom:12px">
     ${seletorMesAno()}
     <div style="font-size:13px;font-weight:600;color:var(--azul);align-self:center;margin-left:4px">
       📅 Exibindo: <span style="color:var(--azul2)">${labelPeriodo()}</span>
     </div>
     <button class="btn btn-sm btn-outline" onclick="FILTRO={mes:'',ano:''};render_dashboard()" style="margin-left:auto">✕ Limpar filtro</button>
   </div>
-  <div class="kpis">
+  <div class="flex flex-between flex-center" style="margin-bottom:16px;flex-wrap:wrap;gap:10px">
+    ${_seletorDashView()}
+    <button class="btn btn-sm btn-outline" onclick="gerarFechamentoMensal()">${icon('print',16)} Gerar Fechamento Mensal</button>
+  </div>`;
+
+  // ── Blocos — cada um é independente, montados na ordem certa por visão ──
+  const kpisFinanceiras = `<div class="kpis">
     ${_kpiCard({icon:'money',cor:'#1A8F5A',label:'Receita',valor:recTotal,valClass:'verde',prev:showVar?recPrev:null,spark:_spark(spRec,'#1A8F5A')})}
     ${_kpiCard({icon:'pagar',cor:'#D64045',label:'Despesas',valor:despTotal,valClass:'vermelho',prev:showVar?despPrev:null,goodWhenUp:false,spark:_spark(spDesp,'#D64045')})}
     ${_kpiCard({icon:'dashboard',cor:'#2A6DBF',label:'Resultado',valor:recTotal-despTotal,valClass:(recTotal-despTotal>=0?'verde':'vermelho'),prev:showVar?(recPrev-despPrev):null,spark:_spark(spRes,'#2A6DBF')})}
     ${_kpiCard({icon:'download',cor:'#2A6DBF',label:'A Receber (período)',valor:aRec,valClass:'azul',sub:'Próx. 30 dias: '+fmtBRL(prev30)})}
     ${_kpiCard({icon:'alert',cor:'#D64045',label:'Em Atraso (período)',valor:atraso,valClass:'vermelho',sub:atraso?'Atenção às cobranças':'Tudo em dia ✅'})}
-  </div>
-  <div class="grid-3" style="margin-bottom:16px">
-    ${_kpiCard({icon:'wrench',cor:'#1A3C5E',label:'OS em Execução',valor:osExec.length,fmt:v=>String(v),valClass:'azul',sub:'Carteira: '+fmtBRL(osExec.reduce((a,o)=>a+Number(o.valor_total||0),0))})}
     ${_kpiCard({icon:'pagar',cor:'#E8A020',label:'A Pagar (período)',valor:aPagar,valClass:'amarelo'})}
+  </div>`;
+  const kpisOperacionais = `<div class="kpis">
+    ${_kpiCard({icon:'wrench',cor:'#1A3C5E',label:'OS em Execução',valor:osExec.length,fmt:v=>String(v),valClass:'azul',sub:'Carteira: '+fmtBRL(osExec.reduce((a,o)=>a+Number(o.valor_total||0),0))})}
     ${_kpiCard({icon:'orcamentos',cor:'#7B8FA1',label:'Orçamentos Pendentes',valor:D.orcamentos.filter(o=>o.status==='PENDENTE').length,fmt:v=>String(v)})}
-  </div>
-  <div class="card" style="margin-bottom:16px;border-top:3px solid var(--azul)">
+    ${_kpiCard({icon:'money',cor:'#1A8F5A',label:'Receita (período)',valor:recTotal,valClass:'verde',prev:showVar?recPrev:null,spark:_spark(spRec,'#1A8F5A')})}
+    ${_kpiCard({icon:'dashboard',cor:'#2A6DBF',label:'Resultado (período)',valor:recTotal-despTotal,valClass:(recTotal-despTotal>=0?'verde':'vermelho'),prev:showVar?(recPrev-despPrev):null,spark:_spark(spRes,'#2A6DBF')})}
+  </div>`;
+  const blocoCidade = `<div class="card" style="border-top:3px solid var(--azul)">
     <div class="card-title">🗺️ OS em aberto por cidade <span class="text-xs text-muted" style="font-weight:400">— para planejar as visitas</span></div>
     ${renderOsAbertasParaPlanejamento()}
-  </div>
-  <div class="grid-2">
-    <div class="card"><div class="card-title">📊 Receita vs Despesa por Mês</div><canvas id="c-chart-mes" height="170"></canvas></div>
-    <div class="card"><div class="card-title">🥧 Contas a Receber por Status</div><canvas id="c-chart-rec" height="170"></canvas></div>
-  </div>
-  <div class="grid-2">
-    <div class="card"><div class="card-title">⚠️ Parcelas em Atraso</div>${renderAlertaAtraso(receberF)}</div>
-    <div class="card"><div class="card-title">🔧 OS em Execução</div>${renderOsExecDash()}</div>
-  </div>
-  <div class="grid-2">
-    <div class="card"><div class="card-title">📤 Próximas Contas a Pagar</div>${renderProxPagar(pagarF)}</div>
-    <div class="card"><div class="card-title">📈 Top Clientes por Receita</div><canvas id="c-chart-cli" height="170"></canvas></div>
-  </div>
-  <div class="grid-2">
-    ${_cardDespesasPorTipo(fluxoF)}
-    ${_cardReceitaPorTipoServico(fluxoF)}
-  </div>
-  ${_cardDespesasPorFornecedor(fluxoF)}`;
+  </div>`;
+  const blocoOsExec = `<div class="card"><div class="card-title">🔧 OS em Execução</div>${renderOsExecDash()}</div>`;
+  const blocoGraficoMes = `<div class="card"><div class="card-title">📊 Receita vs Despesa por Mês</div><canvas id="c-chart-mes" height="170"></canvas></div>`;
+  const blocoGraficoRecStatus = `<div class="card"><div class="card-title">🥧 Contas a Receber por Status</div><canvas id="c-chart-rec" height="170"></canvas></div>`;
+  const blocoAtraso = `<div class="card"><div class="card-title">⚠️ Parcelas em Atraso</div>${renderAlertaAtraso(receberF)}</div>`;
+  const blocoProxPagar = `<div class="card"><div class="card-title">📤 Próximas Contas a Pagar</div>${renderProxPagar(pagarF)}</div>`;
+  const blocoTopClientes = `<div class="card"><div class="card-title">📈 Top Clientes por Receita</div><canvas id="c-chart-cli" height="170"></canvas></div>`;
+  const blocoDespTipo = _cardDespesasPorTipo(fluxoF);
+  const blocoRecServico = _cardReceitaPorTipoServico(fluxoF);
+  const blocoDespForn = _cardDespesasPorFornecedor(fluxoF);
 
-  // Gráfico meses — mostra todos os meses do ano filtrado (só operacional)
-  const fluxoGraf = soOperacional(FILTRO.ano ? D.fluxo.filter(r=>(r.data_movimento||'').startsWith(FILTRO.ano)) : D.fluxo);
-  const byMes={};
-  fluxoGraf.forEach(r=>{const k=r.data_movimento?.slice(5,7)||'00';if(!byMes[k])byMes[k]={r:0,d:0};if(r.tipo==='RECEITA')byMes[k].r+=Number(r.valor);else byMes[k].d+=Number(r.valor);});
-  const mks=Object.keys(byMes).sort();
-  new Chart(document.getElementById('c-chart-mes'),{type:'bar',data:{labels:mks.map(m=>MESES_A[parseInt(m)]),datasets:[{label:'Receita',data:mks.map(m=>byMes[m].r),backgroundColor:'#1A8F5A',borderRadius:4},{label:'Despesa',data:mks.map(m=>byMes[m].d),backgroundColor:'#D64045',borderRadius:4}]},options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
-
-  // Gráfico receber — usa dados filtrados
-  const rs={};receberF.forEach(r=>{rs[r.status]=(rs[r.status]||0)+Number(r.valor);});
-  if(Object.keys(rs).length){
-    new Chart(document.getElementById('c-chart-rec'),{type:'doughnut',data:{labels:Object.keys(rs),datasets:[{data:Object.values(rs),backgroundColor:['#1A8F5A','#2A6DBF','#D64045','#E8A020'],borderWidth:0}]},options:{responsive:true,cutout:'55%',plugins:{legend:{position:'bottom'}}}});
+  let corpo;
+  if(_dashView==='financeira'){
+    corpo = `
+    ${kpisFinanceiras}
+    <div class="grid-2">${blocoGraficoMes}${blocoGraficoRecStatus}</div>
+    <div class="grid-2">${blocoAtraso}${blocoProxPagar}</div>
+    <div class="grid-2">${blocoTopClientes}${blocoRecServico}</div>
+    <div class="grid-2">${blocoDespTipo}${blocoDespForn}</div>`;
+  } else if(_dashView==='operacional'){
+    corpo = `
+    ${kpisOperacionais}
+    ${blocoCidade}
+    ${blocoOsExec}`;
   } else {
-    document.getElementById('c-chart-rec').parentElement.innerHTML+='<p class="text-muted text-sm" style="text-align:center">Sem dados no período</p>';
+    corpo = `
+    ${kpisFinanceiras}
+    <div class="grid-2" style="margin-bottom:16px">
+      ${_kpiCard({icon:'wrench',cor:'#1A3C5E',label:'OS em Execução',valor:osExec.length,fmt:v=>String(v),valClass:'azul',sub:'Carteira: '+fmtBRL(osExec.reduce((a,o)=>a+Number(o.valor_total||0),0))})}
+      ${_kpiCard({icon:'orcamentos',cor:'#7B8FA1',label:'Orçamentos Pendentes',valor:D.orcamentos.filter(o=>o.status==='PENDENTE').length,fmt:v=>String(v)})}
+    </div>
+    ${blocoCidade}
+    <div class="grid-2">${blocoGraficoMes}${blocoGraficoRecStatus}</div>
+    <div class="grid-2">${blocoAtraso}${blocoOsExec}</div>
+    <div class="grid-2">${blocoProxPagar}${blocoTopClientes}</div>
+    <div class="grid-2">${blocoDespTipo}${blocoRecServico}</div>
+    ${blocoDespForn}`;
   }
 
-  // Gráfico clientes — ranking por faturamento (usa fluxo do período; se vazio, usa consolidação geral)
-  const cr={};fluxoF.filter(r=>r.tipo==='RECEITA').forEach(r=>{const k=r.cliente||r.cliente_nome||'—';cr[k]=(cr[k]||0)+Number(r.valor);});
-  let topCli=Object.entries(cr).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  let tituloFonte='no período';
-  // Se não há receitas no fluxo do período, cai para o faturamento consolidado de todos os tempos
-  if(!topCli.length && typeof consolidarClientes==='function'){
-    const cons=consolidarClientes().filter(c=>c.faturado>0).slice(0,6);
-    topCli=cons.map(c=>[c.nome, c.faturado]);
-    tituloFonte='total';
+  c.innerHTML = blocoTopo + corpo;
+
+  // Gráfico meses — mostra todos os meses do ano filtrado (só operacional).
+  // Só existe nas visões Financeira/Completa — guarda contra elemento ausente.
+  const elMes = document.getElementById('c-chart-mes');
+  if(elMes){
+    const fluxoGraf = soOperacional(FILTRO.ano ? D.fluxo.filter(r=>(r.data_movimento||'').startsWith(FILTRO.ano)) : D.fluxo);
+    const byMes={};
+    fluxoGraf.forEach(r=>{const k=r.data_movimento?.slice(5,7)||'00';if(!byMes[k])byMes[k]={r:0,d:0};if(r.tipo==='RECEITA')byMes[k].r+=Number(r.valor);else byMes[k].d+=Number(r.valor);});
+    const mks=Object.keys(byMes).sort();
+    new Chart(elMes,{type:'bar',data:{labels:mks.map(m=>MESES_A[parseInt(m)]),datasets:[{label:'Receita',data:mks.map(m=>byMes[m].r),backgroundColor:'#1A8F5A',borderRadius:4},{label:'Despesa',data:mks.map(m=>byMes[m].d),backgroundColor:'#D64045',borderRadius:4}]},options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
   }
-  if(topCli.length){
-    new Chart(document.getElementById('c-chart-cli'),{type:'bar',data:{labels:topCli.map(e=>e[0].length>18?e[0].slice(0,18)+'…':e[0]),datasets:[{data:topCli.map(e=>e[1]),backgroundColor:'#1A3C5E',borderRadius:3}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'R$ '+Number(c.raw).toLocaleString('pt-BR',{minimumFractionDigits:2})}}},scales:{x:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
-  } else {
-    const el=document.getElementById('c-chart-cli');
-    if(el) el.parentElement.innerHTML='<div class="card-title">📈 Top Clientes por Receita</div><p class="text-muted text-sm" style="text-align:center;padding:30px 10px">Ainda não há receitas registradas para montar o ranking.</p>';
+
+  // Gráfico receber — usa dados filtrados. Só existe nas visões Financeira/Completa.
+  const elRec = document.getElementById('c-chart-rec');
+  if(elRec){
+    const rs={};receberF.forEach(r=>{rs[r.status]=(rs[r.status]||0)+Number(r.valor);});
+    if(Object.keys(rs).length){
+      new Chart(elRec,{type:'doughnut',data:{labels:Object.keys(rs),datasets:[{data:Object.values(rs),backgroundColor:['#1A8F5A','#2A6DBF','#D64045','#E8A020'],borderWidth:0}]},options:{responsive:true,cutout:'55%',plugins:{legend:{position:'bottom'}}}});
+    } else {
+      elRec.parentElement.innerHTML+='<p class="text-muted text-sm" style="text-align:center">Sem dados no período</p>';
+    }
+  }
+
+  // Gráfico clientes — ranking por faturamento. Só existe nas visões Financeira/Completa.
+  const elCli = document.getElementById('c-chart-cli');
+  if(elCli){
+    const cr={};fluxoF.filter(r=>r.tipo==='RECEITA').forEach(r=>{const k=r.cliente||r.cliente_nome||'—';cr[k]=(cr[k]||0)+Number(r.valor);});
+    let topCli=Object.entries(cr).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    // Se não há receitas no fluxo do período, cai para o faturamento consolidado de todos os tempos
+    if(!topCli.length && typeof consolidarClientes==='function'){
+      const cons=consolidarClientes().filter(c=>c.faturado>0).slice(0,6);
+      topCli=cons.map(c=>[c.nome, c.faturado]);
+    }
+    if(topCli.length){
+      new Chart(elCli,{type:'bar',data:{labels:topCli.map(e=>e[0].length>18?e[0].slice(0,18)+'…':e[0]),datasets:[{data:topCli.map(e=>e[1]),backgroundColor:'#1A3C5E',borderRadius:3}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'R$ '+Number(c.raw).toLocaleString('pt-BR',{minimumFractionDigits:2})}}},scales:{x:{ticks:{callback:v=>'R$'+Math.round(v/1000)+'k'}}}}});
+    } else {
+      elCli.parentElement.innerHTML='<div class="card-title">📈 Top Clientes por Receita</div><p class="text-muted text-sm" style="text-align:center;padding:30px 10px">Ainda não há receitas registradas para montar o ranking.</p>';
+    }
   }
 
   // Gráficos de barra/pizza dos cards de ranking (despesa por tipo, por
@@ -1627,6 +1694,169 @@ function render_dashboard(){
   _instanciarChartsRanking();
 }
 
+// ══════════════════════════════════════════════════════════════
+// FECHAMENTO MENSAL — relatório novo, montado a partir do que está visível
+// na Dashboard NO MOMENTO (respeita a visão ativa e o filtro de mês/ano).
+// Diferente do "Resultado do Mês" (relatório fixo em Relatórios): este
+// reflete exatamente os cards que você escolheu ver.
+// ══════════════════════════════════════════════════════════════
+function gerarFechamentoMensal(){
+  const soOperacional = arr => arr.filter(f=>!_ehNaoOperacional(f.categoria||f.tipo_servico||f.tipo_despesa));
+  const fluxoF   = soOperacional(filtrarPorPeriodo(D.fluxo, 'data_movimento'));
+  const receberF = soOperacional(filtrarPorPeriodo(D.receber, 'vencimento'));
+  const pagarF   = soOperacional(filtrarPorPeriodo(D.pagar,   'data_vencimento'));
+  const recTotal = fluxoF.filter(x=>x.tipo==='RECEITA').reduce((a,b)=>a+Number(b.valor),0);
+  const despTotal= fluxoF.filter(x=>x.tipo==='DESPESA').reduce((a,b)=>a+Number(b.valor),0);
+  const aRec     = receberF.filter(x=>['A VENCER','VENCE HOJE'].includes(x.status)).reduce((a,b)=>a+Number(b.valor),0);
+  const atraso   = receberF.filter(x=>x.status==='EM ATRASO').reduce((a,b)=>a+Number(b.valor),0);
+  const aPagar   = pagarF.filter(x=>x.status==='EM ABERTO').reduce((a,b)=>a+Number(b.valor),0);
+  const osExec   = D.os.filter(o=>o.status==='EM EXECUÇÃO');
+  const osAtivas = D.os.filter(o=>!o.arquivada && ['A EXECUTAR','EM EXECUÇÃO'].includes((o.status||'').toUpperCase()));
+
+  const sBox=(label,valor,cor,sub)=>`<div class="rs-summary-box"><div class="rs-summary-label">${label}</div><div class="rs-summary-value" style="color:${cor}">${valor}</div>${sub?`<div class="rs-summary-sub">${sub}</div>`:''}</div>`;
+  const thS='style="text-align:left;padding:6px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.02em;color:#7B8FA1;border-bottom:2px solid #E0E6ED"';
+  const thSR='style="text-align:right;padding:6px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.02em;color:#7B8FA1;border-bottom:2px solid #E0E6ED"';
+  const tdS='style="padding:6px 4px;border-bottom:1px solid #F0F2F5;font-size:12.5px"';
+  const tdSR='style="padding:6px 4px;border-bottom:1px solid #F0F2F5;font-size:12.5px;text-align:right"';
+  // Barra de progresso em HTML/CSS puro — ao contrário de capturar o canvas
+  // do Chart.js como imagem (instável ao imprimir/salvar PDF em vários
+  // navegadores), isto sempre aparece, porque é só HTML normal.
+  const pBarra=(nome,valor,total,cor)=>{
+    const pct = total>0 ? (valor/total*100) : 0;
+    return `<div style="margin-bottom:9px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px;gap:8px">
+        <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(nome)}</span>
+        <span style="white-space:nowrap;font-weight:700">${fmtBRL(valor)} <span style="font-weight:400;color:#9AA5B1">${pct.toFixed(1)}%</span></span>
+      </div>
+      <div style="background:#F0F2F5;border-radius:6px;height:10px;overflow:hidden">
+        <div style="width:${Math.max(2,pct)}%;height:100%;border-radius:6px;background:${cor}"></div>
+      </div>
+    </div>`;
+  };
+
+  let corpo='';
+
+  if(_dashView==='financeira' || _dashView==='completa'){
+    corpo += `<div class="rs-summary-grid">
+      ${sBox('💰 Receita', fmtBRL(recTotal), '#1A8F5A')}
+      ${sBox('📤 Despesas', fmtBRL(despTotal), '#D64045')}
+      ${sBox('⚖️ Resultado', fmtBRL(recTotal-despTotal), recTotal-despTotal>=0?'#1A8F5A':'#D64045')}
+      ${sBox('📥 A Receber', fmtBRL(aRec), '#2A6DBF', atraso?fmtBRL(atraso)+' em atraso':'nada em atraso')}
+    </div>`;
+
+    // Receita vs Despesa por Mês — barras pareadas por mês
+    const fluxoGraf = soOperacional(FILTRO.ano ? D.fluxo.filter(r=>(r.data_movimento||'').startsWith(FILTRO.ano)) : D.fluxo);
+    const byMes={};
+    fluxoGraf.forEach(r=>{const k=r.data_movimento?.slice(5,7)||'00';if(!byMes[k])byMes[k]={r:0,d:0};if(r.tipo==='RECEITA')byMes[k].r+=Number(r.valor);else byMes[k].d+=Number(r.valor);});
+    const mks=Object.keys(byMes).sort();
+    const maxMes=Math.max(1, ...mks.map(m=>Math.max(byMes[m].r,byMes[m].d)));
+    const linhaMes=(rotulo,v,cor)=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+      <div style="width:58px;font-size:10.5px;color:${cor};text-align:right;flex-shrink:0;font-weight:600">${rotulo}</div>
+      <div style="flex:1;background:#F0F2F5;border-radius:4px;height:13px;overflow:hidden"><div style="width:${Math.max(1,v/maxMes*100)}%;height:100%;background:${cor}"></div></div>
+      <div style="width:78px;font-size:11px;text-align:right;font-weight:700;flex-shrink:0">${fmtBRL(v)}</div>
+    </div>`;
+    const graficoMesHTML = mks.length ? mks.map(m=>`<div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:#7B8FA1;margin-bottom:4px">${MESES_A[parseInt(m)]}</div>
+      ${linhaMes('Receita', byMes[m].r, '#1A8F5A')}
+      ${linhaMes('Despesa', byMes[m].d, '#D64045')}
+    </div>`).join('') : '<p style="color:#9AA5B1;font-size:12.5px">Sem dados no período.</p>';
+
+    // Contas a Receber por Status — barras de proporção
+    const rsStatus={};receberF.forEach(r=>{rsStatus[r.status]=(rsStatus[r.status]||0)+Number(r.valor);});
+    const totRsStatus=Object.values(rsStatus).reduce((a,v)=>a+v,0);
+    const coresStatus={'A VENCER':'#2A6DBF','VENCE HOJE':'#E8A020','EM ATRASO':'#D64045','RECEBIDO':'#1A8F5A','PARCIAL':'#7B8FA1'};
+    const graficoStatusHTML = Object.keys(rsStatus).length
+      ? Object.entries(rsStatus).sort((a,b)=>b[1]-a[1]).map(([st,v])=>pBarra(st, v, totRsStatus, coresStatus[st]||'#7B8FA1')).join('')
+      : '<p style="color:#9AA5B1;font-size:12.5px">Sem dados no período.</p>';
+
+    corpo += `<div class="rs-section"><div class="rs-section-title">📊 Receita vs Despesa por Mês / Contas a Receber por Status</div>
+      <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;margin-top:10px">
+        <div>${graficoMesHTML}</div>
+        <div>${graficoStatusHTML}</div>
+      </div>
+    </div>`;
+
+    const rankDesp=_rankingDespesas(fluxoF, r=>r.categoria||r.tipo_despesa).linhas.slice(0,8);
+    const rankRec=_rankingReceitaPorServico(fluxoF).linhas.slice(0,8);
+    const tabRank=(rows,cor)=>rows.length?`<table style="width:100%;border-collapse:collapse;margin-top:6px"><tbody>${rows.map(([nome,d])=>`<tr><td ${tdS}>${esc(nome)}</td><td ${tdSR} style="font-weight:700;color:${cor}">${fmtBRL(d.valor)}</td></tr>`).join('')}</tbody></table>`:'<p style="color:#9AA5B1;font-size:12.5px;margin-top:6px">Sem dados no período.</p>';
+    corpo += `<div class="rs-section"><div class="rs-section-title">Principais categorias</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:6px">
+        <div><div style="font-size:11px;font-weight:700;color:#7B8FA1;text-transform:uppercase;letter-spacing:.02em">Despesas por Tipo</div>${tabRank(rankDesp,'#D64045')}</div>
+        <div><div style="font-size:11px;font-weight:700;color:#7B8FA1;text-transform:uppercase;letter-spacing:.02em">Receita por Tipo de Serviço</div>${tabRank(rankRec,'#1A8F5A')}</div>
+      </div>
+    </div>`;
+
+    // Top Clientes por Receita — barras de proporção
+    const crCli={};fluxoF.filter(r=>r.tipo==='RECEITA').forEach(r=>{const k=r.cliente||r.cliente_nome||'—';crCli[k]=(crCli[k]||0)+Number(r.valor);});
+    let topCliRows=Object.entries(crCli).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    if(!topCliRows.length && typeof consolidarClientes==='function'){
+      const cons=consolidarClientes().filter(c=>c.faturado>0).slice(0,8);
+      topCliRows=cons.map(c=>[c.nome, c.faturado]);
+    }
+    const totTopCli=topCliRows.reduce((a,[,v])=>a+v,0);
+    const graficoTopCliHTML = topCliRows.length
+      ? topCliRows.map(([nome,v])=>pBarra(nome, v, totTopCli, '#1A3C5E')).join('')
+      : '<p style="color:#9AA5B1;font-size:12.5px">Sem dados no período.</p>';
+    corpo += `<div class="rs-section"><div class="rs-section-title">📈 Top Clientes por Receita</div><div style="margin-top:10px">${graficoTopCliHTML}</div></div>`;
+  }
+
+  if(_dashView==='operacional' || _dashView==='completa'){
+    corpo += `<div class="rs-summary-grid">
+      ${sBox('🔧 OS em Execução', String(osExec.length), '#1A3C5E', 'carteira '+fmtBRL(osExec.reduce((a,o)=>a+Number(o.valor_total||0),0)))}
+      ${sBox('📋 Orçamentos Pendentes', String(D.orcamentos.filter(o=>o.status==='PENDENTE').length), '#7B8FA1')}
+      ${sBox('📤 A Pagar', fmtBRL(aPagar), '#E8A020')}
+      ${sBox('🗂️ OS Ativas', String(osAtivas.length), '#1A3C5E')}
+    </div>`;
+    const porCidade={};
+    osAtivas.forEach(o=>{
+      const loc=_cidadeDaOS(o);
+      const k=loc.cidade ? (loc.cidade+(loc.uf?' - '+loc.uf:'')) : '(sem cidade)';
+      if(!porCidade[k]) porCidade[k]={n:0,valor:0};
+      porCidade[k].n++; porCidade[k].valor+=Number(o.valor_total||0);
+    });
+    const cidadesRows=Object.entries(porCidade).sort((a,b)=>b[1].valor-a[1].valor);
+    corpo += `<div class="rs-section"><div class="rs-section-title">🗺️ OS Ativas por Cidade<span class="rs-count">${osAtivas.length}</span></div>
+      <table style="margin-top:8px"><thead><tr><th ${thS}>Cidade</th><th ${thSR}>OS</th><th ${thSR}>Valor</th></tr></thead>
+      <tbody>${cidadesRows.length?cidadesRows.map(([cid,d])=>`<tr><td ${tdS}>${esc(cid)}</td><td ${tdSR}>${d.n}</td><td ${tdSR} style="font-weight:700">${fmtBRL(d.valor)}</td></tr>`).join(''):`<tr><td colspan="3" style="padding:10px;color:#9AA5B1;font-size:12.5px">Nenhuma OS ativa.</td></tr>`}</tbody></table>
+    </div>`;
+    corpo += `<div class="rs-section"><div class="rs-section-title">🔧 Ordens de Serviço Ativas<span class="rs-count">${osAtivas.length}</span></div>
+      <table style="margin-top:8px"><thead><tr><th ${thS}>OS</th><th ${thS}>Cliente</th><th ${thS}>Serviço</th><th ${thS}>Status</th><th ${thSR}>Valor</th></tr></thead>
+      <tbody>${osAtivas.length?osAtivas.map(o=>`<tr><td ${tdS}>#${o.numero_os}</td><td ${tdS}>${esc(o.cliente_nome||'—')}</td><td ${tdS}>${esc(o.servico||'—')}</td><td ${tdS}><span class="rs-badge" style="background:${o.status==='EM EXECUÇÃO'?'#E8F5E9;color:#1A8F5A':'#FFF8E1;color:#B8860B'}">${esc(o.status||'—')}</span></td><td ${tdSR}>${fmtBRL(o.valor_total)}</td></tr>`).join(''):`<tr><td colspan="5" style="padding:10px;color:#9AA5B1;font-size:12.5px">Nenhuma OS ativa.</td></tr>`}</tbody></table>
+    </div>`;
+  }
+
+  const rotuloView = _dashView==='financeira'?'Visão Financeira':_dashView==='operacional'?'Visão Operacional':'Visão Completa';
+  const w=window.open('','_blank');
+  if(!w){ alert('Permita pop-ups neste site para gerar o relatório.'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Fechamento Mensal — Compostos Engenharia</title>
+  <style>
+  *{box-sizing:border-box}
+  body{font-family:'Manrope','Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#1A2A3A;max-width:860px;margin:24px auto;padding:0 16px;background:#F7F9FC}
+  h1{font-size:19px;color:#1A3C5E;margin:0;font-weight:700}
+  table{width:100%;border-collapse:collapse}
+  .topo{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1A3C5E;padding-bottom:10px;margin-bottom:18px}
+  .rs-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+  .rs-summary-box{background:#fff;border:1px solid #E0E6ED;border-radius:10px;padding:14px 16px}
+  .rs-summary-label{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#7B8FA1;font-weight:600}
+  .rs-summary-value{font-size:21px;font-weight:700;margin-top:4px;line-height:1.2}
+  .rs-summary-sub{font-size:11px;color:#9AA5B1;margin-top:3px}
+  .rs-section{background:#fff;border:1px solid #E0E6ED;border-radius:10px;padding:16px 18px;margin-bottom:14px}
+  .rs-section-title{font-size:14px;font-weight:700;color:#1A3C5E;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center}
+  .rs-count{font-size:11px;font-weight:700;color:#7B8FA1;background:#F0F2F5;border-radius:20px;padding:2px 9px}
+  .rs-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700}
+  @media print{
+    .noprint{display:none}
+    body{background:#fff;max-width:100%;margin:0;padding:12px 18px}
+    .rs-section,.rs-summary-box{border-color:#ddd;break-inside:avoid}
+  }
+  </style></head><body>
+  <div class="topo"><div><h1>Compostos Engenharia</h1><div style="font-size:12px;color:#666;margin-top:2px">Fechamento Mensal — ${esc(rotuloView)}</div></div>
+  <div style="font-size:12px;color:#666;text-align:right">Período: ${esc(labelPeriodo())}<br>Gerado em ${fmtData(hoje())}</div></div>
+  ${corpo}
+  <button class="noprint" onclick="window.print()" style="margin-top:20px;padding:10px 16px;font-size:14px;background:#1A3C5E;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600">${icon('print',16)} Imprimir / Salvar como PDF</button>
+  </body></html>`);
+  w.document.close();
+}
 function renderAlertaAtraso(rec){
   rec = rec || D.receber;
   const at=rec.filter(r=>r.status==='EM ATRASO');
@@ -3416,7 +3646,13 @@ function _cardConciliacaoFluxo(){
 }
 
 function render_fluxo(){
-  const fluxoF = filtrarPorPeriodo(D.fluxo,'data_movimento').slice().sort((a,b)=>(b.id||0)-(a.id||0));
+  // Ordena por DATA do lançamento (mais recente primeiro) — não por id/ordem
+  // de criação. Isso importa principalmente depois de usar as correções da
+  // Auditoria: elas criam linhas novas (id alto) mas preservam a data
+  // original, que pode ser de semanas atrás.
+  const fluxoF = filtrarPorPeriodo(D.fluxo,'data_movimento').slice().sort((a,b)=>
+    String(b.data_movimento||'').localeCompare(String(a.data_movimento||'')) || ((b.id||0)-(a.id||0))
+  );
   const rec  = fluxoF.filter(x=>x.tipo==='RECEITA').reduce((a,b)=>a+Number(b.valor),0);
   const desp = fluxoF.filter(x=>x.tipo==='DESPESA').reduce((a,b)=>a+Number(b.valor),0);
   const servicos=[...new Set(D.fluxo.map(r=>r.categoria||r.tipo_servico).filter(Boolean))];
@@ -7000,38 +7236,76 @@ function montarResumoSemanal(){
   const pagAberto=D.pagar.filter(p=>p.status!=='PAGO');
   const pagVenc=pagAberto.filter(p=>pd(p)&&pd(p)<hd).sort((a,b)=>pd(a).localeCompare(pd(b)));
   const pagAV=pagAberto.filter(p=>pd(p)>=hd).sort((a,b)=>pd(a).localeCompare(pd(b)));
-  // estilos inline (funciona também na janela de impressão, sem o CSS do app)
-  const th='style="text-align:left;border-bottom:2px solid #ccc;padding:6px 8px;color:#555;font-size:11px;text-transform:uppercase"';
-  const thR='style="text-align:right;border-bottom:2px solid #ccc;padding:6px 8px;color:#555;font-size:11px;text-transform:uppercase"';
-  const td='style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px"';
-  const tdR='style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;text-align:right"';
-  const vazio=t=>`<p style="color:#888;font-size:12px;margin:4px 0 0">${t}</p>`;
-  const totLine=(label,v,cor)=>`<div style="text-align:right;font-weight:700;font-size:13px;margin-top:4px;color:${cor||'#1A2A3A'}">${label}: ${fmtBRL(v)}</div>`;
-  const H3='style="font-size:14px;color:#1A3C5E;border-bottom:1px solid #ddd;padding-bottom:3px;margin:18px 0 4px"';
+
+  // ── Resumo executivo (visão geral antes dos detalhes) ──
+  const totReceber=sum(recVenc)+sum(recAV);
+  const totPagar=sum(pagVenc)+sum(pagAV);
+  const saldoProj=totReceber-totPagar;
+
+  const th='style="text-align:left;padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#7B8FA1;border-bottom:2px solid #E0E6ED"';
+  const thR='style="text-align:right;padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#7B8FA1;border-bottom:2px solid #E0E6ED"';
+  const td='style="padding:7px 8px;border-bottom:1px solid #F0F2F5;font-size:12.5px"';
+  const tdR='style="padding:7px 8px;border-bottom:1px solid #F0F2F5;font-size:12.5px;text-align:right"';
+  const vazio=t=>`<p style="color:#9AA5B1;font-size:12.5px;margin:6px 0 0">${t}</p>`;
+  const totLine=(label,v,cor)=>`<div style="text-align:right;font-weight:700;font-size:13px;margin-top:8px;padding-top:8px;border-top:1px solid #E0E6ED;color:${cor||'#1A2A3A'}">${label}: ${fmtBRL(v)}</div>`;
+  const secao=(titulo,badge,corpo)=>`<div class="rs-section"><div class="rs-section-title">${titulo}${badge?`<span class="rs-count">${badge}</span>`:''}</div>${corpo}</div>`;
+  const subBloco=(pontoCor,label,n,valor,corpo)=>`
+    <div style="display:flex;align-items:baseline;gap:8px;margin:${n===undefined?'0':'14px 0 0'};font-size:12.5px;font-weight:700;color:${pontoCor}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${pontoCor};display:inline-block"></span>
+      ${label} — ${n} parcela(s) — ${fmtBRL(valor)}
+    </div>${corpo}`;
+
   const statusFluxo = ultFluxo
     ? `<b>${fmtData(ultFluxo)}</b> ${diasFx>0?`<span style="color:${diasFx>7?'#D64045':'#7B8FA1'}">(há ${diasFx} dia${diasFx>1?'s':''})</span>`:`<span style="color:#1A8F5A">(hoje)</span>`}`
     : `<span style="color:#D64045">Nenhum lançamento registrado</span>`;
+
   return `
-  <div style="background:#F5F6FA;border:1px solid #E0E6ED;border-radius:8px;padding:12px 14px;margin-bottom:8px">
-    <div style="font-size:12px;color:#555">🗓️ Última atualização do Fluxo de Caixa (último dia lançado)</div>
-    <div style="font-size:18px;margin-top:2px">${statusFluxo}</div>
-    ${diasFx>7?`<div style="color:#B71C1C;font-size:12px;margin-top:4px">⚠️ Fluxo possivelmente desatualizado — verificar lançamentos recentes.</div>`:''}
+  <div class="rs-status">
+    <div>
+      <div style="font-size:11px;color:#7B8FA1;text-transform:uppercase;letter-spacing:.03em;font-weight:600">🗓️ Última atualização do Fluxo de Caixa</div>
+      <div style="font-size:16px;margin-top:2px">${statusFluxo}</div>
+    </div>
+    ${diasFx>7?`<div style="color:#B71C1C;font-size:12px;font-weight:600;max-width:220px;text-align:right">⚠️ Possivelmente desatualizado — verificar lançamentos recentes</div>`:''}
   </div>
 
-  <h3 ${H3}>🔧 Ordens de Serviço — A Executar e Em Execução (${osAtivas.length})</h3>
-  ${osAtivas.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>OS</th><th ${th}>Cliente</th><th ${th}>Serviço</th><th ${th}>Status</th><th ${thR}>Valor</th></tr></thead><tbody>${osAtivas.map(o=>`<tr><td ${td}>#${o.numero_os}</td><td ${td}>${esc(o.cliente_nome||'—')}</td><td ${td}>${esc(o.servico||'—')}</td><td ${td}>${esc(o.status||'—')}</td><td ${tdR}>${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table>${totLine('Total em OS ativas',totOS,'#1A3C5E')}`:vazio('Nenhuma OS a executar ou em execução.')}
+  <div class="rs-summary-grid">
+    <div class="rs-summary-box">
+      <div class="rs-summary-label">💰 A Receber (aberto)</div>
+      <div class="rs-summary-value" style="color:#1A8F5A">${fmtBRL(totReceber)}</div>
+      <div class="rs-summary-sub">${recVenc.length?fmtBRL(sum(recVenc))+' vencido':'nada vencido'}</div>
+    </div>
+    <div class="rs-summary-box">
+      <div class="rs-summary-label">📤 A Pagar (aberto)</div>
+      <div class="rs-summary-value" style="color:#D64045">${fmtBRL(totPagar)}</div>
+      <div class="rs-summary-sub">${pagVenc.length?fmtBRL(sum(pagVenc))+' vencido':'nada vencido'}</div>
+    </div>
+    <div class="rs-summary-box">
+      <div class="rs-summary-label">⚖️ Saldo Projetado</div>
+      <div class="rs-summary-value" style="color:${saldoProj>=0?'#1A8F5A':'#D64045'}">${fmtBRL(saldoProj)}</div>
+      <div class="rs-summary-sub">a receber − a pagar</div>
+    </div>
+    <div class="rs-summary-box">
+      <div class="rs-summary-label">🔧 OS Ativas</div>
+      <div class="rs-summary-value" style="color:#1A3C5E">${osAtivas.length}</div>
+      <div class="rs-summary-sub">carteira ${fmtBRL(totOS)}</div>
+    </div>
+  </div>
 
-  <h3 ${H3}>💰 Contas a Receber</h3>
-  <div style="font-weight:700;color:#B71C1C;font-size:12px;margin-top:8px"><span class="dot dot-vermelho"></span>Vencidas — ${recVenc.length} parcela(s) — ${fmtBRL(sum(recVenc))}</div>
-  ${recVenc.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Cliente</th><th ${thR}>Parcelas em aberto</th><th ${thR}>Valor total</th></tr></thead><tbody>${porCliente(recVenc).map(g=>`<tr><td ${td}>${esc(g.cli)}</td><td ${tdR}>${g.parcelas}</td><td ${tdR}>${fmtBRL(g.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta vencida. 🎉')}
-  <div style="font-weight:700;color:#1A8F5A;font-size:12px;margin-top:12px"><span class="dot dot-azul"></span>A Vencer — ${recAV.length} parcela(s) — ${fmtBRL(sum(recAV))}</div>
-  ${recAV.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Cliente</th><th ${thR}>Parcelas em aberto</th><th ${thR}>Valor total</th></tr></thead><tbody>${porCliente(recAV).map(g=>`<tr><td ${td}>${esc(g.cli)}</td><td ${tdR}>${g.parcelas}</td><td ${tdR}>${fmtBRL(g.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a vencer.')}
+  ${secao('🔧 Ordens de Serviço — A Executar e Em Execução', osAtivas.length,
+    osAtivas.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>OS</th><th ${th}>Cliente</th><th ${th}>Serviço</th><th ${th}>Status</th><th ${thR}>Valor</th></tr></thead><tbody>${osAtivas.map(o=>`<tr><td ${td}>#${o.numero_os}</td><td ${td}>${esc(o.cliente_nome||'—')}</td><td ${td}>${esc(o.servico||'—')}</td><td ${td}><span class="rs-badge" style="background:${o.status==='EM EXECUÇÃO'?'#E8F5E9;color:#1A8F5A':'#FFF8E1;color:#B8860B'}">${esc(o.status||'—')}</span></td><td ${tdR}>${fmtBRL(o.valor_total)}</td></tr>`).join('')}</tbody></table>${totLine('Total em OS ativas',totOS,'#1A3C5E')}`
+    :vazio('Nenhuma OS a executar ou em execução.'))}
 
-  <h3 ${H3}>📤 Contas a Pagar</h3>
-  <div style="font-weight:700;color:#B71C1C;font-size:12px;margin-top:8px"><span class="dot dot-vermelho"></span>Vencidas (${pagVenc.length}) — ${fmtBRL(sum(pagVenc))}</div>
-  ${pagVenc.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Fornecedor</th><th ${th}>Categoria</th><th ${th}>Vencimento</th><th ${thR}>Valor</th></tr></thead><tbody>${pagVenc.map(p=>`<tr><td ${td}>${esc(p.fornecedor||'—')}</td><td ${td}>${esc(p.categoria||'—')}</td><td ${td}>${fmtData(pd(p))}</td><td ${tdR}>${fmtBRL(p.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a pagar vencida.')}
-  <div style="font-weight:700;color:#1A8F5A;font-size:12px;margin-top:12px"><span class="dot dot-azul"></span>A Vencer (${pagAV.length}) — ${fmtBRL(sum(pagAV))}</div>
-  ${pagAV.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Fornecedor</th><th ${th}>Categoria</th><th ${th}>Vencimento</th><th ${thR}>Valor</th></tr></thead><tbody>${pagAV.map(p=>`<tr><td ${td}>${esc(p.fornecedor||'—')}</td><td ${td}>${esc(p.categoria||'—')}</td><td ${td}>${fmtData(pd(p))}</td><td ${tdR}>${fmtBRL(p.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a pagar cadastrada ainda.')}
+  ${secao('💰 Contas a Receber', recVenc.length+recAV.length,
+    subBloco('#B71C1C','Vencidas',recVenc.length,sum(recVenc),
+      recVenc.length?`<table style="width:100%;border-collapse:collapse;margin-top:6px"><thead><tr><th ${th}>Cliente</th><th ${thR}>Parcelas em aberto</th><th ${thR}>Valor total</th></tr></thead><tbody>${porCliente(recVenc).map(g=>`<tr><td ${td}>${esc(g.cli)}</td><td ${tdR}>${g.parcelas}</td><td ${tdR}>${fmtBRL(g.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta vencida. 🎉'))
+    + subBloco('#2A6DBF','A Vencer',recAV.length,sum(recAV),
+      recAV.length?`<table style="width:100%;border-collapse:collapse;margin-top:6px"><thead><tr><th ${th}>Cliente</th><th ${thR}>Parcelas em aberto</th><th ${thR}>Valor total</th></tr></thead><tbody>${porCliente(recAV).map(g=>`<tr><td ${td}>${esc(g.cli)}</td><td ${tdR}>${g.parcelas}</td><td ${tdR}>${fmtBRL(g.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a vencer.')))}
+
+  ${secao('📤 Contas a Pagar', pagVenc.length+pagAV.length,
+    subBloco('#B71C1C','Vencidas',pagVenc.length,sum(pagVenc),
+      pagVenc.length?`<table style="width:100%;border-collapse:collapse;margin-top:6px"><thead><tr><th ${th}>Fornecedor</th><th ${th}>Categoria</th><th ${th}>Vencimento</th><th ${thR}>Valor</th></tr></thead><tbody>${pagVenc.map(p=>`<tr><td ${td}>${esc(p.fornecedor||'—')}</td><td ${td}>${esc(p.categoria||'—')}</td><td ${td}>${fmtData(pd(p))}</td><td ${tdR}>${fmtBRL(p.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a pagar vencida.'))
+    + subBloco('#2A6DBF','A Vencer',pagAV.length,sum(pagAV),
+      pagAV.length?`<table style="width:100%;border-collapse:collapse;margin-top:6px"><thead><tr><th ${th}>Fornecedor</th><th ${th}>Categoria</th><th ${th}>Vencimento</th><th ${thR}>Valor</th></tr></thead><tbody>${pagAV.map(p=>`<tr><td ${td}>${esc(p.fornecedor||'—')}</td><td ${td}>${esc(p.categoria||'—')}</td><td ${td}>${fmtData(pd(p))}</td><td ${tdR}>${fmtBRL(p.valor)}</td></tr>`).join('')}</tbody></table>`:vazio('Nenhuma conta a pagar cadastrada ainda.')))}
   `;
 }
 function relReuniao(){
@@ -7049,14 +7323,33 @@ function imprimirResumo(){
   const w=window.open('','_blank');
   if(!w){ alert('Permita pop-ups neste site para gerar o relatório.'); return; }
   w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Resumo Semanal — Compostos Engenharia</title>
-  <style>body{font-family:Arial,Helvetica,sans-serif;color:#1A2A3A;max-width:780px;margin:24px auto;padding:0 16px}
-  h1{font-size:18px;color:#1A3C5E;margin:0}table{width:100%;border-collapse:collapse}
-  .topo{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1A3C5E;padding-bottom:8px;margin-bottom:8px}
-  @media print{.noprint{display:none}}</style></head><body>
-  <div class="topo"><div><h1>Compostos Engenharia</h1><div style="font-size:12px;color:#666">Relatório de Alinhamento Semanal</div></div>
+  <style>
+  *{box-sizing:border-box}
+  body{font-family:'Manrope','Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#1A2A3A;max-width:820px;margin:24px auto;padding:0 16px;background:#F7F9FC}
+  h1{font-size:19px;color:#1A3C5E;margin:0;font-weight:700}
+  table{width:100%;border-collapse:collapse}
+  .topo{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1A3C5E;padding-bottom:10px;margin-bottom:18px}
+  .rs-status{background:#fff;border:1px solid #E0E6ED;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  .rs-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+  .rs-summary-box{background:#fff;border:1px solid #E0E6ED;border-radius:10px;padding:14px 16px}
+  .rs-summary-label{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#7B8FA1;font-weight:600}
+  .rs-summary-value{font-size:21px;font-weight:700;margin-top:4px;line-height:1.2}
+  .rs-summary-sub{font-size:11px;color:#9AA5B1;margin-top:3px}
+  .rs-section{background:#fff;border:1px solid #E0E6ED;border-radius:10px;padding:16px 18px;margin-bottom:14px}
+  .rs-section-title{font-size:14px;font-weight:700;color:#1A3C5E;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center}
+  .rs-count{font-size:11px;font-weight:700;color:#7B8FA1;background:#F0F2F5;border-radius:20px;padding:2px 9px}
+  .rs-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700}
+  @media print{
+    .noprint{display:none}
+    body{background:#fff;max-width:100%;margin:0;padding:12px 18px}
+    .rs-section,.rs-summary-box,.rs-status{border-color:#ddd}
+    .rs-section{break-inside:avoid}
+  }
+  </style></head><body>
+  <div class="topo"><div><h1>Compostos Engenharia</h1><div style="font-size:12px;color:#666;margin-top:2px">Relatório de Alinhamento Semanal</div></div>
   <div style="font-size:12px;color:#666">Gerado em ${fmtData(hoje())}</div></div>
   ${corpo}
-  <button class="noprint" onclick="window.print()" style="margin-top:24px;padding:10px 16px;font-size:14px;background:#1A3C5E;color:#fff;border:none;border-radius:6px;cursor:pointer">${icon('print',16)} Imprimir / Salvar como PDF</button>
+  <button class="noprint" onclick="window.print()" style="margin-top:20px;padding:10px 16px;font-size:14px;background:#1A3C5E;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600">${icon('print',16)} Imprimir / Salvar como PDF</button>
   </body></html>`);
   w.document.close();
 }
@@ -7963,7 +8256,10 @@ function consolidarClientes(){
   // Calcula totais por cliente
   let lista = Object.values(mapa).map(r=>{
     const faturado = r.fluxo.filter(f=>f.tipo==='RECEITA').reduce((a,f)=>a+Number(f.valor||0),0);
-    const emAberto = r.receber.filter(x=>x.status!=='RECEBIDO').reduce((a,x)=>a+Number(x.valor||0),0);
+    // "Em aberto" é o que FALTA receber — desconta o que já foi recebido em
+    // contas PARCIAIS, senão uma conta com metade já paga contava o valor
+    // cheio como se nada tivesse entrado ainda.
+    const emAberto = r.receber.filter(x=>x.status!=='RECEBIDO').reduce((a,x)=>a+Math.max(0, Number(x.valor||0)-Number(x.valor_recebido||0)),0);
     const recebido = r.receber.filter(x=>x.status==='RECEBIDO').reduce((a,x)=>a+Number(x.valor||0),0);
     const carteiraOS = r.os.reduce((a,o)=>a+Number(o.valor_total||0),0);
     return { ...r, faturado, emAberto, recebido, carteiraOS };
