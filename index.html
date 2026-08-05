@@ -476,6 +476,7 @@ tr:hover td{ background:#F3F8FF; }
       <a onclick="nav('receber')" id="nav-receber"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg> Contas a Receber</a>
       <div class="nav-sep">Saídas</div>
       <a onclick="nav('pagar')" id="nav-pagar"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/></svg> Contas a Pagar</a>
+      <a onclick="nav('cartao')" id="nav-cartao">💳 Cartão de Crédito</a>
       <a onclick="nav('funcionarios')" id="nav-funcionarios"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 18h20v2H2zM4 18v-2a8 8 0 0 1 16 0v2"/><path d="M10 4.5V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5"/></svg> Funcionários / OS</a>
       <a onclick="nav('estoque')" id="nav-estoque"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg> Estoque</a>
       <a onclick="nav('laudos')" id="nav-laudos"><svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg> Laudos Emitidos</a>
@@ -825,6 +826,14 @@ async function carregarTudo(){
     else D.auditoria_ok = [];
   } catch(e) { D.auditoria_ok = []; }
 
+  // Carrega itens de cartão de crédito (tabela pode não existir ainda —
+  // só existe depois de rodar o SQL de criação da tabela cartao_itens)
+  try {
+    const resCartao = await sb.from('cartao_itens').select('*').order('data',{ascending:false});
+    if(!resCartao.error) D.cartao_itens = resCartao.data||[];
+    else D.cartao_itens = [];
+  } catch(e) { D.cartao_itens = []; }
+
   // Carrega grupos de unificação de clientes (tabela pode não existir ainda)
   try {
     const resGrp = await sb.from('clientes_grupos').select('*');
@@ -1045,7 +1054,7 @@ async function doLogout(){
 // ══════════════════════════════════════════════════════════════
 // NAVEGAÇÃO
 // ══════════════════════════════════════════════════════════════
-const PAGE_TITLES={dashboard:'Dashboard',agenda:'Agenda',clientes:'Clientes',orcamentos:'Orçamentos',os:'Ordens de Serviço',fluxo:'Fluxo de Caixa',receber:'Contas a Receber',pagar:'Contas a Pagar',funcionarios:'Funcionários por OS',estoque:'Estoque',laudos:'Laudos Emitidos',relatorios:'Relatórios',auditoria:'Auditoria',config:'Configurações'};
+const PAGE_TITLES={dashboard:'Dashboard',agenda:'Agenda',clientes:'Clientes',orcamentos:'Orçamentos',os:'Ordens de Serviço',fluxo:'Fluxo de Caixa',receber:'Contas a Receber',pagar:'Contas a Pagar',cartao:'Cartão de Crédito',funcionarios:'Funcionários por OS',estoque:'Estoque',laudos:'Laudos Emitidos',relatorios:'Relatórios',auditoria:'Auditoria',config:'Configurações'};
 function toggleSidebar(force){
   const sb=document.getElementById('sidebar'), bd=document.getElementById('sidebar-backdrop');
   if(!sb)return;
@@ -1767,8 +1776,17 @@ function gerarFechamentoMensal(){
       ${linhaMes('Despesa', byMes[m].d, '#D64045')}
     </div>`).join('') : '<p style="color:#9AA5B1;font-size:12.5px">Sem dados no período.</p>';
 
-    // Contas a Receber por Status — barras de proporção
-    const rsStatus={};receberF.forEach(r=>{rsStatus[r.status]=(rsStatus[r.status]||0)+Number(r.valor);});
+    // Contas a Receber por Status — visão da carteira TODA (não só o período
+    // filtrado, senão "A Vencer" de meses futuros fica de fora — o que
+    // importa aqui é "quanto falta receber agora", não "quanto venceu neste
+    // período"). Para status em aberto, conta só o que FALTA (valor menos o
+    // já recebido) — senão uma conta PARCIAL aparecia com a fatura inteira,
+    // como se nada tivesse entrado ainda.
+    const rsStatus={};
+    D.receber.forEach(r=>{
+      const v = r.status==='RECEBIDO' ? Number(r.valor||0) : Math.max(0, Number(r.valor||0)-Number(r.valor_recebido||0));
+      if(v>0.005) rsStatus[r.status]=(rsStatus[r.status]||0)+v;
+    });
     const totRsStatus=Object.values(rsStatus).reduce((a,v)=>a+v,0);
     const coresStatus={'A VENCER':'#2A6DBF','VENCE HOJE':'#E8A020','EM ATRASO':'#D64045','RECEBIDO':'#1A8F5A','PARCIAL':'#7B8FA1'};
     const graficoStatusHTML = Object.keys(rsStatus).length
@@ -1778,7 +1796,7 @@ function gerarFechamentoMensal(){
     corpo += `<div class="rs-section"><div class="rs-section-title">📊 Receita vs Despesa por Mês / Contas a Receber por Status</div>
       <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;margin-top:10px">
         <div>${graficoMesHTML}</div>
-        <div>${graficoStatusHTML}</div>
+        <div><div style="font-size:10.5px;color:#9AA5B1;margin-bottom:8px">Carteira toda (não só o período do filtro) — o que falta receber de cada conta</div>${graficoStatusHTML}</div>
       </div>
     </div>`;
 
@@ -4776,6 +4794,194 @@ function render_pagar(){
   </div>`;
 }
 function aplicarFiltroPagar(){ lerFiltro(); render_pagar(); }
+
+// ══════════════════════════════════════════════════════════════
+// CARTÃO DE CRÉDITO — itemização e fechamento de fatura
+// A fatura é paga em bloco (uma vez por mês), mas é composta de várias
+// compras diferentes, cada uma pertencendo a um serviço/categoria diferente.
+// Aqui você lança cada compra separadamente ao longo do mês; ao fechar a
+// fatura, o sistema cria um lançamento de DESPESA no Fluxo de Caixa PARA
+// CADA ITEM (não um valor único), já com a categoria/OS certa de cada um —
+// assim os relatórios por tipo de despesa/por OS ficam corretos.
+// ══════════════════════════════════════════════════════════════
+function categoriasDespesa(){
+  return ['FUNCIONÁRIO','SALARIO','IMPOSTO','ART','CONTADOR','ROYALTES','FINANCIAMENTO CARRO','SEGURO','PEÇAS CUSTO','COMPRA DE EQUIPAMENTOS','ALUGUEL DE EQUIPAMENTOS','ALIMENTAÇÃO E DESLOCAMENTO','DESLOCAMENTO','COMPRA DE MATERIAL (INSUMOS)','TERCEIRIZAÇÃO DE MÃO DE OBRA','TARIFAS BANCÁRIAS','DEMAIS GASTOS','SERVENTE DE PEDREIRO','MULTA','FERRAMENTAS','VALE'];
+}
+
+function _mesAnoCartaoAtual(){
+  return { mes: FILTRO.mes ? parseInt(FILTRO.mes) : (new Date().getMonth()+1), ano: FILTRO.ano ? parseInt(FILTRO.ano) : new Date().getFullYear() };
+}
+
+function render_cartao(){
+  const c = document.getElementById('content');
+  const {mes: mesAtual, ano: anoAtual} = _mesAnoCartaoAtual();
+
+  const itensAbertos = D.cartao_itens.filter(i=>!i.fechado && Number(i.mes)===mesAtual && Number(i.ano)===anoAtual).sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  const totalAberto = itensAbertos.reduce((a,i)=>a+Number(i.valor||0),0);
+  const itensFechados = D.cartao_itens.filter(i=>i.fechado && Number(i.mes)===mesAtual && Number(i.ano)===anoAtual).sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  const totalFechado = itensFechados.reduce((a,i)=>a+Number(i.valor||0),0);
+
+  const osAtivas = D.os.filter(o=>!o.arquivada).sort((a,b)=>(Number(b.numero_os)||0)-(Number(a.numero_os)||0));
+
+  c.innerHTML = `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">💳 Fatura do Cartão de Crédito</div>
+    <p class="text-sm text-muted" style="margin:-4px 0 12px">Lance aqui cada compra ao longo do mês, já com categoria e OS (quando for o caso). Quando a fatura chegar, feche o mês: o sistema cria um lançamento de despesa separado pra cada item no Fluxo de Caixa — nada vira um "cartão" genérico.</p>
+    <div class="filters">${seletorMesAno([], 'aplicarFiltroCartao()')}</div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">➕ Novo Item</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Data da compra</label><input type="date" id="ci-data" value="${hoje()}"></div>
+      <div class="form-group span2"><label>Descrição</label><input type="text" id="ci-desc" placeholder="Ex: Combustível, almoço da equipe, material..."></div>
+      <div class="form-group"><label>Valor (R$)</label><input type="number" id="ci-valor" step="0.01" min="0"></div>
+      <div class="form-group"><label>Categoria</label><select id="ci-cat">${categoriasDespesa().map(cat=>`<option>${esc(cat)}</option>`).join('')}</select></div>
+      <div class="form-group span2">
+        <label>🔧 Vincular à OS (opcional)</label>
+        <input type="text" id="ci-os-busca" placeholder="🔍 Filtrar por cliente ou número..." oninput="_filtrarOpcoesOSCartao()" style="margin-bottom:6px">
+        <select id="ci-os-id">
+          <option value="">— Sem vínculo —</option>
+          ${osAtivas.map(o=>`<option value="${o.numero_os}" data-busca="${esc((o.cliente_nome||'')+' '+o.numero_os).toLowerCase()}">#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico||'')})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Responsável (quem comprou)</label><input type="text" id="ci-resp" placeholder="Ex: Hugo" value="${esc(localStorage.getItem('cartaoUltimoResp')||'')}"></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="salvarItemCartao()">${icon('plus',16)} Adicionar Item</button>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">📋 Itens deste mês <span class="text-xs text-muted" style="font-weight:400">(ainda não fechados — ${itensAbertos.length})</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>OS</th><th>Responsável</th><th class="td-num">Valor</th><th></th></tr></thead>
+      <tbody>
+        ${itensAbertos.length?itensAbertos.map(i=>`<tr>
+          <td class="text-xs">${fmtData(i.data)}</td>
+          <td class="text-xs">${esc(i.descricao)}</td>
+          <td class="text-xs">${esc(i.categoria||'—')}</td>
+          <td class="text-xs">${i.os_id?'#'+i.os_id:'—'}</td>
+          <td class="text-xs">${esc(i.responsavel||'—')}</td>
+          <td class="td-num vermelho" style="font-weight:700">${fmtBRL(i.valor)}</td>
+          <td><button class="btn btn-sm btn-outline" onclick="excluirItemCartao(${i.id})" title="Excluir">${icon('trash',14)}</button></td>
+        </tr>`).join('') : `<tr><td colspan="7" class="text-muted td-center">Nenhum item lançado ainda em ${MESES[mesAtual]}/${anoAtual}.</td></tr>`}
+      </tbody>
+      <tfoot><tr class="total-row"><td colspan="5"><b>TOTAL LANÇADO</b></td><td class="td-num" style="font-weight:700">${fmtBRL(totalAberto)}</td><td></td></tr></tfoot>
+    </table></div>
+  </div>
+
+  ${itensAbertos.length?`
+  <div class="card" style="margin-bottom:16px;border-top:3px solid var(--azul)">
+    <div class="card-title">✅ Fechar Fatura de ${MESES[mesAtual]}/${anoAtual}</div>
+    <p class="text-xs text-muted" style="margin:-4px 0 10px">Confira se o valor da fatura que chegou bate com o total lançado. Se não bater, ajusta os itens antes de fechar (pode faltar lançar alguma compra, ou ter juros/IOF/anuidade — nesse caso lance um item extra pra cobrir a diferença).</p>
+    <div class="form-grid">
+      <div class="form-group"><label>Valor real da fatura (R$)</label><input type="number" id="ci-fatura-valor" step="0.01" value="${totalAberto.toFixed(2)}" oninput="_conferirFaturaCartao()"></div>
+      <div class="form-group"><label>Data do pagamento da fatura</label><input type="date" id="ci-fatura-data" value="${hoje()}"></div>
+    </div>
+    <div id="ci-conferencia" style="margin-top:8px"></div>
+    <button class="btn btn-success" style="margin-top:10px" onclick="fecharFaturaCartao(${mesAtual},${anoAtual})">${icon('check',16)} Fechar Fatura e Lançar no Fluxo de Caixa</button>
+  </div>`:''}
+
+  ${itensFechados.length?`
+  <div class="card">
+    <div class="card-title">🔒 Itens já fechados <span class="text-xs text-muted" style="font-weight:400">(lançados no Fluxo de Caixa)</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>OS</th><th>Responsável</th><th class="td-num">Valor</th></tr></thead>
+      <tbody>${itensFechados.map(i=>`<tr><td class="text-xs">${fmtData(i.data)}</td><td class="text-xs">${esc(i.descricao)}</td><td class="text-xs">${esc(i.categoria||'—')}</td><td class="text-xs">${i.os_id?'#'+i.os_id:'—'}</td><td class="text-xs">${esc(i.responsavel||'—')}</td><td class="td-num text-xs">${fmtBRL(i.valor)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr class="total-row"><td colspan="5"><b>TOTAL FECHADO</b></td><td class="td-num" style="font-weight:700">${fmtBRL(totalFechado)}</td></tr></tfoot>
+    </table></div>
+  </div>`:''}
+  `;
+  setTimeout(_conferirFaturaCartao, 0);
+}
+
+function aplicarFiltroCartao(){ lerFiltro(); render_cartao(); }
+
+function _filtrarOpcoesOSCartao(){
+  const q=(document.getElementById('ci-os-busca').value||'').toLowerCase();
+  document.querySelectorAll('#ci-os-id option').forEach(op=>{
+    if(!op.dataset.busca) return; // "— Sem vínculo —" fica sempre visível
+    op.style.display = op.dataset.busca.includes(q) ? '' : 'none';
+  });
+}
+
+async function salvarItemCartao(){
+  const data=document.getElementById('ci-data').value;
+  const descricao=document.getElementById('ci-desc').value.trim();
+  const valor=parseFloat(document.getElementById('ci-valor').value)||0;
+  const categoria=document.getElementById('ci-cat').value;
+  const osId=document.getElementById('ci-os-id').value;
+  const responsavel=document.getElementById('ci-resp').value.trim();
+  if(!data || !descricao || !valor){ alert('Preencha pelo menos data, descrição e valor.'); return; }
+  const d=new Date(data+'T12:00:00');
+  const ok = await sbInsert('cartao_itens', {
+    data, descricao, valor, categoria,
+    os_id: osId?parseInt(osId):null,
+    responsavel: responsavel||null,
+    mes: d.getMonth()+1, ano: d.getFullYear(),
+    fechado: false
+  });
+  if(ok){
+    if(responsavel) try{ localStorage.setItem('cartaoUltimoResp', responsavel); }catch(e){}
+    await carregarTudo();
+    render_cartao();
+  }
+}
+
+async function excluirItemCartao(id){
+  if(!confirm('Excluir este item? Ele não vai entrar na fatura.')) return;
+  const ok = await sbDelete('cartao_itens','id',id);
+  if(ok){ await carregarTudo(); render_cartao(); }
+}
+
+function _conferirFaturaCartao(){
+  const el=document.getElementById('ci-conferencia');
+  const campoValor=document.getElementById('ci-fatura-valor');
+  if(!el || !campoValor) return;
+  const faturaVal=parseFloat(campoValor.value);
+  if(isNaN(faturaVal)){ el.innerHTML=''; return; }
+  const {mes: mesAtual, ano: anoAtual} = _mesAnoCartaoAtual();
+  const totalLancado = D.cartao_itens.filter(i=>!i.fechado && Number(i.mes)===mesAtual && Number(i.ano)===anoAtual).reduce((a,i)=>a+Number(i.valor||0),0);
+  const dif = Math.round((faturaVal-totalLancado)*100)/100;
+  if(Math.abs(dif)<0.02){
+    el.innerHTML = `<div class="alert-box alert-success" style="font-size:12px;margin:0">✅ Bate certinho com o total lançado (${fmtBRL(totalLancado)}).</div>`;
+  } else if(dif>0){
+    el.innerHTML = `<div class="alert-box alert-warning" style="font-size:12px;margin:0">⚠️ Faltam <b>${fmtBRL(dif)}</b> — a fatura veio maior que o total lançado. Pode ser alguma compra que faltou lançar, ou juros/IOF/anuidade (lance como um item extra).</div>`;
+  } else {
+    el.innerHTML = `<div class="alert-box alert-warning" style="font-size:12px;margin:0">⚠️ Você lançou <b>${fmtBRL(Math.abs(dif))}</b> a mais do que a fatura. Confira se não duplicou algum item.</div>`;
+  }
+}
+
+async function fecharFaturaCartao(mes, ano){
+  const itens = D.cartao_itens.filter(i=>!i.fechado && Number(i.mes)===mes && Number(i.ano)===ano);
+  if(!itens.length){ alert('Não há itens em aberto neste mês.'); return; }
+  const dataFatura = document.getElementById('ci-fatura-data').value;
+  if(!dataFatura){ alert('Informe a data do pagamento da fatura.'); return; }
+  const total = itens.reduce((a,i)=>a+Number(i.valor||0),0);
+  if(!confirm(`Fechar a fatura de ${MESES[mes]}/${ano}?\n\n${itens.length} item(ns), total ${fmtBRL(total)}.\nIsso cria ${itens.length} lançamento(s) de DESPESA no Fluxo de Caixa, todos datados de ${fmtData(dataFatura)}, cada um com sua própria categoria/OS.\n\nOs itens somem desta lista depois de fechados.`)) return;
+
+  for(const item of itens){
+    const okIns = await sbInsert('fluxo_caixa', {
+      data_movimento: dataFatura,
+      cliente: item.responsavel || '',
+      tipo: 'DESPESA',
+      categoria: item.categoria || 'DEMAIS GASTOS',
+      valor: Number(item.valor||0),
+      mes: parseInt(dataFatura.slice(5,7)),
+      ano: parseInt(dataFatura.slice(0,4)),
+      os_id: item.os_id || null,
+      observacao: 'Fatura cartão — compra em '+fmtData(item.data)+': '+item.descricao+(item.responsavel?' ('+item.responsavel+')':'')
+    });
+    if(!okIns){
+      alert('Parou no meio — um dos lançamentos não foi criado. Confira o que já foi lançado no Fluxo de Caixa antes de tentar fechar de novo (os itens já lançados não vão duplicar).');
+      await carregarTudo(); render_cartao(); return;
+    }
+    await sbUpdate('cartao_itens', {fechado:true}, 'id', item.id);
+  }
+  alert(`Fatura de ${MESES[mes]}/${ano} fechada! ${itens.length} lançamento(s) criado(s) no Fluxo de Caixa.`);
+  await carregarTudo();
+  render_cartao();
+}
+
 function modalNovaPagar(){
   abrirModal('Nova Conta a Pagar',`
   <div class="form-grid">
