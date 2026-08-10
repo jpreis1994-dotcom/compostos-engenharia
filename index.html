@@ -4862,7 +4862,7 @@ function render_cartao(){
           <td class="text-xs">${i.os_id?'#'+i.os_id:'—'}</td>
           <td class="text-xs">${esc(i.responsavel||'—')}</td>
           <td class="td-num vermelho" style="font-weight:700">${fmtBRL(i.valor)}</td>
-          <td><button class="btn btn-sm btn-outline" onclick="excluirItemCartao(${i.id})" title="Excluir">${icon('trash',14)}</button></td>
+          <td style="white-space:nowrap"><button class="btn btn-sm btn-outline" onclick="editarItemCartao(${i.id})" title="Editar">${icon('edit',14)}</button> <button class="btn btn-sm btn-outline" onclick="excluirItemCartao(${i.id})" title="Excluir">${icon('trash',14)}</button></td>
         </tr>`).join('') : `<tr><td colspan="7" class="text-muted td-center">Nenhum item lançado ainda em ${MESES[mesAtual]}/${anoAtual}.</td></tr>`}
       </tbody>
       <tfoot><tr class="total-row"><td colspan="5"><b>TOTAL LANÇADO</b></td><td class="td-num" style="font-weight:700">${fmtBRL(totalAberto)}</td><td></td></tr></tfoot>
@@ -4912,12 +4912,15 @@ async function salvarItemCartao(){
   const osId=document.getElementById('ci-os-id').value;
   const responsavel=document.getElementById('ci-resp').value.trim();
   if(!data || !descricao || !valor){ alert('Preencha pelo menos data, descrição e valor.'); return; }
-  const d=new Date(data+'T12:00:00');
+  // O mês/ano é o da FATURA selecionada na tela (seletor no topo), não o mês
+  // da data de compra — uma fatura pode ter compras de meses diferentes
+  // (ex: compras de 29/jun a 29/jul, tudo na fatura de agosto).
+  const {mes, ano} = _mesAnoCartaoAtual();
   const ok = await sbInsert('cartao_itens', {
     data, descricao, valor, categoria,
     os_id: osId?parseInt(osId):null,
     responsavel: responsavel||null,
-    mes: d.getMonth()+1, ano: d.getFullYear(),
+    mes, ano,
     fechado: false
   });
   if(ok){
@@ -4931,6 +4934,56 @@ async function excluirItemCartao(id){
   if(!confirm('Excluir este item? Ele não vai entrar na fatura.')) return;
   const ok = await sbDelete('cartao_itens','id',id);
   if(ok){ await carregarTudo(); render_cartao(); }
+}
+
+// Abre modal pra editar um item já lançado — categoria errada, precisa
+// vincular a uma OS, corrigir valor, o que for. Só pra itens ainda não
+// fechados (os fechados já viraram lançamento no Fluxo de Caixa).
+function editarItemCartao(id){
+  const item = D.cartao_itens.find(x=>x.id===id);
+  if(!item){ alert('Item não encontrado — atualize a página.'); return; }
+  const osAtivas = D.os.filter(o=>!o.arquivada).sort((a,b)=>(Number(b.numero_os)||0)-(Number(a.numero_os)||0));
+  abrirModal('Editar item do cartão', `
+    <div class="form-grid">
+      <div class="form-group"><label>Data da compra</label><input type="date" id="eci-data" value="${item.data}"></div>
+      <div class="form-group span2"><label>Descrição</label><input type="text" id="eci-desc" value="${esc(item.descricao)}"></div>
+      <div class="form-group"><label>Valor (R$)</label><input type="number" id="eci-valor" step="0.01" min="0" value="${item.valor}"></div>
+      <div class="form-group"><label>Categoria</label><select id="eci-cat">${categoriasDespesa().map(cat=>`<option ${cat===item.categoria?'selected':''}>${esc(cat)}</option>`).join('')}</select></div>
+      <div class="form-group span2">
+        <label>🔧 Vincular à OS (opcional)</label>
+        <input type="text" id="eci-os-busca" placeholder="🔍 Filtrar por cliente ou número..." oninput="_filtrarOpcoesOSCartaoModal()" style="margin-bottom:6px">
+        <select id="eci-os-id">
+          <option value="">— Sem vínculo —</option>
+          ${osAtivas.map(o=>`<option value="${o.numero_os}" data-busca="${esc((o.cliente_nome||'')+' '+o.numero_os).toLowerCase()}" ${String(o.numero_os)===String(item.os_id)?'selected':''}>#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico||'')})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Responsável</label><input type="text" id="eci-resp" value="${esc(item.responsavel||'')}"></div>
+    </div>
+  `, `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarEdicaoItemCartao(${id})">${icon('check',16)} Salvar</button>`);
+}
+function _filtrarOpcoesOSCartaoModal(){
+  const q=(document.getElementById('eci-os-busca').value||'').toLowerCase();
+  document.querySelectorAll('#eci-os-id option').forEach(op=>{
+    if(!op.dataset.busca) return;
+    op.style.display = op.dataset.busca.includes(q) ? '' : 'none';
+  });
+}
+async function salvarEdicaoItemCartao(id){
+  const data=document.getElementById('eci-data').value;
+  const descricao=document.getElementById('eci-desc').value.trim();
+  const valor=parseFloat(document.getElementById('eci-valor').value)||0;
+  const categoria=document.getElementById('eci-cat').value;
+  const osId=document.getElementById('eci-os-id').value;
+  const responsavel=document.getElementById('eci-resp').value.trim();
+  if(!data || !descricao || !valor){ alert('Preencha pelo menos data, descrição e valor.'); return; }
+  // Mês/ano da FATURA não muda aqui — só a data da compra em si (que é só
+  // referência). Editar a descrição não deve "mudar de fatura" o item.
+  const ok = await sbUpdate('cartao_itens', {
+    data, descricao, valor, categoria,
+    os_id: osId?parseInt(osId):null,
+    responsavel: responsavel||null
+  }, 'id', id);
+  if(ok){ fecharModal(); await carregarTudo(); render_cartao(); }
 }
 
 function _conferirFaturaCartao(){
