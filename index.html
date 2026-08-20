@@ -717,7 +717,7 @@ function badge(s){
     'A VENCER':'azul','EM EXECUÇÃO':'azul','EM ABERTO':'azul','CONVERTIDO':'azul',
     'PARCIAL':'amarelo',
     'EM ATRASO':'vermelho','VENCIDA':'vermelho','RECUSADO':'vermelho',
-    'A EXECUTAR':'amarelo','VENCE HOJE':'amarelo','PENDENTE':'amarelo','EM CONVERSA':'cinza',
+    'A EXECUTAR':'amarelo','VENCE HOJE':'amarelo','PENDENTE':'amarelo','EM CONVERSA':'cinza','INDIRETA':'cinza',
   };
   return `<span class="badge badge-${m[t]||'cinza'}">${esc(s)}</span>`;
 }
@@ -3725,7 +3725,14 @@ function render_fluxo(){
       <tbody id="tb-fluxo">
       ${fluxoF.map(r=>{
         const osVinc = r.os_id ? D.os.find(o=>o.numero_os==r.os_id) : null;
-        const osLabel = r.os_id ? `<span class="badge badge-azul" title="${osVinc?esc(osVinc.cliente_nome):''}">#${r.os_id}</span>` : '<span class="text-muted">—</span>';
+        // Só mostra o aviso geral/pendente quando o campo foi realmente
+        // preenchido pelo formulário novo — lançamento antigo (de antes
+        // desse campo existir) fica neutro, sem virar alarme retroativo.
+        const osLabel = r.os_id
+          ? `<span class="badge badge-azul" title="${osVinc?esc(osVinc.cliente_nome):''}">#${r.os_id}</span>`
+          : r.classificacao==='indireta' ? badge('INDIRETA')
+          : r.classificacao==='pendente' ? badge('PENDENTE')
+          : '<span class="text-muted">—</span>';
         return`<tr data-tipo="${esc(r.tipo)}" data-cat="${esc(r.categoria||r.tipo_servico||'')}" data-cli="${esc(_fluxoTextoBusca(r))}" data-os="${r.os_id||''}">
           <td class="text-xs text-muted">#${r.id}</td>
           <td>${fmtData(r.data_movimento)}</td>
@@ -3780,12 +3787,15 @@ function modalNovoLancamento(){
       <select id="fc-cat-desp" style="display:none" onchange="toggleEstoqueWrap()">${categoriasDespesa().map(c=>`<option>${esc(c)}</option>`).join('')}</select>
     </div>
     <div class="form-group span2">
-      <label>🔧 Vincular à OS (opcional)</label>
-      <input type="text" id="fc-os-busca" placeholder="🔍 Filtrar por nome do cliente ou CNPJ..." oninput="filtrarOpcoesOS()" style="margin-bottom:6px">
-      <select id="fc-os-id" onchange="fluxoAoSelecionarOS()">
+      <label>Vincular à OS <span class="text-muted" style="font-weight:400">(opcional)</span></label>
+      <input type="text" id="fc-os-busca" placeholder="Filtrar por nome do cliente ou CNPJ..." oninput="filtrarOpcoesOS()" style="margin-bottom:6px">
+      <select id="fc-os-id" onchange="fluxoAoSelecionarOS();_aoMudarOSLimpaIndireta('fc')">
         <option value="">— Sem vínculo —</option>
         ${osAtivas.map(o=>`<option value="${o.numero_os}" data-busca="${esc((o.cliente_nome||'')+' '+(o.cnpj||'')).toLowerCase()}">#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico)})</option>`).join('')}
       </select>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer;margin-top:8px">
+        <input type="checkbox" id="fc-indireta" onchange="_toggleIndireta('fc')"> Indireta <span class="text-muted">(não é de um cliente específico — trava o campo de OS)</span>
+      </label>
     </div>
     <div id="fc-os-serv-aviso" style="display:none;grid-column:1/-1;margin-top:-4px"></div>
     <div id="fc-os-cr-aviso" style="display:none;grid-column:1/-1"></div>
@@ -3926,6 +3936,11 @@ async function salvarLancamento(){
     os_id:osId,
     observacao:document.getElementById('fc-obs').value
   };
+  // Sem OS vinculada: grava se é geral/administrativo (revisado) ou ainda
+  // pendente de identificação. Com OS vinculada, não faz sentido.
+  if(!osId){
+    dadosFC.classificacao = document.getElementById('fc-indireta')?.checked ? 'indireta' : 'pendente';
+  }
   if(fornecedor) dadosFC.fornecedor=fornecedor;
   dadosFC.forma_conta = document.getElementById('fc-forma-conta')?.value || 'conta';
   const cnpjFC=(document.getElementById('fc-cnpj')?.value||'').trim();
@@ -3939,7 +3954,14 @@ async function salvarLancamento(){
   const materiais = darEntrada ? coletarMateriaisFC() : [];
 
   // Insere o lançamento e captura o ID gerado (para vincular aos movimentos)
-  const {data:novoFC, error:errFC} = await sb.from('fluxo_caixa').insert([dadosFC]).select().single();
+  let {data:novoFC, error:errFC} = await sb.from('fluxo_caixa').insert([dadosFC]).select().single();
+  // Se a coluna classificacao ainda não existe no banco (SQL não rodado
+  // ainda), tenta de novo sem ela — não pode deixar o lançamento inteiro
+  // falhar por causa de um campo opcional.
+  if(errFC && dadosFC.classificacao && /classificacao/i.test(errFC.message||'')){
+    delete dadosFC.classificacao;
+    ({data:novoFC, error:errFC} = await sb.from('fluxo_caixa').insert([dadosFC]).select().single());
+  }
   if(errFC){ alert('Erro ao salvar: '+errFC.message); return; }
 
   if(recSel){
@@ -4257,12 +4279,15 @@ function editarLancamento(id){
       </select>
     </div>
     <div class="form-group span2">
-      <label>🔧 Vincular à OS (opcional)</label>
-      <select id="efc-os-id" onchange="_efcOSMudou()">
+      <label>Vincular à OS <span class="text-muted" style="font-weight:400">(opcional)</span></label>
+      <select id="efc-os-id" onchange="_efcOSMudou();_aoMudarOSLimpaIndireta('efc')" ${r.classificacao==='indireta'?'disabled':''}>
         <option value="">— Sem vínculo —</option>
         ${osAtivas.map(o=>`<option value="${o.numero_os}" ${r.os_id==o.numero_os?'selected':''}>#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico)})</option>`).join('')}
       </select>
       <div id="efc-os-serv-aviso" style="display:none;margin-top:6px"></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer;margin-top:8px">
+        <input type="checkbox" id="efc-indireta" onchange="_toggleIndireta('efc')" ${r.classificacao==='indireta'?'checked':''}> Indireta <span class="text-muted">(não é de um cliente específico — trava o campo de OS)</span>
+      </label>
     </div>
     <div class="form-group span2" id="efc-rec-wrap" style="${tipo==='DESPESA'?'display:none':''}">
       <label>💰 Quitar uma Conta a Receber (opcional)</label>
@@ -4313,6 +4338,10 @@ async function salvarEditLancamento(id){
     os_id: osId ? parseInt(osId) : null,
     observacao:obs
   };
+  // Sem OS vinculada: grava se é geral/administrativo (revisado) ou ainda
+  // pendente de identificação. Com OS vinculada, não faz sentido — apaga
+  // qualquer classificação antiga que tenha sobrado.
+  dados.classificacao = osId ? null : (document.getElementById('efc-indireta')?.checked ? 'indireta' : 'pendente');
   dados.conta_receber_id = vinculoNovo;
   dados.cnpj = (document.getElementById('efc-cnpj')?.value||'').trim();
   dados.forma_conta = document.getElementById('efc-forma-conta')?.value || 'conta';
@@ -4837,13 +4866,13 @@ function render_cartao(){
   const osAtivas = D.os.filter(o=>!o.arquivada).sort((a,b)=>(Number(b.numero_os)||0)-(Number(a.numero_os)||0));
   const opcoesOS = osAtivas.map(o=>`<option value="${o.numero_os}" data-busca="${esc((o.cliente_nome||'')+' '+o.numero_os).toLowerCase()}">#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico||'')})</option>`).join('');
 
-  // Rótulo da coluna OS na tabela: OS específica, geral/administrativo, ou
-  // "precisa identificar" (inclui os itens antigos, de antes deste campo
-  // existir — ficam tratados como pendente também, o que é o correto).
+  // Rótulo da coluna OS na tabela: OS específica, indireta, ou pendente
+  // (inclui os itens antigos, de antes deste campo existir — ficam tratados
+  // como pendente também, o que é o correto).
   const rotuloOS = i => {
     if(i.os_id) return '#'+i.os_id;
-    if(i.classificacao==='geral') return '<span style="color:#7B8FA1">🏢 Geral</span>';
-    return '<span style="color:#B25000;font-weight:600">⚠️ Identificar</span>';
+    if(i.classificacao==='indireta') return badge('INDIRETA');
+    return badge('PENDENTE');
   };
 
   c.innerHTML = `
@@ -4864,20 +4893,15 @@ function render_cartao(){
         <select id="ci-cat">${categoriasDespesa().map(cat=>`<option>${esc(cat)}</option>`).join('')}</select>
       </div>
       <div class="form-group span2">
-        <label>🔧 Vincular à OS <span class="text-muted" style="font-weight:400">(se não for de um cliente específico, escolha abaixo)</span></label>
-        <input type="text" id="ci-os-busca" placeholder="🔍 Filtrar por cliente ou número..." oninput="_filtrarOpcoesOSCartao()" style="margin-bottom:6px">
-        <select id="ci-os-id" onchange="_toggleClassifCartao('ci')">
+        <label>Vincular à OS <span class="text-muted" style="font-weight:400">(opcional)</span></label>
+        <input type="text" id="ci-os-busca" placeholder="Filtrar por cliente ou número..." oninput="_filtrarOpcoesOSCartao()" style="margin-bottom:6px">
+        <select id="ci-os-id" onchange="_aoMudarOSLimpaIndireta('ci')">
           <option value="">— Sem OS específica —</option>
           ${opcoesOS}
         </select>
-        <div id="ci-classif-wrap" style="margin-top:8px;display:flex;gap:16px;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:400;cursor:pointer">
-            <input type="radio" name="ci-classif" value="pendente" checked> Ainda preciso identificar
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:400;cursor:pointer">
-            <input type="radio" name="ci-classif" value="geral"> 🏢 É geral/administrativo mesmo
-          </label>
-        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer;margin-top:8px">
+          <input type="checkbox" id="ci-indireta" onchange="_toggleIndireta('ci')"> Indireta <span class="text-muted">(não é de um cliente específico — trava o campo de OS)</span>
+        </label>
       </div>
       <div class="form-group"><label>Responsável (quem comprou)</label><input type="text" id="ci-resp" placeholder="Ex: Hugo" value="${esc(localStorage.getItem('cartaoUltimoResp')||'')}"></div>
     </div>
@@ -4937,12 +4961,23 @@ function _filtrarOpcoesOSCartao(){
     op.style.display = op.dataset.busca.includes(q) ? '' : 'none';
   });
 }
-// Mostra o bloco "geral / precisa identificar" só quando NÃO há OS
-// selecionada — com uma OS específica, a classificação não faz sentido.
-function _toggleClassifCartao(prefix){
-  const os=document.getElementById(prefix+'-os-id')?.value;
-  const wrap=document.getElementById(prefix+'-classif-wrap');
-  if(wrap) wrap.style.display = os ? 'none' : '';
+// Marcar "Indireta" trava e limpa o campo de OS — os dois são mutuamente
+// exclusivos (ou está numa OS específica, ou é indireta, nunca os dois).
+function _toggleIndireta(prefix){
+  const chk=document.getElementById(prefix+'-indireta');
+  const osSel=document.getElementById(prefix+'-os-id');
+  if(!chk||!osSel) return;
+  if(chk.checked){ osSel.value=''; osSel.disabled=true; }
+  else { osSel.disabled=false; }
+}
+// Escolher uma OS desmarca e trava a caixinha "Indireta" (mesma exclusão,
+// no sentido contrário).
+function _aoMudarOSLimpaIndireta(prefix){
+  const osSel=document.getElementById(prefix+'-os-id');
+  const chk=document.getElementById(prefix+'-indireta');
+  if(!osSel||!chk) return;
+  if(osSel.value){ chk.checked=false; chk.disabled=true; }
+  else { chk.disabled=false; }
 }
 
 async function salvarItemCartao(){
@@ -4953,9 +4988,9 @@ async function salvarItemCartao(){
   const osId=document.getElementById('ci-os-id').value;
   const responsavel=document.getElementById('ci-resp').value.trim();
   if(!data || !descricao || !valor){ alert('Preencha pelo menos data, descrição e valor.'); return; }
-  // Sem OS vinculada, classificacao guarda 'geral' (administrativo, revisado
-  // de propósito) ou 'pendente' (ainda não decidiu) — nunca uma OS falsa.
-  const classificacao = osId ? null : (document.querySelector('input[name="ci-classif"]:checked')?.value || 'pendente');
+  // Sem OS vinculada, classificacao guarda 'indireta' (revisado, não é de
+  // cliente específico) ou 'pendente' (ainda não decidiu) — nunca uma OS falsa.
+  const classificacao = osId ? null : (document.getElementById('ci-indireta')?.checked ? 'indireta' : 'pendente');
   // O mês/ano é o da FATURA selecionada na tela (seletor no topo), não o mês
   // da data de compra — uma fatura pode ter compras de meses diferentes
   // (ex: compras de 29/jun a 29/jul, tudo na fatura de agosto).
@@ -4989,7 +5024,7 @@ function editarItemCartao(id){
   if(!item){ alert('Item não encontrado — atualize a página.'); return; }
   const osAtivas = D.os.filter(o=>!o.arquivada).sort((a,b)=>(Number(b.numero_os)||0)-(Number(a.numero_os)||0));
   const opcoesOS = osAtivas.map(o=>`<option value="${o.numero_os}" data-busca="${esc((o.cliente_nome||'')+' '+o.numero_os).toLowerCase()}" ${String(o.numero_os)===String(item.os_id)?'selected':''}>#${o.numero_os} — ${esc(o.cliente_nome)} (${esc(o.servico||'')})</option>`).join('');
-  const classifAtual = item.classificacao==='geral' ? 'geral' : 'pendente'; // itens antigos (sem o campo) caem em pendente
+  const jaIndireta = item.classificacao==='indireta';
   abrirModal('Editar item do cartão', `
     <div class="form-grid">
       <div class="form-group"><label>Data da compra</label><input type="date" id="eci-data" value="${item.data}"></div>
@@ -5000,20 +5035,15 @@ function editarItemCartao(id){
         <select id="eci-cat">${categoriasDespesa().map(cat=>`<option ${cat===item.categoria?'selected':''}>${esc(cat)}</option>`).join('')}</select>
       </div>
       <div class="form-group span2">
-        <label>🔧 Vincular à OS <span class="text-muted" style="font-weight:400">(se não for de um cliente específico, escolha abaixo)</span></label>
-        <input type="text" id="eci-os-busca" placeholder="🔍 Filtrar por cliente ou número..." oninput="_filtrarOpcoesOSCartaoModal()" style="margin-bottom:6px">
-        <select id="eci-os-id" onchange="_toggleClassifCartao('eci')">
+        <label>Vincular à OS <span class="text-muted" style="font-weight:400">(opcional)</span></label>
+        <input type="text" id="eci-os-busca" placeholder="Filtrar por cliente ou número..." oninput="_filtrarOpcoesOSCartaoModal()" style="margin-bottom:6px">
+        <select id="eci-os-id" onchange="_aoMudarOSLimpaIndireta('eci')" ${jaIndireta?'disabled':''}>
           <option value="">— Sem OS específica —</option>
           ${opcoesOS}
         </select>
-        <div id="eci-classif-wrap" style="margin-top:8px;display:${item.os_id?'none':'flex'};gap:16px;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:400;cursor:pointer">
-            <input type="radio" name="eci-classif" value="pendente" ${classifAtual==='pendente'?'checked':''}> Ainda preciso identificar
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:400;cursor:pointer">
-            <input type="radio" name="eci-classif" value="geral" ${classifAtual==='geral'?'checked':''}> 🏢 É geral/administrativo mesmo
-          </label>
-        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;cursor:pointer;margin-top:8px">
+          <input type="checkbox" id="eci-indireta" onchange="_toggleIndireta('eci')" ${jaIndireta?'checked':''}> Indireta <span class="text-muted">(não é de um cliente específico — trava o campo de OS)</span>
+        </label>
       </div>
       <div class="form-group"><label>Responsável</label><input type="text" id="eci-resp" value="${esc(item.responsavel||'')}"></div>
     </div>
@@ -5034,7 +5064,7 @@ async function salvarEdicaoItemCartao(id){
   const osId=document.getElementById('eci-os-id').value;
   const responsavel=document.getElementById('eci-resp').value.trim();
   if(!data || !descricao || !valor){ alert('Preencha pelo menos data, descrição e valor.'); return; }
-  const classificacao = osId ? null : (document.querySelector('input[name="eci-classif"]:checked')?.value || 'pendente');
+  const classificacao = osId ? null : (document.getElementById('eci-indireta')?.checked ? 'indireta' : 'pendente');
   // Mês/ano da FATURA não muda aqui — só a data da compra em si (que é só
   // referência). Editar a descrição não deve "mudar de fatura" o item.
   const ok = await sbUpdate('cartao_itens', {
