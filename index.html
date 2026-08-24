@@ -4589,6 +4589,7 @@ async function confirmarRecebido(id){
       data_movimento:data, cliente, tipo:'RECEITA', categoria,
       valor:agora, mes:parseInt(data.slice(5,7)), ano:parseInt(data.slice(0,4)),
       conta_receber_id:id, cnpj:r.cnpj||'', os_id: osVinc?osVinc.numero_os:null,
+      classificacao: osVinc ? null : 'pendente',
       forma_conta: document.getElementById('rec-forma-conta')?.value || 'conta',
       observacao: quitou?'':'Recebimento parcial'
     });
@@ -4690,8 +4691,13 @@ function modalNovaCobranca(osIdPre){
       </select>
     </div>
     <div class="form-group span2" id="cr-prev-wrap" style="display:none">
-      <label>Prévia das parcelas <span class="text-xs text-muted">(intervalo de 30 dias entre elas)</span></label>
-      <div id="cr-preview" style="background:var(--cinza-bg);border-radius:8px;padding:10px;font-size:12px;max-height:160px;overflow-y:auto"></div>
+      <label class="flex flex-between flex-center">Parcelas <button type="button" class="btn btn-sm btn-outline" style="padding:2px 8px" onclick="previewParcelas()">${icon('back',12)} Recalcular igual</button></label>
+      <div class="text-xs text-muted" style="margin:-2px 0 6px">Ajuste data e valor de cada parcela se o combinado for diferente da divisão automática.</div>
+      <div class="table-wrap" style="max-height:220px;overflow-y:auto">
+        <table><thead><tr><th style="width:50px">#</th><th>Vencimento</th><th class="td-num">Valor</th></tr></thead>
+        <tbody id="cr-preview-body"></tbody></table>
+      </div>
+      <div id="cr-preview-total" style="margin-top:6px;font-size:12.5px"></div>
     </div>
     <div class="form-group span2"><label>Observação</label><textarea id="cr-obs" rows="2"></textarea></div>
   </div>`,
@@ -4733,16 +4739,31 @@ function previewParcelas(){
   const val=parseFloat(document.getElementById('cr-val')?.value)||0;
   const venc=document.getElementById('cr-venc')?.value||hoje();
   const wrap=document.getElementById('cr-prev-wrap');
-  const prev=document.getElementById('cr-preview');
-  if(!wrap||!prev) return;
+  const body=document.getElementById('cr-preview-body');
+  if(!wrap||!body) return;
   if(n<=1||val<=0){ wrap.style.display='none'; return; }
   wrap.style.display='';
+  // Recalcula do zero (divisão igual) — usado tanto na digitação inicial
+  // quanto no botão "Recalcular igual", que descarta ajustes manuais.
   const parcelas=_calcularParcelas(val, venc, n);
-  prev.innerHTML=parcelas.map(p=>
-    `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--cinza-borda)">
-      <span><b>${p.num}/${p.total}</b> — vence ${fmtData(p.vencimento)}</span>
-      <span style="font-weight:600">${fmtBRL(p.valor)}</span>
-    </div>`).join('');
+  body.innerHTML=parcelas.map(p=>`<tr>
+    <td class="text-xs" style="white-space:nowrap">${p.num}/${p.total}</td>
+    <td><input type="date" class="cr-parc-venc" value="${p.vencimento}" oninput="_atualizarTotalParcelas()" style="font-size:12.5px;padding:5px 6px;width:100%"></td>
+    <td><input type="number" class="cr-parc-valor" value="${p.valor.toFixed(2)}" step="0.01" oninput="_atualizarTotalParcelas()" style="font-size:12.5px;padding:5px 6px;width:100%;text-align:right"></td>
+  </tr>`).join('');
+  _atualizarTotalParcelas();
+}
+// Soma as parcelas (já editadas ou não) e compara com o valor total
+// declarado, avisando na hora se não bater.
+function _atualizarTotalParcelas(){
+  const total=parseFloat(document.getElementById('cr-val')?.value)||0;
+  const box=document.getElementById('cr-preview-total');
+  if(!box) return;
+  const soma=[...document.querySelectorAll('.cr-parc-valor')].reduce((a,i)=>a+(parseFloat(i.value)||0),0);
+  const dif=Math.round((soma-total)*100)/100;
+  box.innerHTML = Math.abs(dif)<0.01
+    ? `<span class="verde">✓ Soma das parcelas bate com o total: ${fmtBRL(soma)}</span>`
+    : `<span class="vermelho">⚠️ Soma das parcelas (${fmtBRL(soma)}) ${dif>0?'passa':'fica abaixo'} do total (${fmtBRL(total)}) em ${fmtBRL(Math.abs(dif))}</span>`;
 }
 
 async function salvarCobranca(){
@@ -4762,8 +4783,25 @@ async function salvarCobranca(){
     return;
   }
 
-  // Parcelado: gera uma linha por parcela
-  const parcelas=_calcularParcelas(val, venc, nParcelas);
+  // Parcelado: lê data e valor de cada parcela DIRETO da prévia editável —
+  // o usuário pode ter ajustado manualmente, não recalcula do zero.
+  const vencInputs=[...document.querySelectorAll('.cr-parc-venc')];
+  const valorInputs=[...document.querySelectorAll('.cr-parc-valor')];
+  if(vencInputs.length!==nParcelas || valorInputs.length!==nParcelas){
+    alert('A prévia das parcelas não bate com o número escolhido — mude o número de parcelas de novo pra atualizar a tela.');
+    return;
+  }
+  const parcelas=[];
+  for(let i=0;i<nParcelas;i++){
+    const v=parseFloat(valorInputs[i].value)||0;
+    const dt=vencInputs[i].value;
+    if(!dt||v<=0){ alert(`A parcela ${i+1}/${nParcelas} está com data ou valor inválido.`); return; }
+    parcelas.push({num:i+1, total:nParcelas, valor:v, vencimento:dt});
+  }
+  const soma=parcelas.reduce((a,p)=>a+p.valor,0);
+  if(Math.abs(soma-val)>0.02){
+    if(!confirm(`A soma das parcelas (${fmtBRL(soma)}) é diferente do valor total informado (${fmtBRL(val)}). Salvar assim mesmo?`)) return;
+  }
   let erros=0;
   for(const p of parcelas){
     const obsParcela=`Parcela ${p.num}/${p.total}`+(obsBase?` — ${obsBase}`:'');
@@ -5485,14 +5523,19 @@ function auditar(){
   // (Removido: "OS sem recebimento" gerava ruído — OS com prazo vigente é normal.
   //  O que importa está no item 7: OS/contas que provavelmente já foram pagas.)
 
-  // 4) Receitas no fluxo SEM vínculo de OS (e que não quitam conta a receber)
+  // 4) Receitas no fluxo marcadas como PENDENTE (ainda não identificadas).
+  // Antes disso existir, esta checagem pegava QUALQUER receita sem OS — mas
+  // aí quem já tinha sido revisado e marcado como 'indireta' continuava
+  // aparecendo aqui pra sempre, como se nunca tivesse sido decidido. Agora
+  // usa o campo classificacao como fonte da verdade: só lista o que
+  // realmente ainda precisa de uma decisão.
   D.fluxo.forEach(f=>{
     if(f.tipo!=='RECEITA') return;
     if(f.conta_receber_id) return;
-    if(!f.os_id){
-      if(_foiIgnorado(_chaveAuditoria('flxSemOS',[f.id]))) return;
-      r.fluxoSemOS.push(f);
-    }
+    if(f.os_id) return;
+    if(f.classificacao!=='pendente') return;
+    if(_foiIgnorado(_chaveAuditoria('flxSemOS',[f.id]))) return;
+    r.fluxoSemOS.push(f);
   });
 
   // 5) Contas a receber sem vínculo de OS
