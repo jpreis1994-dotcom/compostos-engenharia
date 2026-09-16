@@ -8475,7 +8475,13 @@ function gerarPDFOrcamento(id){
     txt(`CNPJ: ${EMPRESA_CNPJ}`, ML, y); y+=4;
     txt(`Tel: ${EMPRESA_TEL}`, ML, y); y+=6;
     linha(ML, y, W-MR, y, AZUL, 0.8); y+=2;
-    const boxH=30;
+    // TIPO DE SERVIÇO pode não caber numa linha só — igual a descrição dos
+    // itens, splitTextToSize devolve um array e antes só a 1ª linha
+    // (tipoShort[0]) era desenhada, cortando o resto sem avisar. Agora a
+    // caixa cresce (boxH) conforme o número de linhas necessárias.
+    setFont('normal',8,BRANCO); // precisa setar a fonte antes de medir, senão splitTextToSize usa a fonte errada
+    const tipoLinhas=doc.splitTextToSize(`TIPO DE SERVIÇO: ${orc.tipo_servico||''}`, CW-36);
+    const boxH=Math.max(30, 25 + tipoLinhas.length*4 + 3);
     doc.setFillColor(...AZUL);doc.rect(ML,y,CW,boxH,'F');
     try{doc.addImage('data:image/png;base64,'+LOGO_B64,'PNG', ML+2, y+2, 28, 26);}catch(e){}
     const tx=ML+34;
@@ -8486,8 +8492,7 @@ function gerarPDFOrcamento(id){
     txt(`CLIENTE: ${(orc.cli_razao||'').toUpperCase()}`, tx, y+13);
     txt(`CID.: ${orc.cli_municipio||''}  -  ${orc.cli_uf||''}`, W-MR-2, y+13,{align:'right'});
     txt(`CNPJ: ${orc.cli_cnpj||'—'}`, tx, y+19);
-    const tipoShort=doc.splitTextToSize(`TIPO DE SERVIÇO: ${orc.tipo_servico||''}`, CW-36);
-    txt(tipoShort[0]||'', tx, y+25);
+    tipoLinhas.forEach((ln,i)=>txt(ln, tx, y+25+i*4));
     txt(`Página ${pag} de ${total}`, W-MR-2, y+25,{align:'right'});
     doc.setTextColor(0,0,0);
     y+=boxH+6;
