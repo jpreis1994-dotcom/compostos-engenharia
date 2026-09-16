@@ -2308,7 +2308,7 @@ function addItemOrc(desc='', qtd=1, vunit=0, descPct=0){
   const div=document.getElementById('itens-orc');
   const idx=_orcIdx++;
   div.insertAdjacentHTML('beforeend',`<div class="item-row" id="irow-${idx}">
-    <input type="text" id="item-desc-${idx}" placeholder="Descrição do serviço" value="${esc(desc)}">
+    <textarea id="item-desc-${idx}" placeholder="Descrição do serviço" rows="2" style="resize:vertical;font-family:inherit;font-size:inherit">${esc(desc)}</textarea>
     <input type="number" id="item-qty-${idx}" value="${qtd}" min="0.5" step="0.5" oninput="calcTotalOrc()" style="width:100%">
     <input type="number" id="item-vunit-${idx}" value="${vunit}" min="0" step="0.01" oninput="calcTotalOrc()" style="width:100%">
     <input type="number" id="item-desc-pct-${idx}" value="${descPct}" min="0" max="100" oninput="calcTotalOrc()" style="width:100%">
@@ -8553,24 +8553,38 @@ function gerarPDFOrcamento(id){
   txt('Valor total',          ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
   y+=8;
 
-  // Desenha uma linha de item
+  // Desenha uma linha de item. A descrição pode vir em várias linhas —
+  // tanto por quebra manual (o usuário digitou Enter no campo) quanto por
+  // quebra automática (texto longo demais pra largura da coluna). Antes,
+  // só a primeira linha era desenhada (doc.splitTextToSize devolve um
+  // array, mas só descShort[0] era usado) — o resto sumia silenciosamente
+  // e a linha da tabela tinha sempre 9mm de altura fixa, mesmo quando o
+  // texto não cabia.
+  const LINHA_ALT=4; // altura de cada linha de texto, em mm
   const desenharLinha=(item,idx)=>{
     const q=Number(item.quantidade||item.qtd||1);
     const v=Number(item.valor_unit||item.valor_unitario||0);
     const d=Number(item.desconto||0);
     const tot=q*v*(1-d/100);
-    const bg=idx%2===0?CINZA_BG:BRANCO;
-    doc.setFillColor(...bg);doc.rect(ML,y,CW,9,'F');
-    doc.setDrawColor(220,220,220);doc.setLineWidth(0.2);
-    doc.line(ML,y,ML,y+9);doc.line(ML+CW,y,ML+CW,y+9);doc.line(ML,y+9,ML+CW,y+9);
-    [cw1,cw1+cw2,cw1+cw2+cw3].forEach(cx=>doc.line(ML+cx,y,ML+cx,y+9));
     setFont('bold',8.5,PRETO);
-    const descShort=doc.splitTextToSize(item.descricao||item.nome||'—',cw1-4);
-    txt(descShort[0], ML+cw1/2,        y+5.5,{align:'center'});
-    txt(String(q),    ML+cw1+cw2/2,    y+5.5,{align:'center'});
-    txt(fmtBRL(v),    ML+cw1+cw2+cw3/2,y+5.5,{align:'center'});
-    txt(fmtBRL(tot),  ML+cw1+cw2+cw3+cw4/2,y+5.5,{align:'center'});
-    y+=9;
+    const descLinhas=doc.splitTextToSize(item.descricao||item.nome||'—',cw1-4);
+    const rowH=Math.max(9, descLinhas.length*LINHA_ALT+3);
+    checkPag(rowH);
+    const bg=idx%2===0?CINZA_BG:BRANCO;
+    doc.setFillColor(...bg);doc.rect(ML,y,CW,rowH,'F');
+    doc.setDrawColor(220,220,220);doc.setLineWidth(0.2);
+    doc.line(ML,y,ML,y+rowH);doc.line(ML+CW,y,ML+CW,y+rowH);doc.line(ML,y+rowH,ML+CW,y+rowH);
+    [cw1,cw1+cw2,cw1+cw2+cw3].forEach(cx=>doc.line(ML+cx,y,ML+cx,y+rowH));
+    // Bloco de descrição centralizado verticalmente na linha (reduz pro
+    // mesmo resultado de antes quando é 1 linha só e rowH=9)
+    const blocoAlt=descLinhas.length*LINHA_ALT;
+    const descY0=y+rowH/2-blocoAlt/2+LINHA_ALT/2+1;
+    descLinhas.forEach((ln,i)=>txt(ln, ML+cw1/2, descY0+i*LINHA_ALT,{align:'center'}));
+    const midY=y+rowH/2+1;
+    txt(String(q),    ML+cw1+cw2/2,    midY,{align:'center'});
+    txt(fmtBRL(v),    ML+cw1+cw2+cw3/2,midY,{align:'center'});
+    txt(fmtBRL(tot),  ML+cw1+cw2+cw3+cw4/2,midY,{align:'center'});
+    y+=rowH;
     return tot;
   };
   // Desenha um subtítulo de grupo (SERVIÇOS / PEÇAS UTILIZADAS)
