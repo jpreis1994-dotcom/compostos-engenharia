@@ -705,7 +705,10 @@ function _logoSrc(){
 
 function fmtBRL(v){ return 'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtData(d){ if(!d) return '—'; const p=d.split('T')[0].split('-'); return `${p[2]}/${p[1]}/${p[0]}`; }
-function hoje(){ return new Date().toISOString().slice(0,10); }
+// Data no fuso LOCAL (Brasília), formato 'YYYY-MM-DD'.
+// Não usar toISOString() para isso: ele usa UTC e, depois das 21h, já retorna o dia seguinte.
+function dataLocal(d){ d=d||new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function hoje(){ return dataLocal(new Date()); }
 function fmtNum(v){ const f=parseFloat(v); return f===Math.floor(f)?f.toFixed(0):f.toFixed(2); }
 // Escapa texto para inserção segura em HTML (previne XSS armazenado)
 function esc(v){ return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
@@ -775,15 +778,42 @@ function checkAlertas(){
 // ══════════════════════════════════════════════════════════════
 // CARREGAMENTO DE DADOS DO SUPABASE
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+// LEITURA COMPLETA DE UMA TABELA (paginada)
+// O Supabase devolve no máximo 1.000 linhas por consulta e corta o resto
+// sem avisar. Esta função busca em páginas de 1.000 até trazer tudo.
+// Ordena também por id para a paginação não pular nem repetir linhas.
+// Se der erro em qualquer página, devolve o erro (e nada de dado parcial),
+// para a tela manter os dados anteriores em vez de mostrar números incompletos.
+// ══════════════════════════════════════════════════════════════
+async function sbSelectTudo(tabela, ordem){
+  const PAG = 1000;
+  let todos = [], usarId = true;
+  for(let de = 0; ; de += PAG){
+    let q = sb.from(tabela).select('*');
+    if(ordem) q = q.order(ordem[0], {ascending: ordem[1]});
+    if(usarId && (!ordem || ordem[0] !== 'id')) q = q.order('id', {ascending: true});
+    const res = await q.range(de, de + PAG - 1);
+    if(res.error){
+      // Tabela sem coluna "id": refaz a mesma página sem esse desempate
+      if(usarId && /\bid\b/.test(res.error.message || '')){ usarId = false; de -= PAG; continue; }
+      return { data: null, error: res.error };
+    }
+    const lote = res.data || [];
+    todos = todos.concat(lote);
+    if(lote.length < PAG) return { data: todos, error: null };
+  }
+}
+
 async function carregarTudo(){
   const [resOS, resFluxo, resRec, resOrc, resTipos, resFuncs, resCfg] = await Promise.all([
-    sb.from('ordens_servico').select('*').order('numero_os',{ascending:false}),
-    sb.from('fluxo_caixa').select('*').order('data_movimento',{ascending:false}),
-    sb.from('contas_receber').select('*').order('vencimento',{ascending:true}),
-    sb.from('orcamentos').select('*').order('id',{ascending:false}),
-    sb.from('tipos_servico').select('*').order('nome',{ascending:true}),
-    sb.from('funcionarios_os').select('*').order('data',{ascending:false}),
-    sb.from('configuracoes').select('*'),
+    sbSelectTudo('ordens_servico',['numero_os',false]),
+    sbSelectTudo('fluxo_caixa',['data_movimento',false]),
+    sbSelectTudo('contas_receber',['vencimento',true]),
+    sbSelectTudo('orcamentos',['id',false]),
+    sbSelectTudo('tipos_servico',['nome',true]),
+    sbSelectTudo('funcionarios_os',['data',false]),
+    sbSelectTudo('configuracoes'),
   ]);
   if(!resOS.error)    D.os            = resOS.data||[];
   if(!resFluxo.error) D.fluxo         = resFluxo.data||[];
@@ -795,33 +825,33 @@ async function carregarTudo(){
 
   // Carrega contas_pagar separado (tabela pode não existir ainda)
   try {
-    const resPag = await sb.from('contas_pagar').select('*').order('data_vencimento',{ascending:true});
+    const resPag = await sbSelectTudo('contas_pagar',['data_vencimento',true]);
     if(!resPag.error) D.pagar = resPag.data||[];
     else D.pagar = [];
   } catch(e) { D.pagar = []; }
 
   // Carrega clientes (tabela pode não existir ainda)
   try {
-    const resCli = await sb.from('clientes').select('*').order('razao_social',{ascending:true});
+    const resCli = await sbSelectTudo('clientes',['razao_social',true]);
     if(!resCli.error) D.clientes = resCli.data||[];
     else D.clientes = [];
   } catch(e) { D.clientes = []; }
 
   // Carrega estoque e movimentos (tabelas podem não existir ainda)
   try {
-    const resEst = await sb.from('estoque').select('*').order('nome',{ascending:true});
+    const resEst = await sbSelectTudo('estoque',['nome',true]);
     if(!resEst.error) D.estoque = resEst.data||[];
     else D.estoque = [];
   } catch(e) { D.estoque = []; }
   try {
-    const resMov = await sb.from('estoque_movimentos').select('*').order('data',{ascending:false});
+    const resMov = await sbSelectTudo('estoque_movimentos',['data',false]);
     if(!resMov.error) D.estoque_mov = resMov.data||[];
     else D.estoque_mov = [];
   } catch(e) { D.estoque_mov = []; }
 
   // Carrega marcações de auditoria "OK/ignorado" (tabela pode não existir ainda)
   try {
-    const resAud = await sb.from('auditoria_ignorados').select('*');
+    const resAud = await sbSelectTudo('auditoria_ignorados');
     if(!resAud.error) D.auditoria_ok = resAud.data||[];
     else D.auditoria_ok = [];
   } catch(e) { D.auditoria_ok = []; }
@@ -829,42 +859,42 @@ async function carregarTudo(){
   // Carrega itens de cartão de crédito (tabela pode não existir ainda —
   // só existe depois de rodar o SQL de criação da tabela cartao_itens)
   try {
-    const resCartao = await sb.from('cartao_itens').select('*').order('data',{ascending:false});
+    const resCartao = await sbSelectTudo('cartao_itens',['data',false]);
     if(!resCartao.error) D.cartao_itens = resCartao.data||[];
     else D.cartao_itens = [];
   } catch(e) { D.cartao_itens = []; }
 
   // Carrega tipos de despesa customizados (tabela pode não existir ainda)
   try {
-    const resTD = await sb.from('tipos_despesa').select('*');
+    const resTD = await sbSelectTudo('tipos_despesa');
     if(!resTD.error) D.tipos_despesa = resTD.data||[];
     else D.tipos_despesa = [];
   } catch(e) { D.tipos_despesa = []; }
 
   // Carrega grupos de unificação de clientes (tabela pode não existir ainda)
   try {
-    const resGrp = await sb.from('clientes_grupos').select('*');
+    const resGrp = await sbSelectTudo('clientes_grupos');
     if(!resGrp.error) D.cli_grupos = resGrp.data||[];
     else D.cli_grupos = [];
   } catch(e) { D.cli_grupos = []; }
 
   // Carrega sugestões dispensadas ("não unificar")
   try {
-    const resDisp = await sb.from('clientes_dispensados').select('*');
+    const resDisp = await sbSelectTudo('clientes_dispensados');
     if(!resDisp.error) D.cli_dispensados = resDisp.data||[];
     else D.cli_dispensados = [];
   } catch(e) { D.cli_dispensados = []; }
 
   // Carrega clientes ocultos da lista (excluídos)
   try {
-    const resOc = await sb.from('clientes_ocultos').select('*');
+    const resOc = await sbSelectTudo('clientes_ocultos');
     if(!resOc.error) D.cli_ocultos = resOc.data||[];
     else D.cli_ocultos = [];
   } catch(e) { D.cli_ocultos = []; }
 
   // Carrega laudos emitidos (controle de vencimentos avulso)
   try {
-    const resLau = await sb.from('laudos_emitidos').select('*').order('vencimento',{ascending:true});
+    const resLau = await sbSelectTudo('laudos_emitidos',['vencimento',true]);
     if(!resLau.error) D.laudos_emitidos = resLau.data||[];
     else D.laudos_emitidos = [];
   } catch(e) { D.laudos_emitidos = []; }
@@ -1012,10 +1042,15 @@ function _colunaInexistente(msg){
   if(m) return m[1];
   return null;
 }
-async function sbDelete(tabela, coluna, valor){
+// silencioso=true: não mostra alerta (para quem já trata a falha com mensagem própria)
+async function sbDelete(tabela, coluna, valor, silencioso){
   if(typeof exigeOnline==='function' && !exigeOnline()) return false;
   const {error} = await sb.from(tabela).delete().eq(coluna, valor);
-  if(error){ console.error(tabela, error); return false; }
+  if(error){
+    console.error(tabela, error);
+    if(!silencioso) alert('Erro ao excluir: '+error.message+'\n\nNada foi alterado. Verifique a conexão e tente de novo.');
+    return false;
+  }
   return true;
 }
 
@@ -1575,7 +1610,7 @@ function render_dashboard(){
   const atraso   = receberF.filter(x=>x.status==='EM ATRASO').reduce((a,b)=>a+Number(b.valor),0);
   const aPagar   = pagarF.filter(x=>x.status==='EM ABERTO').reduce((a,b)=>a+Number(b.valor),0);
   const limite30 = new Date(); limite30.setDate(limite30.getDate()+30);
-  const lim30str = limite30.toISOString().slice(0,10);
+  const lim30str = dataLocal(limite30);
   const prev30   = D.receber.filter(r=>r.status==='A VENCER'&&(r.vencimento||'')<=lim30str).reduce((a,b)=>a+Number(b.valor),0);
   const osExec   = D.os.filter(o=>o.status==='EM EXECUÇÃO');
 
@@ -2008,7 +2043,7 @@ async function aprovarOrc(id){
     nav('os');
   }
 }
-async function deletarOrc(id){if(!confirm('Excluir?'))return;await sbDelete('orcamentos','id',id);nav('orcamentos');}
+async function deletarOrc(id){if(!confirm('Excluir?'))return;if(!await sbDelete('orcamentos','id',id))return;nav('orcamentos');}
 
 // Voltar orçamento aprovado para pendente — COM TRAVA se a OS já tem movimentação
 async function voltarEtapaOrc(id){
@@ -2039,7 +2074,7 @@ async function voltarEtapaOrc(id){
   // Se há OS sem movimentação, exclui a OS
   if(numOS){
     const os=D.os.find(o=>o.numero_os==numOS || o.id==numOS);
-    if(os) await sbDelete('ordens_servico','id',os.id);
+    if(os && !await sbDelete('ordens_servico','id',os.id)) return;
   }
   await sbUpdate('orcamentos',{status:'PENDENTE',os_id:null},'id',id);
   nav('orcamentos');
@@ -2976,7 +3011,7 @@ async function deletarOS(id){
     msg+=`\n\n⚠️ Esta OS tem ${partes.join(', ')} vinculados. Esses registros NÃO serão apagados, mas ficarão sem vínculo de OS (vão aparecer na Auditoria). Considere reorganizá-los antes.\n\nDeseja excluir mesmo assim?`;
   }
   if(!confirm(msg))return;
-  await sbDelete('ordens_servico','id',id);
+  if(!await sbDelete('ordens_servico','id',id)) return;
   nav('os');
 }
 
@@ -3266,12 +3301,15 @@ function verResultadoOS(osId, periodoRateio){
 async function estornarMaterialOS(movId, osId){
   const mv=D.estoque_mov.find(m=>m.id===movId); if(!mv) return;
   if(!confirm('Estornar este material? A quantidade volta para o estoque.')) return;
+  // Apaga o movimento primeiro; só devolve ao estoque se a exclusão deu certo
+  // (senão a quantidade voltaria e o movimento continuaria lá — contagem dupla)
+  if(!await sbDelete('estoque_movimentos','id',movId)) return;
   const item=D.estoque.find(e=>e.id===mv.estoque_id);
   if(item){
     const novaQtd=Number(item.quantidade_atual||0)+Number(mv.quantidade||0);
-    await sb.from('estoque').update({quantidade_atual:novaQtd}).eq('id',item.id);
+    const {error:errEst}=await sb.from('estoque').update({quantidade_atual:novaQtd}).eq('id',item.id);
+    if(errEst) alert('O movimento foi estornado, mas não consegui atualizar a quantidade de "'+(item.nome||'item')+'" no estoque. Ajuste manualmente: deveria ficar '+novaQtd+'.');
   }
-  await sbDelete('estoque_movimentos','id',movId);
   await carregarTudo();
   verResultadoOS(osId);
 }
@@ -4231,7 +4269,7 @@ function preencherDePagar(){
 async function deletarFluxo(id){
   const f=D.fluxo.find(x=>x.id===id)||{};
   if(!confirm('Excluir este lançamento?'))return;
-  await sbDelete('fluxo_caixa','id',id);
+  if(!await sbDelete('fluxo_caixa','id',id)) return;
   if(f.conta_receber_id && confirm('Este lançamento dava baixa numa Conta a Receber. Descontar este valor do que foi recebido nessa conta?')) await _aplicarRecebimento(f.conta_receber_id, -Number(f.valor||0));
   if(f.conta_pagar_id && confirm('Este lançamento quitava uma Conta a Pagar. Voltar essa conta para "EM ABERTO"?')) await sbUpdate('contas_pagar',{status:'EM ABERTO'},'id',f.conta_pagar_id);
   nav('fluxo');
@@ -4596,7 +4634,7 @@ async function confirmarRecebido(id){
   }
   fecharModal();checkAlertas();nav('receber');
 }
-async function deletarReceber(id){if(!confirm('Excluir?'))return;await sbDelete('contas_receber','id',id);nav('receber');}
+async function deletarReceber(id){if(!confirm('Excluir?'))return;if(!await sbDelete('contas_receber','id',id))return;nav('receber');}
 
 function editarReceber(id){
   const r=D.receber.find(x=>x.id===id); if(!r)return;
@@ -4728,7 +4766,7 @@ function _calcularParcelas(valTotal, primeiroVenc, nParcelas){
     // Data: soma i meses (aprox 30 dias) ao primeiro vencimento
     const d=new Date(primeiroVenc+'T12:00:00');
     d.setMonth(d.getMonth()+i);
-    const venc=d.toISOString().slice(0,10);
+    const venc=dataLocal(d);
     parcelas.push({num:i+1, total:nParcelas, valor:v, vencimento:venc});
   }
   return parcelas;
@@ -5206,7 +5244,7 @@ async function confirmarPago(id){
   if(lancar) await sbInsert('fluxo_caixa',{data_movimento:data,cliente:forn,tipo:'DESPESA',categoria:'PAGAMENTO',valor:p.valor||0,mes:parseInt(data.slice(5,7)),ano:parseInt(data.slice(0,4)),conta_pagar_id:id});
   fecharModal();checkAlertas();nav('pagar');
 }
-async function deletarPagar(id){if(!confirm('Excluir?'))return;await sbDelete('contas_pagar','id',id);nav('pagar');}
+async function deletarPagar(id){if(!confirm('Excluir?'))return;if(!await sbDelete('contas_pagar','id',id))return;nav('pagar');}
 
 // ══════════════════════════════════════════════════════════════
 // AGENDA
@@ -5215,7 +5253,7 @@ function render_agenda(){ renderCalendario(new Date().getFullYear(), new Date().
 function renderCalendario(ano, mes){
   const primeiroDia=new Date(ano,mes,1).getDay();
   const diasMes=new Date(ano,mes+1,0).getDate();
-  const hojeStr=new Date().toISOString().slice(0,10);
+  const hojeStr=hoje();
   const mesStr=`${ano}-${String(mes+1).padStart(2,'0')}`;
   const eventos={};      // para o grid (HTML pronto por dia)
   const eventosData={};  // para a lista mobile (objetos por dia)
@@ -6070,7 +6108,7 @@ async function dividirLancamentoPorServico(fluxoId){
     });
     if(!okIns){ alert('Parou no meio — uma das linhas novas não foi criada. Confira o Fluxo de Caixa antes de tentar de novo (o lançamento original ainda está lá, não foi apagado).'); return; }
   }
-  const okDel = await sbDelete('fluxo_caixa','id',f.id);
+  const okDel = await sbDelete('fluxo_caixa','id',f.id,true);
   if(!okDel) alert('As linhas novas foram criadas, mas não consegui apagar o lançamento original #'+f.id+'. Apague ele manualmente no Fluxo de Caixa pra não ficar contando o valor duas vezes.');
   await carregarTudo();
   render_auditoria();
@@ -6111,7 +6149,7 @@ async function forcarDivisaoLancamento(fluxoId){
     });
     if(!okIns){ alert('Parou no meio — uma das linhas novas não foi criada. Confira o Fluxo de Caixa (o lançamento original ainda está lá).'); return; }
   }
-  const okDel = await sbDelete('fluxo_caixa','id',f.id);
+  const okDel = await sbDelete('fluxo_caixa','id',f.id,true);
   if(!okDel) alert('As linhas novas foram criadas, mas não consegui apagar o lançamento original #'+f.id+'. Apague ele manualmente pra não contar o valor duas vezes.');
   await carregarTudo();
   render_auditoria();
@@ -6144,7 +6182,7 @@ async function consolidarFragmentos(idsCSV){
   }
   let falhasDel=0;
   for(const r of rows){
-    const okDel = await sbDelete('fluxo_caixa','id',r.id);
+    const okDel = await sbDelete('fluxo_caixa','id',r.id,true);
     if(!okDel) falhasDel++;
   }
   if(falhasDel) alert('As linhas novas foram criadas, mas '+falhasDel+' das linhas antigas não foram apagadas. Apague elas manualmente no Fluxo de Caixa pra não contar o valor duas vezes.');
@@ -6175,7 +6213,7 @@ async function dividirTodosCatServico(){
       if(!okIns){ tudoOk=false; break; }
     }
     if(tudoOk){
-      const okDel = await sbDelete('fluxo_caixa','id',f.id);
+      const okDel = await sbDelete('fluxo_caixa','id',f.id,true);
       if(okDel) ok++; else falhas.push(f.id);
     } else {
       falhas.push(f.id);
@@ -8109,7 +8147,7 @@ function render_config(){
     ${alertaBox('info','Informe o <b>saldo inicial</b> de cada mês (o valor que estava na conta no 1º dia). O sistema usa isso para calcular o saldo final e te ajudar a conferir se ficou algo sem lançar.')}
     <div class="form-grid" style="margin-top:8px">
       <div class="form-group"><label>Mês/Ano de referência</label>
-        <input type="month" id="cfg-saldo-mes" value="${new Date().toISOString().slice(0,7)}">
+        <input type="month" id="cfg-saldo-mes" value="${hoje().slice(0,7)}">
       </div>
       <div class="form-group"><label>Saldo inicial do mês (R$)</label>
         <input type="number" id="cfg-saldo-valor" step="0.01" placeholder="0,00">
@@ -9934,8 +9972,8 @@ async function salvarEditItemEstoque(id){
 }
 async function deletarItemEstoque(id){
   if(!confirm('Excluir este item e todo o seu histórico de movimentos?')) return;
-  await sbDelete('estoque_movimentos','estoque_id',id);
-  await sbDelete('estoque','id',id);
+  if(!await sbDelete('estoque_movimentos','estoque_id',id)) return;
+  if(!await sbDelete('estoque','id',id)) return;
   fecharModal(); nav('estoque');
 }
 
