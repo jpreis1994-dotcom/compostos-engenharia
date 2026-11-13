@@ -589,7 +589,7 @@ function icon(nome, tam){
 
 
 // Cache local dos dados
-let D = { os:[], fluxo:[], receber:[], pagar:[], orcamentos:[], tipos_servico:[], tipos_despesa:[], cartao_itens:[], funcionarios_os:[], config:{}, clientes:[], estoque:[], estoque_mov:[], auditoria_ok:[], cli_grupos:[], cli_dispensados:[], cli_ocultos:[], laudos_emitidos:[] };
+let D = { receita_categorias:[], os:[], fluxo:[], receber:[], pagar:[], orcamentos:[], tipos_servico:[], tipos_despesa:[], cartao_itens:[], funcionarios_os:[], config:{}, clientes:[], estoque:[], estoque_mov:[], auditoria_ok:[], cli_grupos:[], cli_dispensados:[], cli_ocultos:[], laudos_emitidos:[] };
 
 // Categorias que afetam o SALDO mas NÃO são resultado operacional da empresa
 // (retiradas do dono e aportes de dinheiro pessoal)
@@ -614,29 +614,122 @@ const LOGO_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAaQAAADvCAIAAAAyxjd5AAEAAElEQVR42uz9WZ
 const MESES = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const MESES_A = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
-// ═══ Tipos de serviço (lista única, usada no formulário da OS e na divisão) ═══
-// Tipos de serviço que já vêm no sistema. Você pode cadastrar OUTROS em
-// Configurações → Tabela de Preços dos Serviços, e eles entram nesta lista
-// automaticamente (nas OS, na divisão por serviço e nas categorias do fluxo).
-const TIPOS_SERVICO_BASE = ['OBRA','ESTANQUEIDADE','INTEGRIDADE','NR 11','NR 12','NR 13',
-  'LIMPEZA DE TANQUE','TANQUE AEREO','RESPONSABILIDADE TECNICA','LAUDO DE CLASSE','OUTRO'];
+// ═══ Categorias e subcategorias de RECEITA (estrutura única do sistema) ═══
+// Cada receita (no fluxo e nos itens da OS) tem CATEGORIA e, quando houver,
+// SUBCATEGORIA. No banco ficam em colunas separadas (fluxo_caixa.categoria /
+// fluxo_caixa.subcategoria; ordens_servico.servicos_itens[].tipo / .sub).
+// Na tela e nas comparações internas o sistema usa um RÓTULO único
+// "CATEGORIA › Subcategoria" — assim todas as regras que já comparavam um
+// nome só (divisão, auditoria, relatórios) continuam funcionando.
+// A lista fica na tabela receita_categorias (editável em Configurações);
+// se a tabela não existir, vale a lista padrão abaixo.
+const SEP_CAT = ' › ';
+const ESTRUTURA_RECEITA_PADRAO = [
+  // [categoria, subcategoria, é serviço?]
+  ['OBRA','Obra de posto novo',1], ['OBRA','Obra de reforma / instalação',1], ['OBRA','Outras obras',1],
+  ['INSTALAÇÃO','Bomba',1], ['INSTALAÇÃO','Filtro',1], ['INSTALAÇÃO','Tanque',1], ['INSTALAÇÃO','Aparelho de medição',1],
+  ['LAUDO','NR 11 – Movimentação e armazenagem',1], ['LAUDO','NR 12 – Máquinas e equipamentos',1],
+  ['LAUDO','NR 13 – Caldeiras, vasos de pressão e compressores',1], ['LAUDO','NR 35 – Trabalho em altura (linha de vida)',1],
+  ['LAUDO','Tanque aéreo',1], ['LAUDO','Integridade de tanque',1], ['LAUDO','VOC / passivo ambiental',1], ['LAUDO','Hidrogeológico',1],
+  ['LAUDO','Atestado de classe / conformidade',1], ['LAUDO','Arqueação de tanque',1], ['LAUDO','Acústico',1], ['LAUDO','Perícia',1], ['LAUDO','Outros laudos',1],
+  ['TESTE DE ESTANQUEIDADE','Posto de combustível',1], ['TESTE DE ESTANQUEIDADE','Outras empresas / rede de gás',1],
+  ['MANUTENÇÃO','Manutenção de equipamento',1], ['MANUTENÇÃO','Manutenção aparelho de medição',1],
+  ['LIMPEZA DE TANQUE','',1],
+  ['VENDA DE PEÇAS','Peças soldáveis',1], ['VENDA DE PEÇAS','Tanques',1], ['VENDA DE PEÇAS','Outras peças e materiais',1],
+  ['PROJETO','Cobertura metálica',1], ['PROJETO','Posto de combustível',1],
+  ['RESPONSABILIDADE TÉCNICA','Mensal',1], ['RESPONSABILIDADE TÉCNICA','Avulsa',1],
+  ['REEMBOLSO DE ART','',1],
+  ['COMISSÃO','',0],
+  ['RECEITA FINANCEIRA','Juros e multas recebidos',0],
+];
+function _rotuloCat(cat, sub){
+  cat=String(cat||'').trim(); sub=String(sub||'').trim();
+  return sub ? cat+SEP_CAT+sub : cat;
+}
+// "LAUDO › NR 11 – ..." → {categoria:'LAUDO', subcategoria:'NR 11 – ...'}
+function _partesCat(rotulo){
+  const s=String(rotulo||'').trim();
+  const i=s.indexOf('›');
+  if(i<0) return {categoria:s, subcategoria:null};
+  return {categoria:s.slice(0,i).trim(), subcategoria:s.slice(i+1).trim()||null};
+}
+function _catPrincipal(rotulo){ return _partesCat(rotulo).categoria; }
+// Estrutura vigente: tabela do banco (se tiver linhas) ou a padrão
+function estruturaReceita(){
+  const doBanco=(D.receita_categorias||[]).filter(x=>x && x.categoria && x.ativo!==false);
+  if(doBanco.length){
+    return doBanco.slice().sort((a,b)=>(a.ordem||0)-(b.ordem||0))
+      .map(x=>({categoria:x.categoria, sub:x.subcategoria||'', servico:x.servico!==false, id:x.id}));
+  }
+  return ESTRUTURA_RECEITA_PADRAO.map(([c,s,sv])=>({categoria:c, sub:s, servico:!!sv}));
+}
+// Tipos de serviço (formulário da OS, divisão por serviço, orçamentos → OS)
 function tiposServico(){
-  const lista = TIPOS_SERVICO_BASE.filter(t=>t!=='OUTRO');
-  (D.tipos_servico||[]).forEach(t=>{
-    const nome = String(t.nome||'').trim().toUpperCase();
-    if(nome && !lista.some(x=>_nomeNorm(x)===_nomeNorm(nome))) lista.push(nome);
+  const lista=[];
+  estruturaReceita().filter(e=>e.servico).forEach(e=>{
+    const r=_rotuloCat(e.categoria,e.sub);
+    if(!lista.some(x=>_nomeNorm(x)===_nomeNorm(r))) lista.push(r);
   });
   return [...lista, 'OUTRO'];   // "OUTRO" sempre por último
 }
-
-// Categorias de RECEITA do fluxo de caixa. Começa com os mesmos tipos de
-// serviço (para a categoria bater com o serviço da OS ao vincular) e depois
-// as categorias financeiras que não são serviço.
+// Categorias de RECEITA do fluxo: todos os serviços + as financeiras.
+// RECEBIMENTO continua existindo: é o marcador de "recebimento de OS com mais
+// de um serviço, ainda a dividir" usado pela Auditoria.
 function categoriasReceita(){
-  return [
-    ...tiposServico().filter(t=>t!=='OUTRO'),
-    'RECEBIMENTO','COMISSÃO','VENDA DE PEÇAS','APORTE (PRÓPRIO)','OUTRO'
-  ];
+  const lista=tiposServico().filter(t=>t!=='OUTRO');
+  estruturaReceita().filter(e=>!e.servico).forEach(e=>{
+    const r=_rotuloCat(e.categoria,e.sub);
+    if(!lista.some(x=>_nomeNorm(x)===_nomeNorm(r))) lista.push(r);
+  });
+  return [...lista, 'RECEBIMENTO','APORTE (PRÓPRIO)','OUTRO'];
+}
+// <option>s de categoria agrupados por categoria principal (<optgroup>).
+// Mantém o valor atual como opção, mesmo se não estiver mais na lista.
+function _opcoesCat(lista, selecionado){
+  const sel=String(selecionado||'');
+  const temSel=!sel || lista.some(x=>_nomeNorm(x)===_nomeNorm(sel));
+  const itens=temSel?lista:[sel,...lista];
+  const grupos=[]; const idx={};
+  itens.forEach(r=>{
+    const p=_partesCat(r);
+    const g=p.subcategoria?p.categoria:'';
+    if(!(g in idx)){ idx[g]=grupos.length; grupos.push({g, itens:[]}); }
+    grupos[idx[g]].itens.push({r, txt:r});   // texto completo: com o select fechado fica claro (ex.: INSTALAÇÃO › Filtro)
+  });
+  const opt=x=>`<option value="${esc(x.r)}"${sel && _nomeNorm(x.r)===_nomeNorm(sel)?' selected':''}>${esc(x.txt)}</option>`;
+  return grupos.map(G=>G.g?`<optgroup label="${esc(G.g)}">${G.itens.map(opt).join('')}</optgroup>`:G.itens.map(opt).join('')).join('');
+}
+// Antes de gravar: separa o rótulo em categoria + subcategoria (fluxo) e
+// em tipo + sub (itens da OS). Chamado por sbInsert/sbUpdate e pelos
+// inserts diretos. Não mexe em despesas sem "›" além de limpar a subcategoria.
+function _normalizaCategoriaPayload(tabela, payload){
+  if(!payload || typeof payload!=='object') return payload;
+  if(tabela==='fluxo_caixa' && Object.prototype.hasOwnProperty.call(payload,'categoria')){
+    const p=_partesCat(payload.categoria);
+    payload.categoria=p.categoria;
+    payload.subcategoria=p.subcategoria;
+  }
+  if(tabela==='ordens_servico' && Object.prototype.hasOwnProperty.call(payload,'servicos_itens') && payload.servicos_itens!=null){
+    const eraTexto=typeof payload.servicos_itens==='string';
+    const itens=_lerServicosItens(payload.servicos_itens).map(i=>{
+      const p=_partesCat(i.tipo);
+      const n={...i, tipo:p.categoria};
+      if(p.subcategoria) n.sub=p.subcategoria; else delete n.sub;
+      return n;
+    });
+    payload.servicos_itens=eraTexto?JSON.stringify(itens):itens;
+  }
+  return payload;
+}
+// Depois de ler do banco: junta categoria + subcategoria no rótulo único
+function _aplicaRotulosCarregados(){
+  (D.fluxo||[]).forEach(f=>{
+    if(f.subcategoria && !String(f.categoria||'').includes('›')) f.categoria=_rotuloCat(f.categoria,f.subcategoria);
+  });
+  (D.os||[]).forEach(o=>{
+    const itens=_lerServicosItens(o.servicos_itens);
+    if(itens.some(i=>i && i.sub)) o.servicos_itens=itens.map(i=>({...i, tipo:_rotuloCat(i.tipo,i.sub)}));
+  });
 }
 
 // Lê a divisão por tipo de serviço de uma OS. Aceita qualquer formato vindo do
@@ -776,6 +869,73 @@ function checkAlertas(){
 }
 
 // ══════════════════════════════════════════════════════════════
+// CATEGORIAS E SUBCATEGORIAS DE RECEITA — cadastro (Configurações)
+// ══════════════════════════════════════════════════════════════
+function _usosRotulo(rotulo){
+  const n=_nomeNorm(rotulo);
+  const fx=D.fluxo.filter(f=>f.tipo==='RECEITA' && _nomeNorm(f.categoria)===n).length;
+  const os=D.os.filter(o=>_servicosDaOS(o).some(i=>_nomeNorm(i.tipo)===n)).length;
+  return {fx, os};
+}
+function modalCategoriasReceita(){
+  const est=estruturaReceita();
+  const grupos={};
+  est.forEach(e=>{ (grupos[e.categoria]=grupos[e.categoria]||[]).push(e); });
+  const linhas=Object.entries(grupos).map(([cat,subs])=>`
+    <tr><td colspan="4" style="background:var(--cinza-bg)"><b>${esc(cat)}</b></td></tr>
+    ${subs.map(e=>{
+      const r=_rotuloCat(e.categoria,e.sub), u=_usosRotulo(r);
+      return `<tr><td class="text-xs" style="padding-left:18px">${esc(e.sub||'(sem subcategoria)')}${e.servico?'':' <span class="text-muted">· não é serviço</span>'}</td>
+        <td class="td-num text-xs">${u.fx||'—'}</td><td class="td-num text-xs">${u.os||'—'}</td>
+        <td>${(u.fx||u.os)?'':`<button class="btn btn-sm btn-danger btn-icon" title="Excluir" onclick="_excluirCategoriaReceita('${esc(r.replace(/'/g,"\\'"))}')">${icon('close',16)}</button>`}</td></tr>`;
+    }).join('')}`).join('');
+  const cats=Object.keys(grupos);
+  abrirModal('Categorias e subcategorias de receita', `
+    ${alertaBox('info','Estas são as opções de receita das OS, do fluxo de caixa e dos relatórios. Para trocar a categoria de lançamentos que já existem, use <b>Gerenciar tipos usados nas OS</b>. Só dá para excluir uma subcategoria que não está em uso.')}
+    <div class="form-grid" style="margin:10px 0">
+      <div class="form-group"><label>Categoria</label>
+        <input type="text" id="ncr-cat" list="ncr-cats" placeholder="Ex.: LAUDO"><datalist id="ncr-cats">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+      <div class="form-group"><label>Subcategoria</label><input type="text" id="ncr-sub" placeholder="Ex.: NR 10 – Instalações elétricas"></div>
+      <div class="form-group"><label><input type="checkbox" id="ncr-serv" checked> É um serviço (aparece nas OS)</label></div>
+      <div class="form-group"><button class="btn btn-primary btn-sm" onclick="_salvarCategoriaReceita()">${icon('plus',16)} Adicionar</button></div>
+    </div>
+    <div class="table-wrap" style="max-height:52vh;overflow-y:auto"><table>
+      <thead><tr><th>Subcategoria</th><th class="td-num">Lanç.</th><th class="td-num">OS</th><th></th></tr></thead>
+      <tbody>${linhas}</tbody></table></div>`,
+    `<button class="btn btn-outline" onclick="fecharModal()">Fechar</button>`, true);
+}
+// Na primeira alteração, grava a lista padrão no banco para ela passar a ser editável
+async function _garanteEstruturaNoBanco(){
+  if((D.receita_categorias||[]).length) return true;
+  const linhas=ESTRUTURA_RECEITA_PADRAO.map(([c,sb_,sv],k)=>({categoria:c, subcategoria:sb_||null, servico:!!sv, ordem:(k+1)*10}));
+  const {data,error}=await sb.from('receita_categorias').insert(linhas).select();
+  if(error){ alert('Não consegui gravar as categorias: '+error.message+'\n\nA tabela receita_categorias precisa existir no banco.'); return false; }
+  D.receita_categorias=data||[];
+  return true;
+}
+async function _salvarCategoriaReceita(){
+  const cat=(document.getElementById('ncr-cat').value||'').trim().toUpperCase();
+  const sub=(document.getElementById('ncr-sub').value||'').trim();
+  const serv=document.getElementById('ncr-serv').checked;
+  if(!cat){ alert('Informe a categoria.'); return; }
+  const r=_rotuloCat(cat,sub);
+  if(estruturaReceita().some(e=>_nomeNorm(_rotuloCat(e.categoria,e.sub))===_nomeNorm(r))){ alert('Essa categoria/subcategoria já existe.'); return; }
+  if(!await _garanteEstruturaNoBanco()) return;
+  const mesmaCat=D.receita_categorias.filter(x=>_nomeNorm(x.categoria)===_nomeNorm(cat));
+  const ordem=mesmaCat.length ? Math.max(...mesmaCat.map(x=>x.ordem||0))+1 : Math.max(0,...D.receita_categorias.map(x=>x.ordem||0))+10;
+  const ok=await sbInsert('receita_categorias',{categoria:cat, subcategoria:sub||null, servico:serv, ordem});
+  if(ok){ await carregarTudo(); modalCategoriasReceita(); }
+}
+async function _excluirCategoriaReceita(rotulo){
+  const u=_usosRotulo(rotulo);
+  if(u.fx||u.os){ alert('Essa subcategoria está em uso e não pode ser excluída.'); return; }
+  if(!confirm(`Excluir "${rotulo}" da lista?`)) return;
+  if(!await _garanteEstruturaNoBanco()) return;
+  const alvo=D.receita_categorias.find(x=>_nomeNorm(_rotuloCat(x.categoria,x.subcategoria))===_nomeNorm(rotulo));
+  if(alvo && await sbDelete('receita_categorias','id',alvo.id)){ await carregarTudo(); modalCategoriasReceita(); }
+}
+
+// ══════════════════════════════════════════════════════════════
 // CARREGAMENTO DE DADOS DO SUPABASE
 // ══════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════
@@ -899,6 +1059,13 @@ async function carregarTudo(){
     else D.laudos_emitidos = [];
   } catch(e) { D.laudos_emitidos = []; }
 
+  // Estrutura de categorias/subcategorias de receita (tabela pode não existir ainda)
+  try {
+    const resCat = await sbSelectTudo('receita_categorias',['ordem',true]);
+    D.receita_categorias = resCat.error ? [] : (resCat.data||[]);
+  } catch(e) { D.receita_categorias = []; }
+  _aplicaRotulosCarregados();
+
   await recalcularStatusVencimentos();
   checkAlertas();
   verificarAlertasLaudos();
@@ -988,7 +1155,7 @@ function _avisoColunaEssencial(tabela, coluna){
 
 async function sbInsert(tabela, dados){
   if(typeof exigeOnline==='function' && !exigeOnline()) return false;
-  let payload = {...dados};
+  let payload = _normalizaCategoriaPayload(tabela, {...dados});
   const essenciais = _COLUNAS_ESSENCIAIS[tabela] || [];
   // Tenta inserir; se o banco reclamar de uma coluna que não existe, remove e tenta de novo
   for(let tentativa=0; tentativa<8; tentativa++){
@@ -1011,7 +1178,7 @@ async function sbInsert(tabela, dados){
 }
 async function sbUpdate(tabela, dados, coluna, valor){
   if(typeof exigeOnline==='function' && !exigeOnline()) return false;
-  let payload = {...dados};
+  let payload = _normalizaCategoriaPayload(tabela, {...dados});
   const essenciais = _COLUNAS_ESSENCIAIS[tabela] || [];
   for(let tentativa=0; tentativa<8; tentativa++){
     const {error} = await sb.from(tabela).update(payload).eq(coluna, valor);
@@ -1281,7 +1448,7 @@ function renderOsAbertasParaPlanejamento(){
 // entre atualizações do filtro (mês/ano), pois fica fora da função de
 // render — só muda quando o usuário troca no seletor.
 // ══════════════════════════════════════════════════════════════
-let _dashViewMode = { despTipo:'linhas', despForn:'linhas', recServ:'linhas' };
+let _dashViewMode = { despTipo:'linhas', despForn:'linhas', recServ:'linhas', recCat:'linhas' };
 let _chartQueue = [];
 const _PALETA_CORES = ['#1A3C5E','#2A6DBF','#5B9BD5','#1A8F5A','#7FBF7F','#D64045','#E8899C','#E8A020','#B8860B','#7B8FA1'];
 function _mudarViewCard(key, modo){ _dashViewMode[key]=modo; render_dashboard(); }
@@ -1571,9 +1738,23 @@ function _cardReceitaPorTipoServico(fluxo){
   const nota = ranking.nSemVinculo
     ? `<p class="text-xs text-muted" style="margin-top:8px">🔸 ${ranking.nSemVinculo} lançamento(s) sem OS vinculada (${fmtBRL(ranking.semVinculo)}) não entram nesta tabela — não dá pra saber o tipo de serviço.</p>`
     : '';
-  return _tabelaReceitas('📈 Receita por Tipo de Serviço',
-    'De onde vem o faturamento, por tipo de serviço da OS vinculada (dividido proporcionalmente quando a OS tem mais de um serviço lançado).',
-    fluxo, ranking, 'Tipo de serviço', 'recServ', nota);
+  return _tabelaReceitas('📈 Receita por Categoria',
+    'De onde vem o faturamento, por categoria do serviço da OS vinculada (dividido proporcionalmente quando a OS tem mais de um serviço lançado).',
+    fluxo, _rankingPorCategoriaPrincipal(ranking), 'Categoria', 'recCat', nota)
+    + _tabelaReceitas('🔎 Receita por Subcategoria',
+    'O mesmo faturamento aberto por subcategoria (ex.: Laudo › NR 11, Obra › Reforma / instalação).',
+    fluxo, ranking, 'Categoria › Subcategoria', 'recServ', '');
+}
+// Junta as linhas "CATEGORIA › Sub" de um ranking na categoria principal
+function _rankingPorCategoriaPrincipal(ranking){
+  const acc={};
+  ranking.linhas.forEach(([nome,d])=>{
+    const k=_catPrincipal(nome)||'OUTRO';
+    if(!acc[k]) acc[k]={valor:0, n:0};
+    acc[k].valor+=d.valor; acc[k].n+=d.n;
+  });
+  const linhas=Object.entries(acc).sort((a,b)=>b[1].valor-a[1].valor);
+  return {linhas, total:ranking.total, semVinculo:ranking.semVinculo, nSemVinculo:ranking.nSemVinculo};
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2592,7 +2773,7 @@ let _laudoIdx = 0;
 let _servIdx = 0;
 function _servRowHTML(tipo, valor){
   const i = _servIdx++;
-  const opts = tiposServico().map(t=>`<option${_nomeNorm(t)===_nomeNorm(tipo)?' selected':''}>${esc(t)}</option>`).join('');
+  const opts = _opcoesCat(tiposServico(), tipo);
   return `<div class="item-row" id="serv-row-${i}" style="grid-template-columns:1fr 130px auto;margin-bottom:8px;align-items:end">
     <select id="serv-tipo-${i}" style="width:100%">${opts}</select>
     <input type="number" id="serv-valor-${i}" value="${Number(valor)||0}" step="0.01" style="width:100%" oninput="_totalServicosOS()">
@@ -2789,10 +2970,7 @@ function editarOS(id){
     <div class="form-group span2"><label>Status</label>
       <select id="edit-os-st">${['A EXECUTAR','EM EXECUÇÃO','FINALIZADO','EM CONVERSA'].map(s=>`<option ${o.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
     <div class="form-group span2"><label>Tipo de Serviço</label>
-      <select id="edit-os-serv">${tiposServico().map(s=>`<option ${_nomeNorm(o.servico)===_nomeNorm(s)?'selected':''}>${esc(s)}</option>`).join('')}${
-        // se a OS tem um tipo que não está na lista padrão, mantém como opção para não perder
-        (o.servico && !tiposServico().some(s=>_nomeNorm(s)===_nomeNorm(o.servico)))
-          ? `<option selected>${esc(o.servico)}</option>` : ''}</select>
+      <select id="edit-os-serv">${_opcoesCat(tiposServico(), o.servico)}</select>
       ${_osTemDivisao(o)?'<p class="text-xs text-muted" style="margin-top:4px">Esta OS tem divisão por tipo de serviço — ela é quem vale nos relatórios.</p>':''}</div>
     <div class="form-group"><label>Data de Execução</label><input type="date" id="edit-os-exec" value="${o.data_execucao||''}"></div>
     <div class="form-group"><label>Valor Total (R$)</label><input type="number" id="edit-os-val" value="${o.valor_total}" step="0.01"></div>
@@ -2871,7 +3049,7 @@ function abrirModalDivisaoOS(osId){
 }
 function _divLinhaHTML(tipo, valor){
   const i=_divIdx++;
-  const opts=tiposServico().map(t=>`<option${_nomeNorm(t)===_nomeNorm(tipo)?' selected':''}>${esc(t)}</option>`).join('');
+  const opts=_opcoesCat(tiposServico(), tipo);
   return `<div class="item-row" id="div-row-${i}" style="grid-template-columns:1fr 130px auto;margin-bottom:8px;align-items:end">
     <select id="div-tipo-${i}" style="width:100%">${opts}</select>
     <input type="number" id="div-valor-${i}" value="${Number(valor)||0}" step="0.01" style="width:100%" oninput="_divConferir()">
@@ -3821,7 +3999,7 @@ function modalNovoLancamento(){
     </div>
     <div class="form-group" id="fc-cat-wrap">
       <label class="flex flex-between flex-center">Categoria <button type="button" class="btn btn-sm btn-outline" style="padding:2px 8px" onclick="document.getElementById('fc-tipo').value==='DESPESA'?modalGerenciarTiposDespesa():modalGerenciarTipos()">${icon('edit',12)} Gerenciar</button></label>
-      <select id="fc-cat-rec">${categoriasReceita().map(c=>`<option>${esc(c)}</option>`).join('')}</select>
+      <select id="fc-cat-rec">${_opcoesCat(categoriasReceita(), '')}</select>
       <select id="fc-cat-desp" style="display:none" onchange="toggleEstoqueWrap()">${categoriasDespesa().map(c=>`<option>${esc(c)}</option>`).join('')}</select>
     </div>
     <div class="form-group span2">
@@ -3992,7 +4170,13 @@ async function salvarLancamento(){
   const materiais = darEntrada ? coletarMateriaisFC() : [];
 
   // Insere o lançamento e captura o ID gerado (para vincular aos movimentos)
+  _normalizaCategoriaPayload('fluxo_caixa', dadosFC);
   let {data:novoFC, error:errFC} = await sb.from('fluxo_caixa').insert([dadosFC]).select().single();
+  // Coluna subcategoria ainda não criada no banco: salva sem ela
+  if(errFC && /subcategoria/i.test(errFC.message||'')){
+    delete dadosFC.subcategoria;
+    ({data:novoFC, error:errFC} = await sb.from('fluxo_caixa').insert([dadosFC]).select().single());
+  }
   // Se a coluna classificacao ainda não existe no banco (SQL não rodado
   // ainda), tenta de novo sem ela — não pode deixar o lançamento inteiro
   // falhar por causa de um campo opcional.
@@ -4310,7 +4494,7 @@ function editarLancamento(id){
     <div class="form-group" id="efc-cat-wrap">
       <label class="flex flex-between flex-center">Categoria <button type="button" class="btn btn-sm btn-outline" style="padding:2px 8px" onclick="document.getElementById('efc-tipo').value==='DESPESA'?modalGerenciarTiposDespesa():modalGerenciarTipos()">${icon('edit',12)} Gerenciar</button></label>
       <select id="efc-cat-rec" style="${tipo==='DESPESA'?'display:none':''}">
-        ${catsRec.map(c=>`<option ${cat===c?'selected':''}>${c}</option>`).join('')}
+        ${_opcoesCat(catsRec, tipo==='RECEITA'?cat:'')}
       </select>
       <select id="efc-cat-desp" style="${tipo==='RECEITA'?'display:none':''}">
         ${catsDesp.map(c=>`<option ${cat===c?'selected':''}>${c}</option>`).join('')}
@@ -8123,23 +8307,14 @@ function render_config(){
     </div>
     <div class="card">
       <div class="card-title">📋 Tipos de Serviço e Preços</div>
-      <p class="text-xs text-muted" style="margin:-4px 0 10px">Os tipos cadastrados aqui aparecem em <b>todo o sistema</b>: nos orçamentos, na criação de OS, na divisão por tipo de serviço e nas categorias de receita do fluxo de caixa.</p>
+      <p class="text-xs text-muted" style="margin:-4px 0 10px">A tabela de preços é usada nos orçamentos. As <b>categorias e subcategorias de receita</b> (botão abaixo) são as que aparecem nas OS, na divisão por serviço, no fluxo de caixa e nos relatórios.</p>
       <div class="table-wrap" style="margin-bottom:12px">
         <table><thead><tr><th>Serviço</th><th class="td-num">Valor Base</th><th>Unidade</th></tr></thead>
         <tbody>${D.tipos_servico.map(s=>`<tr><td>${esc(s.nome)}</td><td class="td-num">${fmtBRL(s.valor_base||0)}</td><td>${esc(s.unidade||'un')}</td></tr>`).join('')}</tbody></table>
       </div>
       <button class="btn btn-outline btn-sm" onclick="modalNovoServico()">${icon('plus',16)} Novo Tipo de Serviço</button>
       <button class="btn btn-outline btn-sm" onclick="modalGerenciarTipos()">${icon('edit',16)} Gerenciar tipos usados nas OS</button>
-      <details style="margin-top:10px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--azul2);font-weight:600">Ver todos os tipos disponíveis no sistema (${tiposServico().length})</summary>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-          ${tiposServico().map(t=>{
-            const doBanco=(D.tipos_servico||[]).some(x=>_nomeNorm(x.nome)===_nomeNorm(t));
-            return `<span class="badge badge-${doBanco?'azul':'cinza'}" style="font-size:10px">${esc(t)}${doBanco?' ✎':''}</span>`;
-          }).join('')}
-        </div>
-        <p class="text-xs text-muted" style="margin-top:6px">✎ = cadastrado por você · os demais já vêm no sistema</p>
-      </details>
+      <button class="btn btn-outline btn-sm" onclick="modalCategoriasReceita()">${icon('doc',16)} Categorias e subcategorias de receita (${tiposServico().length-1})</button>
     </div>
   </div>
   <div class="card">
