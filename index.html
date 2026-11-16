@@ -2649,12 +2649,30 @@ async function salvarOrcamento(editId, aprovarDepois){
   }
 }
 
+// Consulta CNPJ: tenta BrasilAPI e, se falhar (fora do ar / limite de consultas), usa OpenCNPJ.
+// Devolve sempre no formato da BrasilAPI (razao_social, municipio, uf, email, ddd_telefone_1...).
+async function consultarCNPJ(cnpj){
+  try{
+    const r=await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+    if(r.ok){ const d=await r.json(); if(d&&d.razao_social) return d; }
+  }catch(e){ console.warn('BrasilAPI falhou, tentando OpenCNPJ', e); }
+  const r2=await fetch(`https://api.opencnpj.org/${cnpj}`);
+  if(!r2.ok) return {};
+  const o=await r2.json();
+  const tel=(o.telefones||[]).find(t=>!t.is_fax)||(o.telefones||[])[0];
+  return {
+    razao_social:o.razao_social||'', nome_fantasia:o.nome_fantasia||'',
+    municipio:o.municipio||'', uf:o.uf||'', email:(o.email||'').toLowerCase(),
+    ddd_telefone_1: tel?`${tel.ddd||''}${tel.numero||''}`:'',
+    logradouro:[o.tipo_logradouro,o.logradouro].filter(Boolean).join(' '),
+    numero:o.numero||'', bairro:o.bairro||'', cep:o.cep||''
+  };
+}
 async function buscarCNPJReal(){
   const cnpj=document.getElementById('orc-cnpj').value.replace(/\D/g,'');
   if(cnpj.length!==14){alert('Digite os 14 dígitos do CNPJ.');return;}
   try{
-    const r=await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
-    const d=await r.json();
+    const d=await consultarCNPJ(cnpj);
     if(d.razao_social){
       document.getElementById('orc-razao').value=d.razao_social;
       document.getElementById('orc-cidade').value=d.municipio||'';
@@ -2899,8 +2917,7 @@ async function buscarCNPJOS(){
   const cnpj=document.getElementById('os-cnpj').value.replace(/\D/g,'');
   if(cnpj.length!==14){alert('Digite os 14 dígitos do CNPJ.');return;}
   try{
-    const r=await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
-    const d=await r.json();
+    const d=await consultarCNPJ(cnpj);
     if(d.razao_social){
       document.getElementById('os-cli').value=d.razao_social;
     } else alert('CNPJ não localizado. Preencha manualmente.');
@@ -9810,8 +9827,7 @@ async function buscarCNPJCliente(){
   const cnpj = document.getElementById('cli-cnpj').value.replace(/\D/g,'');
   if(cnpj.length !== 14){ alert('Digite os 14 dígitos do CNPJ.'); return; }
   try {
-    const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
-    const d = await r.json();
+    const d=await consultarCNPJ(cnpj);
     if(d.razao_social){
       document.getElementById('cli-razao').value    = d.razao_social || '';
       document.getElementById('cli-fantasia').value = d.nome_fantasia || '';
@@ -9829,8 +9845,7 @@ async function buscarCNPJEditCliente(){
   const cnpj = document.getElementById('ecli-cnpj').value.replace(/\D/g,'');
   if(cnpj.length !== 14){ alert('Digite os 14 dígitos do CNPJ.'); return; }
   try {
-    const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
-    const d = await r.json();
+    const d=await consultarCNPJ(cnpj);
     if(d.razao_social){
       // Só preenche o que estiver vazio (não sobrescreve o que você já ajustou)
       const setSeVazio=(id,v)=>{ const e=document.getElementById(id); if(e&&v&&!e.value.trim()) e.value=v; };
