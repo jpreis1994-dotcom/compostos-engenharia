@@ -10392,6 +10392,44 @@ async function excluirClienteDaLista(idx){
 }
 
 // Autocomplete de cliente em campos de texto (usa lista consolidada)
+// Busca de cliente para os autocompletes: ignora acentos e maiúsculas,
+// aceita as palavras em qualquer ordem ("posto carioquinha" acha "AUTO
+// POSTO DE COMBUSTÍVEIS CARIOQUINHA"), procura também no nome fantasia,
+// cidade e CNPJ (só quando há dígitos digitados) e tolera um erro de
+// digitação por palavra quando não acha nada exato.
+function _normBusca(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+}
+function _quaseIgual(a,b){ // distância de edição <= 1
+  if(a===b) return true;
+  if(Math.abs(a.length-b.length)>1) return false;
+  let i=0,j=0,dif=0;
+  while(i<a.length && j<b.length){
+    if(a[i]===b[j]){i++;j++;continue;}
+    if(++dif>1) return false;
+    if(a.length>b.length) i++; else if(b.length>a.length) j++; else {i++;j++;}
+  }
+  return dif + (a.length-i) + (b.length-j) <= 1;
+}
+function _buscarClientesAuto(fonte, texto, limite=8){
+  const q=_normBusca(texto);
+  if(q.length<2) return [];
+  const tokens=q.split(' ').filter(Boolean);
+  const digitos=String(texto||'').replace(/\D/g,'');
+  const pontua=(cl, aproximado)=>{
+    const alvo=_normBusca([cl.nome, cl.nome_fantasia, cl.identificacao, cl.cidade].filter(Boolean).join(' '));
+    const palavras=alvo.split(' ');
+    if(digitos.length>=3 && String(cl.cnpj||'').replace(/\D/g,'').includes(digitos)) return 3;
+    const ok=tokens.every(t=> alvo.includes(t) || (aproximado && t.length>=4 && palavras.some(w=>_quaseIgual(w,t) || (w.length>t.length && _quaseIgual(w.slice(0,t.length+1),t)))));
+    if(!ok) return 0;
+    const nome=_normBusca(cl.nome);
+    return nome.startsWith(q) ? 3 : (nome.includes(q) ? 2 : 1);
+  };
+  let res=fonte.map(cl=>({cl,p:pontua(cl,false)})).filter(x=>x.p>0);
+  if(!res.length) res=fonte.map(cl=>({cl,p:pontua(cl,true)})).filter(x=>x.p>0);
+  return res.sort((a,b)=>b.p-a.p || String(a.cl.nome||'').localeCompare(String(b.cl.nome||''))).slice(0,limite).map(x=>x.cl);
+}
+
 function setupAutoCompleteCliente(inputId, onSelect){
   const input = document.getElementById(inputId);
   if(!input) return;
@@ -10401,14 +10439,8 @@ function setupAutoCompleteCliente(inputId, onSelect){
   function fechar(){ if(dropdown){ dropdown.remove(); dropdown=null; } }
 
   input.addEventListener('input', function(){
-    const val = this.value.toLowerCase().trim();
     fechar();
-    if(!val || val.length < 2) return;
-    const matches = fonte.filter(cl=>
-      (cl.nome||'').toLowerCase().includes(val) ||
-      (cl.nome_fantasia||'').toLowerCase().includes(val) ||
-      (cl.cnpj||'').includes(val.replace(/\D/g,''))
-    ).slice(0,6);
+    const matches = _buscarClientesAuto(fonte, this.value);
     if(!matches.length) return;
 
     dropdown = document.createElement('div');
@@ -10416,7 +10448,7 @@ function setupAutoCompleteCliente(inputId, onSelect){
     matches.forEach(cl=>{
       const item = document.createElement('div');
       item.style.cssText = 'padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--cinza-borda)';
-      item.innerHTML = `<b>${esc(cl.nome)}</b><br><span style="font-size:11px;color:var(--cinza)">${cl.cnpj?esc(fmtCNPJStr(cl.cnpj)):''} ${cl.cidade?'— '+esc(cl.cidade):''}${cl.uf?'/'+esc(cl.uf):''}</span>`;
+      item.innerHTML = `<b>${esc(cl.nome)}</b>${cl.nome_fantasia&&_normBusca(cl.nome_fantasia)!==_normBusca(cl.nome)?` <span style="font-size:11px;color:var(--azul2)">(${esc(cl.nome_fantasia)})</span>`:''}<br><span style="font-size:11px;color:var(--cinza)">${cl.cnpj?esc(fmtCNPJStr(cl.cnpj)):''} ${cl.cidade?'— '+esc(cl.cidade):''}${cl.uf?'/'+esc(cl.uf):''}</span>`;
       item.addEventListener('mouseenter',()=>item.style.background='var(--azul3)');
       item.addEventListener('mouseleave',()=>item.style.background='white');
       item.addEventListener('mousedown',(e)=>{
