@@ -5933,6 +5933,9 @@ function _descreverChaveAuditoria(chave){
     provPago:'Provável recebimento (conta a receber)',
     provPagoOS:'Provável recebimento (OS)',
     fluxoSemOS:'Receita no fluxo sem OS',
+    flxSemOS:'Receita pendente de classificação',
+    despPend:'Despesa pendente de classificação',
+    cartPend:'Item do cartão pendente de classificação',
     osSemRec:'OS sem recebimento',
     catServico:'Recebimento sem tipo de serviço da OS',
     catUnica:'Recebimento com tipo divergente da OS',
@@ -5959,7 +5962,7 @@ function _descreverChaveAuditoria(chave){
 }
 
 function auditar(){
-  const r={duplicReceber:[], duplicFluxo:[], osSemReceb:[], fluxoSemOS:[], receberSemOS:[], naoVinculado:[], provavelPago:[], catServico:[], catUnica:[], fragServico:[]};
+  const r={duplicReceber:[], duplicFluxo:[], osSemReceb:[], fluxoSemOS:[], despPend:[], cartPend:[], receberSemOS:[], naoVinculado:[], provavelPago:[], catServico:[], catUnica:[], fragServico:[]};
   const norm=s=>String(s||'').toLowerCase().trim().replace(/\s+/g,' ');
   const normCNPJ=s=>String(s||'').replace(/\D/g,''); // só dígitos
   // Compara duas "partes" (conta, receita, OS) representando o mesmo cliente.
@@ -6025,6 +6028,18 @@ function auditar(){
     if(f.classificacao!=='pendente') return;
     if(_foiIgnorado(_chaveAuditoria('flxSemOS',[f.id]))) return;
     r.fluxoSemOS.push(f);
+  });
+  // 4b) Despesas do fluxo e itens do cartão ainda PENDENTES (sem OS e sem
+  // "indireta") — entram no mesmo quadro de classificação.
+  D.fluxo.forEach(f=>{
+    if(f.tipo!=='DESPESA' || f.os_id || f.classificacao!=='pendente') return;
+    if(_foiIgnorado(_chaveAuditoria('despPend',[f.id]))) return;
+    r.despPend.push(f);
+  });
+  (D.cartao_itens||[]).forEach(i=>{
+    if(i.os_id || i.classificacao!=='pendente') return;
+    if(_foiIgnorado(_chaveAuditoria('cartPend',[i.id]))) return;
+    r.cartPend.push(i);
   });
 
   // 5) Contas a receber sem vínculo de OS
@@ -6303,9 +6318,167 @@ async function _corrigirTodasBaixas(){
   alert(`✅ ${ok} cobrança(s) corrigida(s).`+(erros?`\n⚠️ ${erros} falharam.`:''));
 }
 
+// ══════════════════════════════════════════════════════════════
+// AUDITORIA — CLASSIFICAR PENDENTES
+// Tudo que está com classificacao='pendente' (receitas e despesas do
+// fluxo, itens do cartão) num quadro só, com a escolha feita ali mesmo:
+// vincular a uma OS ou marcar como Indireta. Dá para classificar linha
+// por linha ou marcar várias e aplicar de uma vez.
+// ══════════════════════════════════════════════════════════════
+const _PEND_CORTE='2026-06-01'; // antes disso são dados antigos importados
+function _pendLinhas(a){
+  const L=[];
+  a.fluxoSemOS.forEach(f=>L.push({orig:'RECEITA', id:f.id, data:f.data_movimento, nome:f.cliente||'', cnpj:f.cnpj||'', cat:f.categoria||'', valor:f.valor, chave:'flxSemOS'}));
+  a.despPend.forEach(f=>L.push({orig:'DESPESA', id:f.id, data:f.data_movimento, nome:f.fornecedor||f.cliente||'', cnpj:f.cnpj||'', cat:f.categoria||'', valor:f.valor, chave:'despPend'}));
+  a.cartPend.forEach(i=>L.push({orig:'CARTAO', id:i.id, data:i.data, nome:(i.descricao||'')+(i.responsavel?` · ${i.responsavel}`:''), cnpj:'', cat:i.categoria||'', valor:i.valor, chave:'cartPend'}));
+  return L.sort((x,y)=>String(y.data||'').localeCompare(String(x.data||'')));
+}
+function _pendOSAtivas(){
+  return (D.os||[]).filter(o=>!o.arquivada).sort((a,b)=>(Number(b.numero_os)||0)-(Number(a.numero_os)||0));
+}
+// OS do mesmo cliente (nome ou CNPJ) aparecem primeiro, como sugestão
+function _pendSugestoes(l, osAtivas){
+  if(l.orig!=='RECEITA') return [];
+  const n=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+  const dig=s=>String(s||'').replace(/\D/g,'');
+  const nome=n(l.nome), doc=dig(l.cnpj);
+  if(!nome && !doc) return [];
+  return osAtivas.filter(o=>{
+    if(doc && doc.length>=11 && dig(o.cnpj)===doc) return true;
+    const on=n(o.cliente_nome);
+    return nome && on && (on===nome || (nome.length>=6 && (on.includes(nome)||nome.includes(on))));
+  }).slice(0,8);
+}
+function _pendOpcoes(sugestoes, osAtivas){
+  const op=o=>`<option value="${esc(o.numero_os)}">#${esc(o.numero_os)} — ${esc(o.cliente_nome||'')} (${esc(o.servico||'')})</option>`;
+  return `<option value="">— escolher —</option>
+    <option value="IND">Indireta (geral / administrativo)</option>
+    ${sugestoes.length?`<optgroup label="Sugestões (mesmo cliente)">${sugestoes.map(op).join('')}</optgroup>`:''}
+    <optgroup label="Todas as OS">${osAtivas.map(op).join('')}</optgroup>`;
+}
+function _cardPendentesClassificacao(a){
+  const linhas=_pendLinhas(a);
+  if(!linhas.length) return '';
+  const osAtivas=_pendOSAtivas();
+  const opcoesTodas=_pendOpcoes([], osAtivas);
+  const n={RECEITA:0,DESPESA:0,CARTAO:0}; linhas.forEach(l=>n[l.orig]++);
+  const nAntigos=linhas.filter(l=>String(l.data||'')<_PEND_CORTE).length;
+  const rotOrig={RECEITA:'<span class="and-st verde">RECEITA</span>',DESPESA:'<span class="and-st" style="background:#FFEBEE;color:#C62828">DESPESA</span>',CARTAO:'<span class="and-st azul">CARTÃO</span>'};
+  const editar=l=> l.orig==='CARTAO' ? `editarItemCartao(${l.id})` : `editarLancamento(${l.id})`;
+  return `
+    <div class="card" id="card-pendentes" style="border-left:4px solid #2A6DBF">
+      <div class="card-title">${icon('alert',18)} Pendentes de classificação (<span id="pend-total">${linhas.length}</span>)</div>
+      <p class="text-sm text-muted" style="margin-bottom:10px">Lançamentos que ainda não têm OS nem foram marcados como indiretos — não entram no resultado por OS. Escolha a OS ou "Indireta" e salve. Para vários de uma vez, marque as linhas e use "Aplicar aos marcados".</p>
+      <div class="flex" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <div class="tabs" style="margin:0">
+          <div class="tab active" onclick="_pendFiltro(this,'')">Todos (${linhas.length})</div>
+          ${n.RECEITA?`<div class="tab" onclick="_pendFiltro(this,'RECEITA')">Receitas (${n.RECEITA})</div>`:''}
+          ${n.DESPESA?`<div class="tab" onclick="_pendFiltro(this,'DESPESA')">Despesas (${n.DESPESA})</div>`:''}
+          ${n.CARTAO?`<div class="tab" onclick="_pendFiltro(this,'CARTAO')">Cartão (${n.CARTAO})</div>`:''}
+        </div>
+        ${nAntigos?`<label class="text-sm" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="pend-ocultar-antigos" onchange="_pendAplicaFiltros()"> Ocultar anteriores a jun/2026 (${nAntigos})</label>`:''}
+      </div>
+      <div class="flex" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;background:var(--cinza-bg);padding:8px 10px;border-radius:8px">
+        <span class="text-sm"><b id="pend-nmarc">0</b> marcado(s) →</span>
+        <select id="pend-lote" style="max-width:340px">${opcoesTodas}</select>
+        <button class="btn btn-sm btn-primary" onclick="classificarPendentesLote()">${icon('check',14)} Aplicar aos marcados</button>
+      </div>
+      <div class="table-wrap"><table><thead><tr>
+        <th style="width:28px"><input type="checkbox" id="pend-todos" onchange="_pendMarcarTodos(this.checked)" title="Marcar todos os visíveis"></th>
+        <th>Origem</th><th>Data</th><th>Cliente / fornecedor / descrição</th><th>Categoria</th><th class="td-num">Valor</th><th style="min-width:220px">Classificar como</th><th>Ação</th></tr></thead><tbody>
+        ${linhas.map(l=>{
+          const sug=_pendSugestoes(l, osAtivas);
+          return `<tr id="pend-${l.orig}-${l.id}" data-orig="${l.orig}" data-data="${esc(l.data||'')}">
+          <td><input type="checkbox" class="pend-chk" data-orig="${l.orig}" data-id="${l.id}" onchange="_pendContaMarcados()"></td>
+          <td>${rotOrig[l.orig]}<div class="text-xs text-muted">#${l.id}</div></td>
+          <td>${fmtData(l.data)}</td>
+          <td>${esc(l.nome)}</td>
+          <td><span class="text-xs">${esc(l.cat)}</span></td>
+          <td class="td-num">${fmtBRL(l.valor)}</td>
+          <td><select id="pend-sel-${l.orig}-${l.id}" style="width:100%">${sug.length?_pendOpcoes(sug, osAtivas):opcoesTodas}</select>
+            ${sug.length?`<div class="text-xs" style="color:var(--azul2);margin-top:2px">${sug.length} OS do mesmo cliente nas sugestões</div>`:''}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-sm btn-success" onclick="classificarPendente('${l.orig}',${l.id})" title="Salvar a classificação escolhida">${icon('check',14)} Salvar</button>
+            <button class="btn btn-sm btn-outline" onclick="${editar(l)}" title="Abrir o lançamento completo">${icon('edit',14)}</button>
+            ${btnOK(l.chave,[l.id])}
+          </td>
+        </tr>`;}).join('')}
+      </tbody></table></div>
+    </div>`;
+}
+let _pendOrigFiltro='';
+function _pendFiltro(el, orig){
+  el.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  _pendOrigFiltro=orig; _pendAplicaFiltros();
+}
+function _pendAplicaFiltros(){
+  const ocultarAnt=document.getElementById('pend-ocultar-antigos')?.checked;
+  document.querySelectorAll('#card-pendentes tbody tr').forEach(tr=>{
+    const vis=(!_pendOrigFiltro || tr.dataset.orig===_pendOrigFiltro) && !(ocultarAnt && tr.dataset.data<_PEND_CORTE);
+    tr.style.display=vis?'':'none';
+    if(!vis){ const c=tr.querySelector('.pend-chk'); if(c) c.checked=false; }
+  });
+  const t=document.getElementById('pend-todos'); if(t) t.checked=false;
+  _pendContaMarcados();
+}
+function _pendMarcarTodos(v){
+  document.querySelectorAll('#card-pendentes tbody tr').forEach(tr=>{
+    if(tr.style.display==='none') return;
+    const c=tr.querySelector('.pend-chk'); if(c) c.checked=v;
+  });
+  _pendContaMarcados();
+}
+function _pendContaMarcados(){
+  const el=document.getElementById('pend-nmarc');
+  if(el) el.textContent=document.querySelectorAll('#card-pendentes .pend-chk:checked').length;
+}
+// Grava a classificação de UM lançamento. valor: 'IND' ou o número da OS.
+async function _pendGravar(orig, id, valor){
+  const tabela = orig==='CARTAO' ? 'cartao_itens' : 'fluxo_caixa';
+  const dados = valor==='IND' ? {os_id:null, classificacao:'indireta'} : {os_id:parseInt(valor), classificacao:null};
+  if(valor!=='IND' && isNaN(dados.os_id)) return false;
+  const ok=await sbUpdate(tabela, dados, 'id', id);
+  if(ok){
+    const lista = orig==='CARTAO' ? D.cartao_itens : D.fluxo;
+    const it=(lista||[]).find(x=>x.id===id); if(it) Object.assign(it, dados);
+  }
+  return ok;
+}
+function _pendRemoveLinha(orig, id){
+  document.getElementById(`pend-${orig}-${id}`)?.remove();
+  const restantes=document.querySelectorAll('#card-pendentes tbody tr').length;
+  const t=document.getElementById('pend-total'); if(t) t.textContent=restantes;
+  if(!restantes) document.getElementById('card-pendentes')?.remove();
+  _pendContaMarcados();
+}
+async function classificarPendente(orig, id){
+  const sel=document.getElementById(`pend-sel-${orig}-${id}`);
+  const valor=sel?sel.value:'';
+  if(!valor){ alert('Escolha a OS ou "Indireta" antes de salvar.'); sel?.focus(); return; }
+  const btns=document.querySelectorAll(`#pend-${orig}-${id} button`); btns.forEach(b=>b.disabled=true);
+  const ok=await _pendGravar(orig, id, valor);
+  if(ok) _pendRemoveLinha(orig, id);
+  else btns.forEach(b=>b.disabled=false);
+}
+async function classificarPendentesLote(){
+  const valor=document.getElementById('pend-lote').value;
+  const marcados=[...document.querySelectorAll('#card-pendentes .pend-chk:checked')].map(c=>({orig:c.dataset.orig, id:parseInt(c.dataset.id)}));
+  if(!marcados.length){ alert('Marque pelo menos uma linha.'); return; }
+  if(!valor){ alert('Escolha a OS ou "Indireta" para aplicar aos marcados.'); return; }
+  const destino = valor==='IND' ? 'INDIRETA' : `a OS #${valor}`;
+  if(!confirm(`Classificar ${marcados.length} lançamento(s) como ${destino}?`)) return;
+  let ok=0, erros=0;
+  for(const m of marcados){
+    if(await _pendGravar(m.orig, m.id, valor)){ ok++; _pendRemoveLinha(m.orig, m.id); } else erros++;
+  }
+  alert(`✅ ${ok} lançamento(s) classificado(s).`+(erros?`\n⚠️ ${erros} não foram salvos — tente de novo.`:''));
+  await carregarTudo(); render_auditoria();
+}
+
 function render_auditoria(){
   const a=auditar();
-  const totalProblemas=a.duplicReceber.length+a.duplicFluxo.length+a.fluxoSemOS.length+a.naoVinculado.length+a.provavelPago.length+a.catServico.length+a.catUnica.length+a.fragServico.length;
+  const totalProblemas=a.duplicReceber.length+a.duplicFluxo.length+a.fluxoSemOS.length+a.despPend.length+a.cartPend.length+a.naoVinculado.length+a.provavelPago.length+a.catServico.length+a.catUnica.length+a.fragServico.length;
   const nIgnorados=(D.auditoria_ok||[]).length;
   const c=document.getElementById('content');
   // btnOK agora é global (definida perto de _foiIgnorado) — usada aqui e em _cardConferirBaixas
@@ -6395,21 +6568,7 @@ function render_auditoria(){
       </tbody></table></div>
     </div>`:'';
 
-  const cardFluxoSemOS=a.fluxoSemOS.length?`
-    <div class="card" style="border-left:4px solid #2A6DBF">
-      <div class="card-title">${icon('alert',18)} Receitas no Fluxo sem vínculo de OS (${a.fluxoSemOS.length})</div>
-      <p class="text-sm text-muted" style="margin-bottom:10px">Dinheiro que entrou mas não está ligado a nenhuma OS — não aparece no resultado por OS. Edite no Fluxo e vincule a OS correta.</p>
-      <div class="table-wrap"><table><thead><tr><th>ID</th><th>Data</th><th>Cliente</th><th>Categoria</th><th class="td-num">Valor</th><th>Ação</th></tr></thead><tbody>
-        ${a.fluxoSemOS.map(f=>`<tr>
-          <td class="text-xs">#${f.id}</td>
-          <td>${fmtData(f.data_movimento)}</td>
-          <td>${esc(f.cliente||'')}</td>
-          <td><span class="text-xs">${esc(f.categoria||'')}</span></td>
-          <td class="td-num">${fmtBRL(f.valor)}</td>
-          <td style="white-space:nowrap"><button class="btn btn-sm btn-outline" onclick="editarLancamento(${f.id})">Vincular OS</button> ${btnOK('flxSemOS',[f.id])}</td>
-        </tr>`).join('')}
-      </tbody></table></div>
-    </div>`:'';
+  const cardFluxoSemOS=_cardPendentesClassificacao(a);
 
   const cardCatServico=a.catServico.length?`
     <div class="card" style="border-left:4px solid #E8A020">
