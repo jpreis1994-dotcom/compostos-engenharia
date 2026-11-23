@@ -93,6 +93,26 @@ nav a:hover .ico-svg{transform:scale(1.1)}
 .topbar-title{font-size:18px;font-weight:700;color:var(--azul)}
 .topbar-right{display:flex;align-items:center;gap:12px}
 .badge-alerta{background:var(--vermelho-bg);color:var(--vermelho);font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;cursor:pointer}
+/* Sino de andamentos das OS */
+.sino-wrap{position:relative}
+.sino-btn{position:relative;background:transparent;border:1px solid var(--cinza-borda);border-radius:50%;width:38px;height:38px;display:flex;align-items:center;justify-content:center;color:var(--azul);cursor:pointer}
+.sino-btn:hover{background:var(--azul3)}
+.sino-count{position:absolute;top:-5px;right:-5px;background:var(--vermelho);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;padding:0 5px;display:flex;align-items:center;justify-content:center;border:2px solid #fff}
+.sino-painel{display:none;position:absolute;right:0;top:46px;width:380px;max-width:calc(100vw - 24px);max-height:70vh;overflow-y:auto;background:#fff;border:1px solid var(--cinza-borda);border-radius:12px;box-shadow:0 10px 30px rgba(15,39,68,.18);z-index:900}
+.sino-painel.open{display:block}
+.sino-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--cinza-borda);position:sticky;top:0;background:#fff}
+.sino-head b{color:var(--azul);font-size:14px}
+.sino-item{padding:10px 14px;border-bottom:1px solid var(--cinza-borda);cursor:pointer;font-size:13px}
+.sino-item:hover{background:var(--cinza-bg)}
+.sino-item.novo{background:#EEF5FD;border-left:3px solid var(--azul2)}
+.sino-item .and-os{font-weight:600;color:var(--azul)}
+.sino-item .and-meta{font-size:11px;color:var(--cinza);margin-top:3px}
+.and-mudanca{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
+.and-st{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--cinza-bg);color:var(--cinza)}
+.and-st.verde{background:#E8F5E9;color:#2E7D32}.and-st.azul{background:#E3F2FD;color:#1565C0}.and-st.amarelo{background:#FFF8E1;color:#B26A00}
+.and-toast-area{position:fixed;right:16px;bottom:16px;z-index:2000;display:flex;flex-direction:column;gap:8px;max-width:calc(100vw - 32px)}
+.and-toast{background:#fff;border:1px solid var(--cinza-borda);border-left:4px solid var(--azul2);border-radius:10px;box-shadow:0 8px 24px rgba(15,39,68,.2);padding:10px 14px;width:330px;max-width:100%;font-size:13px;cursor:pointer;animation:andIn .25s ease}
+@keyframes andIn{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
 #content{flex:1;overflow-y:auto;padding:24px}
 .card{background:white;border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid var(--cinza-borda);padding:20px 24px;margin-bottom:16px}
 .card-title{font-size:13px;font-weight:600;color:var(--azul);margin-bottom:14px;display:flex;align-items:center;gap:6px}
@@ -501,6 +521,13 @@ tr:hover td{ background:#F3F8FF; }
       <div class="topbar-right">
         <span class="badge-alerta hidden" id="badge-alerta" onclick="verificarAlertasLaudos()"></span>
         <span class="text-sm text-muted" id="topbar-date"></span>
+        <div class="sino-wrap hidden" id="sino-wrap">
+          <button class="sino-btn" id="sino-btn" onclick="toggleSinoAndamentos(event)" title="Andamentos das OS" aria-label="Andamentos das OS">
+            <svg class="ico-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span class="sino-count hidden" id="sino-count"></span>
+          </button>
+          <div class="sino-painel" id="sino-painel" onclick="event.stopPropagation()"></div>
+        </div>
       </div>
     </div>
     <div id="content"></div>
@@ -1275,9 +1302,11 @@ function entrarApp(user){
   // Mostra o botão de instalar o app, se disponível
   if(_deferredPrompt) document.getElementById('btn-instalar-pwa')?.classList.add('show');
   nav('dashboard');
+  iniciarAndamentos(user);
 }
 document.addEventListener('keydown',e=>{ if(e.key==='Enter'&&document.getElementById('login-screen').style.display!=='none') doLogin(); });
 async function doLogout(){
+  pararAndamentos();
   try{ await sb.auth.signOut(); }catch(e){}
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('app-shell').style.display='none';
@@ -2795,11 +2824,170 @@ async function mudarStatusOS(id, novo, el){
       el.title=`Status alterado para ${novo}`;
     }
     if(typeof atualizarBadgeAlertas==='function') atualizarBadgeAlertas();
+    setTimeout(carregarAndamentos, 800); // registra a sua mudança no sino
   } else {
     // deu errado: volta para o que estava
     if(el){ el.classList.remove('salvando'); el.value=anterior; }
     alert('Não foi possível alterar o status. Tente de novo.');
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ANDAMENTOS DAS OS — sino com as mudanças de status
+// O banco grava cada mudança (gatilho em ordens_servico → tabela
+// os_andamentos). Aqui: sino com contador do que outra pessoa mudou
+// desde a última vez que você olhou, aviso na hora (tempo real) e
+// histórico dentro da OS. O "visto até" fica salvo no usuário, então
+// vale no computador e no celular.
+// ══════════════════════════════════════════════════════════════
+let _andamentos=[], _andUser=null, _andVistoEm=null, _andCanal=null, _andDisponivel=false;
+const _AND_LIMITE=60;
+
+async function iniciarAndamentos(user){
+  _andUser=user||null;
+  const meta=(user&&user.user_metadata)||{};
+  let local=null; try{ local=localStorage.getItem('and_visto_'+(user&&user.id)); }catch(e){}
+  _andVistoEm=_andMaisRecente(meta.andamentos_visto_em, local);
+  await carregarAndamentos();
+  assinarAndamentos();
+}
+function pararAndamentos(){
+  try{ if(_andCanal) sb.removeChannel(_andCanal); }catch(e){}
+  _andCanal=null; _andamentos=[]; _andUser=null; _andVistoEm=null;
+  document.getElementById('sino-painel')?.classList.remove('open');
+  document.getElementById('sino-wrap')?.classList.add('hidden');
+}
+function _andMaisRecente(a,b){
+  if(!a) return b||null; if(!b) return a;
+  return new Date(a)>=new Date(b) ? a : b;
+}
+async function carregarAndamentos(){
+  if(!_andUser) return;
+  try{
+    const {data,error}=await sb.from('os_andamentos').select('*').order('criado_em',{ascending:false}).limit(_AND_LIMITE);
+    if(error){ _andDisponivel=false; console.warn('os_andamentos indisponível (rode sql/2026-11-23_os_andamentos.sql):', error.message); }
+    else { _andDisponivel=true; _andamentos=data||[]; }
+  }catch(e){ _andDisponivel=false; }
+  renderSino();
+}
+function assinarAndamentos(){
+  if(_andCanal||!_andDisponivel) return;
+  try{
+    _andCanal=sb.channel('os-andamentos')
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'os_andamentos'},payload=>{
+        const a=payload&&payload.new; if(!a) return;
+        if(_andamentos.some(x=>x.id===a.id)) return;
+        _andamentos.unshift(a); _andamentos=_andamentos.slice(0,_AND_LIMITE);
+        _andAplicaNaTela(a);
+        renderSino();
+        if(!_andEhMeu(a)) toastAndamento(a);
+      })
+      .subscribe();
+  }catch(e){ console.warn('tempo real indisponível', e); }
+}
+// Mudou em outro aparelho: atualiza a OS em memória e a "caixinha" da lista, se estiver na tela
+function _andAplicaNaTela(a){
+  const o=(D.os||[]).find(x=>String(x.id)===String(a.os_id));
+  if(o) o.status=a.status_novo;
+  const el=document.getElementById('stsel-'+a.os_id);
+  if(el && el.value!==a.status_novo){
+    if(![...el.options].some(op=>op.value===a.status_novo)){
+      const op=document.createElement('option'); op.value=op.textContent=a.status_novo; el.appendChild(op);
+    }
+    el.value=a.status_novo;
+    el.classList.remove('verde','azul','amarelo','vermelho','cinza');
+    el.classList.add(_corStatus(a.status_novo));
+  }
+}
+function _andEhMeu(a){ return !!(_andUser && a.usuario_id && a.usuario_id===_andUser.id); }
+function _andNaoVistos(){
+  const corte=_andVistoEm?new Date(_andVistoEm):null;
+  return _andamentos.filter(a=>!_andEhMeu(a) && (!corte || new Date(a.criado_em)>corte));
+}
+function _andQuando(ts){
+  const d=new Date(ts), seg=(Date.now()-d.getTime())/1000;
+  if(seg<60) return 'agora';
+  if(seg<3600) return `há ${Math.floor(seg/60)} min`;
+  const hoje=new Date(); const ontem=new Date(); ontem.setDate(hoje.getDate()-1);
+  const hm=d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  if(d.toDateString()===hoje.toDateString()) return `hoje, ${hm}`;
+  if(d.toDateString()===ontem.toDateString()) return `ontem, ${hm}`;
+  return `${d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit'})}, ${hm}`;
+}
+function _andMudancaHTML(a){
+  const de=a.status_anterior?`<span class="and-st ${_corStatus(a.status_anterior)}">${esc(a.status_anterior)}</span> →`:'';
+  return `<div class="and-mudanca">${de}<span class="and-st ${_corStatus(a.status_novo)}">${esc(a.status_novo||'—')}</span></div>`;
+}
+function _andQuem(a){ return _andEhMeu(a) ? 'você' : (a.usuario_nome||'alguém'); }
+function renderSino(){
+  const wrap=document.getElementById('sino-wrap'); if(!wrap) return;
+  wrap.classList.toggle('hidden', !_andDisponivel || !_andUser);
+  const n=_andNaoVistos().length;
+  const cnt=document.getElementById('sino-count');
+  cnt.textContent=n>9?'9+':String(n);
+  cnt.classList.toggle('hidden', n===0);
+  document.getElementById('sino-btn').title = n ? `${n} andamento(s) novo(s) nas OS` : 'Andamentos das OS';
+  if(document.getElementById('sino-painel').classList.contains('open')) _andRenderPainel();
+}
+function _andRenderPainel(){
+  const novos=new Set(_andNaoVistos().map(a=>a.id));
+  const p=document.getElementById('sino-painel');
+  p.innerHTML=`<div class="sino-head"><b>Andamentos das OS</b>
+      <span class="text-xs text-muted">${novos.size?`${novos.size} novo(s)`:'tudo visto'}</span></div>
+    ${_andamentos.length ? _andamentos.map(a=>`
+      <div class="sino-item ${novos.has(a.id)?'novo':''}" onclick="abrirOSdoAndamento(${Number(a.os_id)||0})">
+        <div class="and-os">OS #${esc(a.numero_os||'?')} · ${esc(a.cliente_nome||'')}</div>
+        ${_andMudancaHTML(a)}
+        <div class="and-meta">por <b>${esc(_andQuem(a))}</b> · ${esc(_andQuando(a.criado_em))}</div>
+      </div>`).join('')
+    : '<div class="sino-item text-muted" style="cursor:default">Nenhuma mudança de status registrada ainda.</div>'}`;
+}
+function toggleSinoAndamentos(ev){
+  if(ev) ev.stopPropagation();
+  const p=document.getElementById('sino-painel');
+  const abrir=!p.classList.contains('open');
+  p.classList.toggle('open', abrir);
+  if(abrir){ _andRenderPainel(); marcarAndamentosVistos(); }
+}
+document.addEventListener('click',()=>document.getElementById('sino-painel')?.classList.remove('open'));
+// Marca como visto até o andamento mais recente (os destacados continuam
+// destacados enquanto o painel estiver aberto)
+function marcarAndamentosVistos(){
+  const ultimo=_andamentos[0]&&_andamentos[0].criado_em;
+  if(!ultimo || !_andUser) return;
+  if(_andVistoEm && new Date(_andVistoEm)>=new Date(ultimo)) return;
+  _andVistoEm=ultimo;
+  try{ localStorage.setItem('and_visto_'+_andUser.id, ultimo); }catch(e){}
+  sb.auth.updateUser({data:{andamentos_visto_em:ultimo}}).catch(e=>console.warn('salvar visto', e));
+  const cnt=document.getElementById('sino-count'); cnt.classList.add('hidden');
+}
+function abrirOSdoAndamento(osId){
+  document.getElementById('sino-painel')?.classList.remove('open');
+  if((D.os||[]).some(x=>x.id===osId)) editarOS(osId);
+  else alert('Esta OS não está mais na lista (foi excluída).');
+}
+function toastAndamento(a){
+  let area=document.getElementById('and-toast-area');
+  if(!area){ area=document.createElement('div'); area.id='and-toast-area'; area.className='and-toast-area'; document.body.appendChild(area); }
+  const t=document.createElement('div'); t.className='and-toast';
+  t.innerHTML=`<div class="and-os" style="font-weight:600;color:var(--azul)">${icon('bell',14)} ${esc(a.usuario_nome||'Alguém')} mudou a OS #${esc(a.numero_os||'?')}</div>
+    <div class="text-xs text-muted" style="margin-top:2px">${esc(a.cliente_nome||'')}</div>${_andMudancaHTML(a)}`;
+  t.onclick=()=>{ t.remove(); abrirOSdoAndamento(Number(a.os_id)||0); };
+  area.appendChild(t);
+  setTimeout(()=>t.remove(), 10000);
+}
+// Ao voltar para o app (celular acordando, outra aba), confere se houve novidade
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && _andUser) carregarAndamentos(); });
+// Histórico de status dentro da OS (janela de edição)
+async function carregarHistoricoOS(osId){
+  const box=document.getElementById('os-hist-'+osId); if(!box) return;
+  if(!_andDisponivel){ box.innerHTML='<p class="text-muted text-sm">Histórico indisponível.</p>'; return; }
+  const {data,error}=await sb.from('os_andamentos').select('*').eq('os_id',osId).order('criado_em',{ascending:false});
+  if(error){ box.innerHTML='<p class="text-muted text-sm">Não foi possível carregar o histórico.</p>'; return; }
+  box.innerHTML = (data&&data.length)
+    ? data.map(a=>`<div style="padding:6px 0;border-bottom:1px solid var(--cinza-borda);font-size:13px">
+        ${_andMudancaHTML(a)}<div class="text-xs text-muted" style="margin-top:3px">por <b>${esc(_andQuem(a))}</b> · ${esc(_andQuando(a.criado_em))}</div></div>`).join('')
+    : '<p class="text-muted text-sm">Nenhuma mudança de status registrada desde que o histórico foi ativado.</p>';
 }
 
 async function arquivarOS(id){
@@ -3031,12 +3219,16 @@ function editarOS(id){
   <button class="btn btn-sm btn-outline mt-8" onclick="abrirModalDivisaoOS(${id})">🔧 Dividir por tipo de serviço</button>
   ${laudos.length?`<button class="btn btn-sm btn-outline mt-8" onclick="enviarLaudosOSParaControle(${id})">📋 Enviar p/ controle de laudos</button>`:''}
   <hr class="divider">
+  <div style="font-size:13px;font-weight:600;color:var(--azul);margin-bottom:6px">${icon('bell',16)} Histórico de status</div>
+  <div id="os-hist-${id}" style="max-height:180px;overflow-y:auto;margin-bottom:6px"><p class="text-muted text-sm">Carregando…</p></div>
+  <hr class="divider">
   ${o.arquivada
     ? `<div class="text-xs" style="color:#B25000;margin-bottom:6px">🗄️ Esta OS está arquivada — ela não aparece na lista principal nem no dashboard.</div>
        <button class="btn btn-sm btn-outline" onclick="desarquivarOS(${id})">↩️ Desarquivar OS</button>`
     : `<div class="text-xs text-muted" style="margin-bottom:6px">Arquive quando a OS travou ou a negociação retrocedeu. Ela some da lista principal e do dashboard, mas continua guardada e você pode desarquivar quando quiser.</div>
        <button class="btn btn-sm btn-outline" onclick="arquivarOS(${id})">🗄️ Arquivar OS</button>`}`,
   `<button class="btn btn-outline" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarEditOS(${id})">${icon('check',16)} Salvar</button>`);
+  carregarHistoricoOS(id);
 }
 
 function abrirModalLaudosOS(osId){
@@ -3215,7 +3407,7 @@ async function salvarEditOS(id){
     valor_total:  parseFloat(document.getElementById('edit-os-val').value)||0,
     observacao:   document.getElementById('edit-os-obs').value
   },'id',id);
-  if(ok){fecharModal();nav('os');}
+  if(ok){fecharModal();nav('os');setTimeout(carregarAndamentos, 800);}
 }
 async function deletarOS(id){
   const o=D.os.find(x=>x.id===id); if(!o)return;
